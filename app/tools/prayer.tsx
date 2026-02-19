@@ -29,35 +29,165 @@ export default function PrayerTimesScreen() {
   const [nextPrayer, setNextPrayer] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [locationName, setLocationName] = useState('');
+  const [locationError, setLocationError] = useState(false);
+  const [coordinates, setCoordinates] = useState<{lat: number, lng: number} | null>(null);
 
   useEffect(() => {
     loadPrayerTimes();
   }, []);
 
+  const formatLocationName = (geo: Location.LocationGeocodedAddress): string => {
+    const city = geo.city || geo.district || geo.subregion || geo.region || '';
+    const country = geo.country || '';
+    
+    if (city && country) {
+      return `${city}, ${country}`;
+    } else if (city) {
+      return city;
+    } else if (country) {
+      return country;
+    }
+    return '';
+  };
+
+  // Use BigDataCloud API for accurate city-level reverse geocoding (free, no API key needed)
+  const reverseGeocodeCity = async (lat: number, lng: number): Promise<string> => {
+    try {
+      // BigDataCloud free API - very accurate for city names
+      const response = await fetch(
+        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`,
+        {
+          headers: {
+            'Accept': 'application/json',
+          },
+        }
+      );
+      const data = await response.json();
+      
+      console.log('BigDataCloud response:', JSON.stringify(data)); // Debug
+      
+      if (data) {
+        // BigDataCloud provides clean city name in 'city' or 'locality'
+        const city = data.city || data.locality || data.principalSubdivision || '';
+        const country = data.countryName || '';
+        
+        if (city && country) {
+          return `${city}, ${country}`;
+        } else if (city) {
+          return city;
+        } else if (country) {
+          return country;
+        }
+      }
+      return '';
+    } catch (error) {
+      console.error('BigDataCloud reverse geocoding error:', error);
+      return '';
+    }
+  };
+
+  // Fallback: OpenStreetMap Nominatim API
+  const reverseGeocodeNominatim = async (lat: number, lng: number): Promise<string> => {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&accept-language=en&zoom=10`,
+        {
+          headers: {
+            'User-Agent': 'SukoonApp/1.0',
+            'Accept': 'application/json',
+            'Accept-Language': 'en',
+          },
+        }
+      );
+      const data = await response.json();
+      
+      if (data && data.address) {
+        const addr = data.address;
+        const city = addr.city || addr.state_district || addr.county || addr.state || addr.town || '';
+        const country = addr.country || '';
+        
+        if (city && country) {
+          return `${city}, ${country}`;
+        } else if (city) {
+          return city;
+        }
+      }
+      return '';
+    } catch (error) {
+      console.error('Nominatim reverse geocoding error:', error);
+      return '';
+    }
+  };
+
   const loadPrayerTimes = async () => {
+    setLoading(true);
+    setLocationError(false);
+    
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      let lat = 31.5204, lng = 74.3587; // Default: Lahore
+      let lat: number | null = null;
+      let lng: number | null = null;
 
       if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
-        lat = loc.coords.latitude;
-        lng = loc.coords.longitude;
         try {
-          const [geo] = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
-          if (geo) setLocationName(`${geo.city || geo.district || ''}, ${geo.country || ''}`);
-        } catch {}
+          // Use highest accuracy and force fresh location (not cached)
+          const loc = await Location.getCurrentPositionAsync({ 
+            accuracy: Location.Accuracy.Highest,
+            timeInterval: 0, // Force fresh reading
+            distanceInterval: 0,
+          });
+          lat = loc.coords.latitude;
+          lng = loc.coords.longitude;
+          
+          // Store coordinates for display
+          setCoordinates({ lat, lng });
+          console.log('GPS Coordinates:', lat, lng); // Debug log
+          
+          // Try BigDataCloud first (most accurate for city names)
+          let cityName = await reverseGeocodeCity(lat, lng);
+          
+          // Fallback to Nominatim if BigDataCloud fails
+          if (!cityName) {
+            cityName = await reverseGeocodeNominatim(lat, lng);
+          }
+          
+          // Fallback to expo-location if both APIs fail
+          if (!cityName) {
+            try {
+              const [geo] = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+              if (geo) {
+                cityName = formatLocationName(geo);
+              }
+            } catch {}
+          }
+          
+          // Set the location name or show coordinates
+          if (cityName) {
+            setLocationName(cityName);
+          } else {
+            setLocationName(`${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E`);
+          }
+        } catch (locError) {
+          console.error('Location error:', locError);
+          setLocationError(true);
+          setLocationName('Location unavailable');
+        }
       } else {
-        setLocationName('Lahore, Pakistan');
+        setLocationError(true);
+        setLocationName('Location permission denied');
       }
 
-      const data = await PrayerTimesService.getByCoordinates(lat, lng);
-      if (data) {
-        setTimes(data);
-        setNextPrayer(PrayerTimesService.getNextPrayer(data));
+      // Only fetch prayer times if we have valid coordinates
+      if (lat !== null && lng !== null) {
+        const data = await PrayerTimesService.getByCoordinates(lat, lng);
+        if (data) {
+          setTimes(data);
+          setNextPrayer(PrayerTimesService.getNextPrayer(data));
+        }
       }
     } catch (e) {
       console.error('Prayer times error:', e);
+      setLocationError(true);
     } finally {
       setLoading(false);
     }
@@ -97,12 +227,52 @@ export default function PrayerTimesScreen() {
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          {/* Location & Date */}
-          <View style={styles.locationRow}>
-            <Ionicons name="location-outline" size={16} color={theme.textSecondary} />
-            <Text style={[styles.locationText, { color: theme.textSecondary }]}>{locationName || 'Unknown Location'}</Text>
+          {/* Location & Date Card */}
+          <View style={[styles.locationCard, { backgroundColor: theme.surface, borderColor: theme.borderLight }, SHADOWS.sm]}>
+            <View style={styles.locationHeader}>
+              <View style={[styles.locationIconWrap, { backgroundColor: locationError ? (theme.error || '#EF4444') + '15' : theme.primary + '15' }]}>
+                <Ionicons 
+                  name={locationError ? "warning-outline" : "location"} 
+                  size={20} 
+                  color={locationError ? theme.error || '#EF4444' : theme.primary} 
+                />
+              </View>
+              <View style={styles.locationInfo}>
+                <Text style={[styles.locationText, { color: locationError ? theme.error || '#EF4444' : theme.text }]}>
+                  {locationName || 'Detecting location...'}
+                </Text>
+                {coordinates && (
+                  <Text style={[styles.coordsText, { color: theme.textTertiary }]}>
+                    {coordinates.lat.toFixed(4)}°N, {coordinates.lng.toFixed(4)}°E
+                  </Text>
+                )}
+              </View>
+            </View>
+            {times?.date && (
+              <View style={[styles.dateRow, { borderTopColor: theme.borderLight }]}>
+                <Ionicons name="calendar-outline" size={14} color={theme.textSecondary} />
+                <Text style={[styles.dateText, { color: theme.textSecondary }]}>{times.date}</Text>
+              </View>
+            )}
           </View>
-          {times?.date && <Text style={[styles.dateText, { color: theme.textTertiary }]}>{times.date}</Text>}
+
+          {/* Location Error Message */}
+          {locationError && !times && (
+            <View style={[styles.errorCard, { backgroundColor: theme.surface, borderColor: theme.error || '#EF4444' }]}>
+              <Ionicons name="location-outline" size={48} color={theme.error || '#EF4444'} />
+              <Text style={[styles.errorTitle, { color: theme.text }]}>Location Required</Text>
+              <Text style={[styles.errorText, { color: theme.textSecondary }]}>
+                Please enable location permissions to see accurate prayer times for your area.
+              </Text>
+              <TouchableOpacity 
+                style={[styles.retryBtn, { backgroundColor: theme.primary }]} 
+                onPress={loadPrayerTimes}
+              >
+                <Ionicons name="refresh" size={18} color="#fff" />
+                <Text style={styles.retryBtnText}>Try Again</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Next Prayer Highlight */}
           {nextPrayer && (
@@ -160,9 +330,39 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: '700' },
   refreshBtn: { padding: 8 },
   scrollContent: { padding: 20, paddingBottom: 40 },
-  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
-  locationText: { fontSize: 14 },
-  dateText: { fontSize: 12, marginBottom: 20 },
+  locationCard: { 
+    borderRadius: RADIUS.lg, 
+    borderWidth: 1, 
+    marginBottom: 20,
+    overflow: 'hidden',
+  },
+  locationHeader: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    padding: 14,
+    gap: 12,
+  },
+  locationIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationInfo: {
+    flex: 1,
+  },
+  locationText: { fontSize: 15, fontWeight: '600' },
+  coordsText: { fontSize: 11, marginTop: 2 },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderTopWidth: 1,
+    gap: 8,
+  },
+  dateText: { fontSize: 13 },
   nextCard: { borderRadius: RADIUS.xl, overflow: 'hidden', marginBottom: 24 },
   nextGradient: { padding: 28, alignItems: 'center' },
   nextLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 },
@@ -175,4 +375,22 @@ const styles = StyleSheet.create({
   prayerName: { fontSize: 16, fontWeight: '600' },
   prayerBadge: { fontSize: 11, fontWeight: '700', marginTop: 2 },
   prayerTime: { fontSize: 18, fontWeight: '700' },
+  errorCard: { 
+    alignItems: 'center', 
+    padding: 32, 
+    borderRadius: RADIUS.xl, 
+    borderWidth: 1, 
+    marginVertical: 20 
+  },
+  errorTitle: { fontSize: 18, fontWeight: '700', marginTop: 16, marginBottom: 8 },
+  errorText: { fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 20 },
+  retryBtn: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingHorizontal: 20, 
+    paddingVertical: 12, 
+    borderRadius: RADIUS.lg, 
+    gap: 8 
+  },
+  retryBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
 });

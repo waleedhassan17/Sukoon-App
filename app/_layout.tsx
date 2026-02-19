@@ -12,6 +12,7 @@ import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { FontSizeProvider } from '@/contexts/FontSizeContext';
 import { SavedVersesProvider } from '@/contexts/SavedVersesContext';
 import SukoonSplash from '@/components/SukoonSplash';
+import { QuranService } from '@/lib/quranService';
 
 // Prevent auto-hide so we control the transition
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -24,9 +25,12 @@ function RootLayoutInner() {
   useEffect(() => {
     async function prepare() {
       try {
-        // Load fonts, preload data, etc. here if needed
-        // e.g.: await Font.loadAsync({ ... });
-        // e.g.: await QuranService.preload();
+        // Initialize QuranService cache from AsyncStorage (non-blocking read)
+        await QuranService.initializeCache();
+        
+        // Prefetch Quran surahs list in background for instant first interaction
+        // This is fire-and-forget, doesn't block app startup
+        QuranService.prefetch();
       } catch (e) {
         console.warn('App preparation error:', e);
       } finally {

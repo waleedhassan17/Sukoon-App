@@ -34,7 +34,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Location from 'expo-location';
 import * as Device from 'expo-device';
-import { Magnetometer } from 'expo-sensors';
+import { Magnetometer, DeviceMotion } from 'expo-sensors';
 import { useTheme } from '@/contexts/ThemeContext';
 import { SHADOWS, RADIUS } from '@/constants/theme';
 import { 
@@ -97,6 +97,7 @@ export default function QiblahScreen() {
   const [loadingMessage, setLoadingMessage] = useState('Finding your location...');
   const [error, setError] = useState<QiblahError | null>(null);
   const [sensorAvailable, setSensorAvailable] = useState(true);
+  const [sensorType, setSensorType] = useState<'magnetometer' | 'devicemotion' | 'none'>('none');
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [isRunningOnEmulator, setIsRunningOnEmulator] = useState(false);
@@ -104,10 +105,12 @@ export default function QiblahScreen() {
   
   // Refs for cleanup and animation
   const magnetometerSubscription = useRef<any>(null);
+  const deviceMotionSubscription = useRef<any>(null);
   const compassRotation = useRef(new Animated.Value(0)).current;
   const qiblahNeedleRotation = useRef(new Animated.Value(0)).current;
   const lastHeading = useRef(0);
   const compassCenterRef = useRef({ x: 0, y: 0 });
+  const headingHistory = useRef<number[]>([]); // For smoothing
   
   /**
    * Pan responder for manual compass rotation in static mode
@@ -162,8 +165,8 @@ export default function QiblahScreen() {
   }, []);
 
   /**
-   * Start magnetometer sensor for compass heading
-   * Falls back to static mode if sensor unavailable (no error shown)
+   * Start compass sensor for heading
+   * Tries Magnetometer first, then DeviceMotion, then falls back to static mode
    */
   const startMagnetometer = useCallback(async () => {
     try {
@@ -172,62 +175,143 @@ export default function QiblahScreen() {
       setIsRunningOnEmulator(onEmulator);
       
       if (onEmulator) {
-        console.log('Running on emulator - magnetometer not available');
+        console.log('Running on emulator - compass not available');
         setSensorAvailable(false);
+        setSensorType('none');
         return false; // No error, just use static mode
       }
       
-      const isAvailable = await Magnetometer.isAvailableAsync();
+      // Reset heading history for smoothing
+      headingHistory.current = [];
       
-      if (!isAvailable) {
-        console.log('Magnetometer not available on this device');
-        setSensorAvailable(false);
-        // NO ERROR - we'll show static fallback mode instead
-        return false;
+      // Try DeviceMotion first on iOS (provides fused compass heading)
+      if (Platform.OS === 'ios') {
+        const deviceMotionAvailable = await DeviceMotion.isAvailableAsync();
+        if (deviceMotionAvailable) {
+          console.log('Using DeviceMotion for compass (iOS)');
+          DeviceMotion.setUpdateInterval(MAGNETOMETER_UPDATE_INTERVAL);
+          
+          deviceMotionSubscription.current = DeviceMotion.addListener((data) => {
+            if (data.rotation) {
+              // DeviceMotion rotation gives us alpha which is compass heading on iOS
+              // alpha is rotation around Z axis (compass heading)
+              let angle = (data.rotation.alpha * 180 / Math.PI);
+              
+              // Normalize to 0-360
+              angle = ((angle % 360) + 360) % 360;
+              
+              // Apply smoothing
+              applySmoothing(angle);
+            }
+          });
+          
+          setSensorAvailable(true);
+          setSensorType('devicemotion');
+          return true;
+        }
       }
       
-      // Set faster update interval for smoother animation
-      Magnetometer.setUpdateInterval(MAGNETOMETER_UPDATE_INTERVAL);
+      // Try Magnetometer
+      const magnetometerAvailable = await Magnetometer.isAvailableAsync();
       
-      magnetometerSubscription.current = Magnetometer.addListener((data) => {
-        // Calculate heading from magnetometer data
-        // Note: This gives magnetic north, not true north
-        let angle = Math.atan2(data.y, data.x) * (180 / Math.PI);
+      if (magnetometerAvailable) {
+        console.log('Using Magnetometer for compass');
+        Magnetometer.setUpdateInterval(MAGNETOMETER_UPDATE_INTERVAL);
         
-        // Normalize to 0-360
-        angle = (angle + 360) % 360;
+        magnetometerSubscription.current = Magnetometer.addListener((data) => {
+          // Calculate heading from magnetometer data
+          // Using atan2(x, y) gives angle from Y-axis (North)
+          let angle = Math.atan2(data.x, data.y) * (180 / Math.PI);
+          
+          // Convert to 0-360 range
+          if (angle < 0) {
+            angle += 360;
+          }
+          
+          // Platform-specific adjustments
+          if (Platform.OS === 'android') {
+            angle = (360 - angle) % 360;
+          }
+          
+          // Apply smoothing
+          applySmoothing(angle);
+        });
         
-        // Apply platform-specific adjustments
-        if (Platform.OS === 'ios') {
-          // iOS magnetometer returns different orientation
-          angle = (360 - angle) % 360;
-        }
-        
-        setHeading(angle);
-        
-        // Animate compass rotation (inverted for visual correctness)
-        animateRotation(compassRotation, -angle, lastHeading.current);
-        lastHeading.current = -angle;
-      });
+        setSensorAvailable(true);
+        setSensorType('magnetometer');
+        return true;
+      }
       
-      setSensorAvailable(true);
-      return true;
-    } catch (e) {
-      console.error('Magnetometer error:', e);
+      // Try DeviceMotion as last resort on Android
+      const deviceMotionAvailable = await DeviceMotion.isAvailableAsync();
+      if (deviceMotionAvailable) {
+        console.log('Using DeviceMotion for compass (Android fallback)');
+        DeviceMotion.setUpdateInterval(MAGNETOMETER_UPDATE_INTERVAL);
+        
+        deviceMotionSubscription.current = DeviceMotion.addListener((data) => {
+          if (data.rotation) {
+            // Use gamma (rotation around Y-axis) for compass on Android
+            let angle = (data.rotation.gamma * 180 / Math.PI);
+            angle = ((angle % 360) + 360) % 360;
+            applySmoothing(angle);
+          }
+        });
+        
+        setSensorAvailable(true);
+        setSensorType('devicemotion');
+        return true;
+      }
+      
+      console.log('No compass sensor available');
       setSensorAvailable(false);
-      // NO ERROR - graceful fallback to static mode
+      setSensorType('none');
+      return false;
+      
+    } catch (e) {
+      console.error('Compass sensor error:', e);
+      setSensorAvailable(false);
+      setSensorType('none');
       return false;
     }
   }, [animateRotation, compassRotation]);
 
   /**
-   * Stop magnetometer sensor
+   * Apply smoothing to compass heading
+   */
+  const applySmoothing = useCallback((angle: number) => {
+    const SMOOTHING_FACTOR = 5;
+    headingHistory.current.push(angle);
+    if (headingHistory.current.length > SMOOTHING_FACTOR) {
+      headingHistory.current.shift();
+    }
+    
+    // Circular mean for smooth heading (handles 359°/1° boundary)
+    let sinSum = 0, cosSum = 0;
+    for (const h of headingHistory.current) {
+      sinSum += Math.sin(h * Math.PI / 180);
+      cosSum += Math.cos(h * Math.PI / 180);
+    }
+    let smoothedAngle = Math.atan2(sinSum, cosSum) * (180 / Math.PI);
+    if (smoothedAngle < 0) smoothedAngle += 360;
+    
+    setHeading(smoothedAngle);
+    animateRotation(compassRotation, -smoothedAngle, lastHeading.current);
+    lastHeading.current = -smoothedAngle;
+  }, [animateRotation, compassRotation]);
+
+  /**
+   * Stop all compass sensors
    */
   const stopMagnetometer = useCallback(() => {
     if (magnetometerSubscription.current) {
       magnetometerSubscription.current.remove();
       magnetometerSubscription.current = null;
     }
+    if (deviceMotionSubscription.current) {
+      deviceMotionSubscription.current.remove();
+      deviceMotionSubscription.current = null;
+    }
+    setSensorType('none');
   }, []);
 
   /**
@@ -424,13 +508,16 @@ export default function QiblahScreen() {
     }
   }, [stopMagnetometer, startMagnetometer, compassRotation, userLocation, fetchQiblahData]);
 
-  // Initialize on mount
+  // Initialize on mount - using ref pattern to avoid stale closure
+  const setupRef = useRef(setup);
+  setupRef.current = setup;
+  
   useEffect(() => {
-    setup();
+    setupRef.current();
     return () => {
       stopMagnetometer();
     };
-  }, []);
+  }, [stopMagnetometer]);
 
   // Calculate derived values
   // In static mode, use manual heading; otherwise use sensor heading

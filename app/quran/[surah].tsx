@@ -99,7 +99,7 @@ function pageGlobalOffset(pages: Ayah[][], pageIdx: number): number {
 }
 
 /* ─── Ornament ─── */
-function Ornament({ variant = 'diamond' }: { variant?: 'diamond' | 'dot' }) {
+const Ornament = React.memo(function Ornament({ variant = 'diamond' }: { variant?: 'diamond' | 'dot' }) {
   const { theme } = useTheme();
   return (
     <View style={s.ornRow}>
@@ -112,12 +112,12 @@ function Ornament({ variant = 'diamond' }: { variant?: 'diamond' | 'dot' }) {
       <View style={[s.ornLine, { backgroundColor: `${theme.gold}4D` }]} />
     </View>
   );
-}
+});
 
 /* ═══════════════════════════════════════════════
    HEADER
    ═══════════════════════════════════════════════ */
-function SurahHeader({
+const SurahHeader = React.memo(function SurahHeader({
   englishName, arabicName, ayahCount, revelationType, onBack,
 }: {
   englishName: string; arabicName: string; ayahCount?: number;
@@ -172,12 +172,12 @@ function SurahHeader({
       </View>
     </LinearGradient>
   );
-}
+});
 
 /* ═══════════════════════════════════════════════
    SEGMENTED CONTROL
    ═══════════════════════════════════════════════ */
-function SegmentedControl({
+const SegmentedControl = React.memo(function SegmentedControl({
   showEnglish, showUrdu, showTafseer, onToggle,
 }: {
   showEnglish: boolean; showUrdu: boolean; showTafseer: boolean;
@@ -216,12 +216,12 @@ function SegmentedControl({
       </View>
     </View>
   );
-}
+});
 
 /* ═══════════════════════════════════════════════
    BISMILLAH
    ═══════════════════════════════════════════════ */
-function BismillahCard({ isPageMode }: { isPageMode: boolean }) {
+const BismillahCard = React.memo(function BismillahCard({ isPageMode }: { isPageMode: boolean }) {
   const { theme } = useTheme();
   const { sizes } = useFontSize();
 
@@ -260,14 +260,14 @@ function BismillahCard({ isPageMode }: { isPageMode: boolean }) {
       </LinearGradient>
     </View>
   );
-}
+});
 
 /* ═══════════════════════════════════════════════
    MUSHAF PAGE FRAME
    Just a visual grouping — NOT a paginated view.
    Full width, no sidebar stealing space.
    ═══════════════════════════════════════════════ */
-function PageFrame({
+const PageFrame = React.memo(function PageFrame({
   ayahs, globalOffset, currentIndex, surahNumber, pageNumber, totalPages,
   isVerseSaved, onPlayVerse, onBookmark,
 }: {
@@ -358,14 +358,14 @@ function PageFrame({
       </View>
     </View>
   );
-}
+});
 
 /* ═══════════════════════════════════════════════
    FLOATING PAGE INDICATOR
    Tiny pill that appears briefly while manual scrolling, then fades
    Hidden during auto-scroll
    ═══════════════════════════════════════════════ */
-function FloatingPageIndicator({ current, total, visible, isAutoScrolling }: { current: number; total: number; visible: boolean; isAutoScrolling: boolean }) {
+const FloatingPageIndicator = React.memo(function FloatingPageIndicator({ current, total, visible, isAutoScrolling }: { current: number; total: number; visible: boolean; isAutoScrolling: boolean }) {
   const { theme } = useTheme();
   const opacity = useRef(new Animated.Value(0)).current;
 
@@ -395,12 +395,12 @@ function FloatingPageIndicator({ current, total, visible, isAutoScrolling }: { c
       </Text>
     </Animated.View>
   );
-}
+});
 
 /* ═══════════════════════════════════════════════
    VERSE CARD (card mode)
    ═══════════════════════════════════════════════ */
-function VerseCard({
+const VerseCard = React.memo(function VerseCard({
   ayahNumber, arabicText, englishText, urduText, tafseerText,
   showEnglish, showUrdu, showTafseer,
   isBookmarked, isPlaying, onBookmark, onPlay, onShare,
@@ -447,12 +447,12 @@ function VerseCard({
       </View>
     </View>
   );
-}
+});
 
 /* ═══════════════════════════════════════════════
    PERSISTENT AUDIO PLAYER
    ═══════════════════════════════════════════════ */
-function PersistentPlayer({
+const PersistentPlayer = React.memo(function PersistentPlayer({
   surahName, ayahs, currentIndex, playerState,
   onPlayIndex, onTogglePlayPause, onPrev, onNext,
   onSeek, onCycleSpeed, onCycleRepeat, onClose,
@@ -568,13 +568,13 @@ function PersistentPlayer({
       </BlurView>
     </View>
   );
-}
+});
 
 /* ═══════════════════════════════════════════════
    AUTO-SCROLL BAR
    Same smooth pixel scroll in both modes.
    ═══════════════════════════════════════════════ */
-function AutoScrollBar({
+const AutoScrollBar = React.memo(function AutoScrollBar({
   active, speed, onStart, onStop, onUp, onDown, scaleAnim,
 }: {
   active: boolean; speed: number;
@@ -626,7 +626,7 @@ function AutoScrollBar({
       )}
     </Animated.View>
   );
-}
+});
 
 /* ═══════════════════════════════════════════════
    MAIN SCREEN
@@ -807,16 +807,29 @@ export default function SurahScreen() {
     else setShowTafseer((p) => !p);
   }, [autoScrollActive, stopAS]);
 
+  // Memoize onBack to prevent SurahHeader re-renders
+  const handleBack = useCallback(() => router.back(), [router]);
+
   if (loading) {
     return (
       <View style={[s.loadWrap, { backgroundColor: theme.surface }]}>
         <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={theme.surface} />
+        {/* Skeleton loading with animated placeholders */}
+        <View style={s.skeletonHeader}>
+          <LinearGradient colors={theme.headerGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.skeletonHeaderBg} />
+        </View>
+        <View style={[s.skeletonSegment, { backgroundColor: theme.surfaceMuted }]} />
+        <View style={s.skeletonContent}>
+          {[1, 2, 3].map((i) => (
+            <View key={i} style={[s.skeletonCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}>
+              <View style={[s.skeletonLine, { backgroundColor: theme.surfaceMuted, width: '80%' }]} />
+              <View style={[s.skeletonLine, { backgroundColor: theme.surfaceMuted, width: '60%', marginTop: 12 }]} />
+              <View style={[s.skeletonLine, { backgroundColor: theme.surfaceMuted, width: '90%', marginTop: 8 }]} />
+            </View>
+          ))}
+        </View>
         <View style={s.loadInner}>
-          <LinearGradient colors={[theme.primaryLight, theme.primary]} style={s.loadIcon}>
-            <Ionicons name="book-outline" size={24} color="#fff" />
-          </LinearGradient>
-          <Text style={[s.loadText, { color: theme.textSecondary }]}>Loading Surah…</Text>
-          <ActivityIndicator size="small" color={theme.primaryMuted} style={{ marginTop: 8 }} />
+          <ActivityIndicator size="small" color={theme.primaryMuted} />
         </View>
       </View>
     );
@@ -829,7 +842,7 @@ export default function SurahScreen() {
       <SurahHeader
         englishName={meta?.englishName || ''} arabicName={meta?.name || ''}
         ayahCount={meta?.numberOfAyahs} revelationType={meta?.revelationType}
-        onBack={() => router.back()}
+        onBack={handleBack}
       />
 
       <SegmentedControl showEnglish={showEnglish} showUrdu={showUrdu} showTafseer={showTafseer} onToggle={handleToggle} />
@@ -943,10 +956,18 @@ export default function SurahScreen() {
    ═══════════════════════════════════════════════ */
 const s = StyleSheet.create({
   container: { flex: 1 },
-  loadWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadInner: { alignItems: 'center', gap: 12 },
+  loadWrap: { flex: 1 },
+  loadInner: { position: 'absolute', bottom: 100, alignSelf: 'center', alignItems: 'center' },
   loadIcon: { width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   loadText: { fontSize: 16, fontWeight: '500' },
+  
+  // Skeleton loading styles
+  skeletonHeader: { height: 160, width: '100%' },
+  skeletonHeaderBg: { flex: 1 },
+  skeletonSegment: { height: 44, marginHorizontal: 16, marginVertical: 12, borderRadius: 22 },
+  skeletonContent: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
+  skeletonCard: { borderRadius: 16, padding: 20, marginBottom: 12, borderWidth: 1 },
+  skeletonLine: { height: 16, borderRadius: 8 },
 
   ornRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 6 },
   ornLine: { width: 28, height: 1 },

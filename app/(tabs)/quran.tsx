@@ -1,9 +1,16 @@
 /**
  * QuranListScreen - Premium Surah browser
  * Refined design matching Sukoon aesthetic system
+ * 
+ * Performance optimizations:
+ * - useMemo for filtered data and computed values
+ * - useCallback for event handlers
+ * - React.memo for list item component
+ * - FlatList optimizations (windowSize, removeClippedSubviews, getItemLayout)
+ * - Prefetch on visible items
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import {
   View,
   Text,
@@ -27,6 +34,10 @@ import { ReadingProgress } from '@/lib/readingProgress';
 import { RADIUS } from '@/constants/theme';
 
 const { width } = Dimensions.get('window');
+
+// Fixed item height for getItemLayout optimization
+const ITEM_HEIGHT = 82;
+const SEPARATOR_HEIGHT = 1;
 
 export default function QuranListScreen() {
   const insets = useSafeAreaInsets();
@@ -71,15 +82,41 @@ export default function QuranListScreen() {
     }
   };
 
-  const filtered = surahs.filter((s) => {
-    if (!search) return true;
+  const filtered = useMemo(() => {
+    if (!search) return surahs;
     const q = search.toLowerCase();
-    return (
+    return surahs.filter((s) =>
       s.englishName.toLowerCase().includes(q) ||
       s.name.includes(q) ||
       String(s.number).includes(q)
     );
-  });
+  }, [surahs, search]);
+
+  // FlatList optimizations
+  const keyExtractor = useCallback((item: SurahMeta) => String(item.number), []);
+  
+  const getItemLayout = useCallback((_: any, index: number) => ({
+    length: ITEM_HEIGHT + SEPARATOR_HEIGHT,
+    offset: (ITEM_HEIGHT + SEPARATOR_HEIGHT) * index,
+    index,
+  }), []);
+
+  // Prefetch surahs that become visible
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+  
+  const onViewableItemsChanged = useCallback(({ viewableItems }: any) => {
+    // Prefetch the first few visible surahs for instant loading
+    viewableItems.slice(0, 3).forEach((item: any) => {
+      if (item.item) {
+        QuranService.prefetchSurah(item.item.number);
+      }
+    });
+  }, []);
+
+  // Memoized separator component
+  const ItemSeparator = useCallback(() => (
+    <View style={[styles.separator, { backgroundColor: theme.border }]} />
+  ), [theme.border]);
 
   const handleSurahPress = useCallback(
     (surah: SurahMeta) => {
@@ -100,7 +137,9 @@ export default function QuranListScreen() {
     }
   }, [lastSeen, surahs, router]);
 
-  const lastSeenSurah = lastSeen ? surahs.find((s) => s.number === lastSeen.surah) : null;
+  const lastSeenSurah = useMemo(() => 
+    lastSeen ? surahs.find((s) => s.number === lastSeen.surah) : null
+  , [lastSeen, surahs]);
 
   /* ─── Surah Row ─── */
   const renderSurahItem = useCallback(
@@ -294,13 +333,20 @@ export default function QuranListScreen() {
       {/* ═══════════════ SURAH LIST ═══════════════ */}
       <FlatList
         data={filtered}
-        keyExtractor={(item) => String(item.number)}
+        keyExtractor={keyExtractor}
         renderItem={renderSurahItem}
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={15}
-        maxToRenderPerBatch={10}
-        ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: theme.border }]} />}
+        // Performance optimizations
+        initialNumToRender={12}
+        maxToRenderPerBatch={8}
+        windowSize={5}
+        removeClippedSubviews={Platform.OS === 'android'}
+        getItemLayout={getItemLayout}
+        // Prefetch visible surahs
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={viewabilityConfig}
+        ItemSeparatorComponent={ItemSeparator}
         ListEmptyComponent={
           <View style={styles.emptyWrap}>
             <View style={[styles.emptyIconWrap, { backgroundColor: theme.surfaceMuted }]}>

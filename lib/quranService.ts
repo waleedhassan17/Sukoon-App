@@ -1,11 +1,32 @@
 /**
- * QuranService - Open source Quran API integration
- * Uses alquran.cloud API for Arabic text, translations, and audio
- * Uses api.quran.com as fallback
+ * QuranService - Optimized Quran API with intelligent caching
+ * 
+ * Performance optimizations:
+ * - AsyncStorage persistence for offline-first experience
+ * - In-memory cache for instant access
+ * - Stale-while-revalidate pattern
+ * - Prefetch support for app startup
+ * - Non-blocking architecture
+ * - Request deduplication
  */
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ALQURAN_BASE = 'https://api.alquran.cloud/v1';
 const QURANCOM_BASE = 'https://api.quran.com/api/v4';
+
+// Cache keys
+const CACHE_KEYS = {
+  SURAHS_META: '@quran_surahs_meta',
+  SURAH_DATA: (num: number) => `@quran_surah_${num}`,
+  CACHE_VERSION: '@quran_cache_version',
+};
+
+// Current cache version - increment to invalidate old caches
+const CACHE_VERSION = '1.0';
+
+// Cache TTL (24 hours - but we use stale-while-revalidate)
+const CACHE_TTL = 24 * 60 * 60 * 1000;
 
 export interface SurahMeta {
   number: number;
@@ -35,17 +56,147 @@ export interface TafseerEntry {
   source: string;
 }
 
-// Cache
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+// In-memory cache for instant access
 let surahsCache: SurahMeta[] | null = null;
-const surahDataCache: Record<number, { meta: SurahMeta; ayahs: Ayah[] }> = {};
+const surahDataCache: Map<number, { meta: SurahMeta; ayahs: Ayah[] }> = new Map();
+
+// Request deduplication - prevent duplicate in-flight requests
+const pendingRequests: Map<string, Promise<any>> = new Map();
+
+// Prefetch state
+let isPrefetched = false;
+let prefetchPromise: Promise<void> | null = null;
+
+/**
+ * Check if cache entry is stale
+ */
+function isCacheStale(timestamp: number): boolean {
+  return Date.now() - timestamp > CACHE_TTL;
+}
+
+/**
+ * Safe AsyncStorage get with JSON parsing
+ */
+async function getCached<T>(key: string): Promise<CacheEntry<T> | null> {
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw) as CacheEntry<T>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Safe AsyncStorage set with JSON stringification
+ */
+async function setCache<T>(key: string, data: T): Promise<void> {
+  try {
+    const entry: CacheEntry<T> = { data, timestamp: Date.now() };
+    await AsyncStorage.setItem(key, JSON.stringify(entry));
+  } catch (e) {
+    console.warn('Cache write failed:', e);
+  }
+}
+
+/**
+ * Deduplicate concurrent requests for the same resource
+ */
+function deduplicateRequest<T>(key: string, fetchFn: () => Promise<T>): Promise<T> {
+  const existing = pendingRequests.get(key);
+  if (existing) return existing as Promise<T>;
+  
+  const promise = fetchFn().finally(() => {
+    pendingRequests.delete(key);
+  });
+  
+  pendingRequests.set(key, promise);
+  return promise;
+}
 
 export const QuranService = {
   /**
+   * Initialize cache from AsyncStorage on app startup
+   * Call this in _layout.tsx or app initialization
+   */
+  async initializeCache(): Promise<void> {
+    try {
+      // Check cache version
+      const version = await AsyncStorage.getItem(CACHE_KEYS.CACHE_VERSION);
+      if (version !== CACHE_VERSION) {
+        // Invalidate old cache
+        await this.clearCache();
+        await AsyncStorage.setItem(CACHE_KEYS.CACHE_VERSION, CACHE_VERSION);
+        return;
+      }
+
+      // Load surahs meta into memory
+      const cached = await getCached<SurahMeta[]>(CACHE_KEYS.SURAHS_META);
+      if (cached?.data) {
+        surahsCache = cached.data;
+      }
+    } catch (e) {
+      console.warn('Cache initialization failed:', e);
+    }
+  },
+
+  /**
+   * Prefetch essential data for instant first interaction
+   * Non-blocking - returns immediately, fetches in background
+   */
+  prefetch(): Promise<void> {
+    if (isPrefetched) return Promise.resolve();
+    if (prefetchPromise) return prefetchPromise;
+    
+    prefetchPromise = (async () => {
+      try {
+        // Prefetch surahs list (most important for first interaction)
+        await this.getAllSurahs();
+        isPrefetched = true;
+      } catch (e) {
+        console.warn('Prefetch failed:', e);
+      } finally {
+        prefetchPromise = null;
+      }
+    })();
+    
+    return prefetchPromise;
+  },
+
+  /**
    * Get all 114 Surahs metadata
+   * Uses stale-while-revalidate pattern
    */
   async getAllSurahs(): Promise<SurahMeta[]> {
+    // Return from memory cache immediately
     if (surahsCache) return surahsCache;
     
+    // Check AsyncStorage cache
+    const cached = await getCached<SurahMeta[]>(CACHE_KEYS.SURAHS_META);
+    if (cached?.data) {
+      surahsCache = cached.data;
+      
+      // Revalidate in background if stale
+      if (isCacheStale(cached.timestamp)) {
+        this.fetchAndCacheSurahs().catch(() => {});
+      }
+      
+      return surahsCache;
+    }
+    
+    // No cache - fetch with deduplication
+    return deduplicateRequest('surahs', () => this.fetchAndCacheSurahs());
+  },
+
+  /**
+   * Fetch surahs from API and cache
+   */
+  async fetchAndCacheSurahs(): Promise<SurahMeta[]> {
     try {
       const res = await fetch(`${ALQURAN_BASE}/surah`);
       const json = await res.json();
@@ -59,6 +210,8 @@ export const QuranService = {
           numberOfAyahs: s.numberOfAyahs,
           revelationType: s.revelationType,
         }));
+        // Persist to AsyncStorage (non-blocking)
+        setCache(CACHE_KEYS.SURAHS_META, surahsCache).catch(() => {});
         return surahsCache!;
       }
       throw new Error('API error');
@@ -74,19 +227,47 @@ export const QuranService = {
         numberOfAyahs: s.verses_count,
         revelationType: s.revelation_place,
       }));
+      // Persist to AsyncStorage (non-blocking)
+      setCache(CACHE_KEYS.SURAHS_META, surahsCache).catch(() => {});
       return surahsCache!;
     }
   },
 
   /**
    * Get complete Surah with Arabic, English, Urdu translations and audio
-   * Uses Mishary Rashid Alafasy for recitation
+   * Uses stale-while-revalidate pattern for instant loading
    */
   async getSurah(surahNumber: number): Promise<{ meta: SurahMeta; ayahs: Ayah[] }> {
-    if (surahDataCache[surahNumber]) return surahDataCache[surahNumber];
+    // Return from memory cache immediately
+    const memoryCached = surahDataCache.get(surahNumber);
+    if (memoryCached) return memoryCached;
 
+    // Check AsyncStorage cache
+    const cacheKey = CACHE_KEYS.SURAH_DATA(surahNumber);
+    const cached = await getCached<{ meta: SurahMeta; ayahs: Ayah[] }>(cacheKey);
+    
+    if (cached?.data) {
+      // Store in memory for instant subsequent access
+      surahDataCache.set(surahNumber, cached.data);
+      
+      // Revalidate in background if stale
+      if (isCacheStale(cached.timestamp)) {
+        this.fetchAndCacheSurah(surahNumber).catch(() => {});
+      }
+      
+      return cached.data;
+    }
+    
+    // No cache - fetch with deduplication
+    return deduplicateRequest(`surah_${surahNumber}`, () => this.fetchAndCacheSurah(surahNumber));
+  },
+
+  /**
+   * Fetch surah from API and cache
+   */
+  async fetchAndCacheSurah(surahNumber: number): Promise<{ meta: SurahMeta; ayahs: Ayah[] }> {
     try {
-      // Fetch Arabic + English translation + Audio in parallel
+      // Fetch Arabic + English + Urdu in parallel for maximum speed
       const [arabicRes, englishRes, urduRes] = await Promise.all([
         fetch(`${ALQURAN_BASE}/surah/${surahNumber}/ar.alafasy`),
         fetch(`${ALQURAN_BASE}/surah/${surahNumber}/en.sahih`),
@@ -127,12 +308,35 @@ export const QuranService = {
       }));
 
       const result = { meta, ayahs };
-      surahDataCache[surahNumber] = result;
+      
+      // Store in memory cache
+      surahDataCache.set(surahNumber, result);
+      
+      // Persist to AsyncStorage (non-blocking)
+      setCache(CACHE_KEYS.SURAH_DATA(surahNumber), result).catch(() => {});
+      
       return result;
     } catch (e) {
       console.error('Error loading surah:', e);
       throw e;
     }
+  },
+
+  /**
+   * Prefetch a specific surah in background (for predictive loading)
+   */
+  prefetchSurah(surahNumber: number): void {
+    if (surahDataCache.has(surahNumber)) return;
+    
+    // Fire and forget - don't await
+    this.getSurah(surahNumber).catch(() => {});
+  },
+
+  /**
+   * Check if surah is cached (for UI indicators)
+   */
+  isSurahCached(surahNumber: number): boolean {
+    return surahDataCache.has(surahNumber);
   },
 
   /**
@@ -228,9 +432,36 @@ export const QuranService = {
     }
   },
 
-  clearCache() {
+  /**
+   * Clear all caches (memory and AsyncStorage)
+   */
+  async clearCache(): Promise<void> {
+    // Clear memory cache
     surahsCache = null;
-    Object.keys(surahDataCache).forEach(k => delete surahDataCache[Number(k)]);
+    surahDataCache.clear();
+    isPrefetched = false;
+    prefetchPromise = null;
+    
+    // Clear AsyncStorage cache
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const quranKeys = keys.filter(k => k.startsWith('@quran_'));
+      if (quranKeys.length > 0) {
+        await AsyncStorage.multiRemove(quranKeys);
+      }
+    } catch (e) {
+      console.warn('Failed to clear AsyncStorage cache:', e);
+    }
+  },
+
+  /**
+   * Get cache statistics (for debugging)
+   */
+  getCacheStats(): { memorySurahs: number; hasMetaCache: boolean } {
+    return {
+      memorySurahs: surahDataCache.size,
+      hasMetaCache: surahsCache !== null,
+    };
   },
 };
 

@@ -132,19 +132,19 @@ export default function HomeScreen() {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+        const loc = await Location.getCurrentPositionAsync({ 
+          accuracy: Location.Accuracy.High,
+          mayShowUserSettingsDialog: true,
+        });
         const times = await PrayerTimesService.getByCoordinates(loc.coords.latitude, loc.coords.longitude);
         if (times) {
           setPrayerTimes(times);
           setNextPrayer(PrayerTimesService.getNextPrayer(times));
         }
       }
-    } catch {
-      const times = await PrayerTimesService.getByCity('Lahore', 'Pakistan');
-      if (times) {
-        setPrayerTimes(times);
-        setNextPrayer(PrayerTimesService.getNextPrayer(times));
-      }
+    } catch (e) {
+      console.error('Prayer times error:', e);
+      // No static fallback - show nothing if location unavailable
     }
   };
 
