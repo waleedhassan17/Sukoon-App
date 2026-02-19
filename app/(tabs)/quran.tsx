@@ -369,7 +369,7 @@ export default function QuranListScreen() {
 
       {/* ═══════════════ SURAH COUNTER ═══════════════ */}
       <View style={styles.listHeader}>
-        <Text style={[styles.listHeaderText, { color: theme.textTertiary }]}
+        <Text style={[styles.listHeaderText, { color: theme.textTertiary }]}>
           {filtered.length} {filtered.length === 1 ? 'Surah' : 'Surahs'}
         </Text>
         {search.length > 0 && (
@@ -399,23 +399,24 @@ export default function QuranListScreen() {
 
   /* ─── Loading ─── */
   if (loading) {
-      <View style={styles.listHeader}>
-        <Text style={[styles.listHeaderText, { color: theme.textTertiary }]}>
-          {filtered.length} {filtered.length === 1 ? 'Surah' : 'Surahs'}
-        </Text>
-        {search.length > 0 && (
-        ListHeaderComponent={listHeader}
-          <TouchableOpacity onPress={() => setSearch('')} activeOpacity={0.6}>
-            <Text style={[styles.clearSearch, { color: theme.primaryMuted }]}>Clear</Text>
-          </TouchableOpacity>
-        )}
+    return (
+      <View style={[styles.container, { backgroundColor: theme.surface }]}>
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={theme.primaryMuted} />
+          <Text style={[styles.loadingText, { color: theme.textSecondary }]}>Loading the Holy Quran…</Text>
+        </View>
       </View>
+    );
+  }
 
+  return (
+    <View style={[styles.container, { backgroundColor: theme.surface }]}>
       {/* ═══════════════ SURAH LIST ═══════════════ */}
       <FlatList
         data={filtered}
         keyExtractor={keyExtractor}
         renderItem={renderSurahItem}
+        ListHeaderComponent={listHeader}
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
         showsVerticalScrollIndicator={false}
         refreshControl={

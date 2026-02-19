@@ -23,12 +23,6 @@ export default function TabLayout() {
         headerShown: false,
         tabBarActiveTintColor: theme.tabBarActive,
         tabBarInactiveTintColor: theme.tabBarInactive,
-        contentStyle: {
-          paddingBottom: Platform.OS === 'ios' ? 110 : 100,
-        },
-        sceneContainerStyle: {
-          paddingBottom: Platform.OS === 'ios' ? 110 : 100,
-        },
         tabBarStyle: {
           position: 'absolute',
           bottom: 0,

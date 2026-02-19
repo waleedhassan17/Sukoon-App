@@ -182,7 +182,7 @@ export const darkTheme = {
   accentGradient: ['#40916C', '#2D6A4F'] as const,
 };
 
-export type AppTheme = typeof lightTheme;
+export type AppTheme = typeof lightTheme | typeof darkTheme;
 
 // Typography
 export const TYPOGRAPHY = {

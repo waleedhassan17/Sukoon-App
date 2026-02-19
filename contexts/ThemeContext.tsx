@@ -22,8 +22,8 @@ const ThemeContext = createContext<ThemeContextType>({
 const THEME_KEY = '@sukoon_theme';
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const systemScheme = useColorScheme();
-  const [mode, setModeState] = useState<ThemeMode>(systemScheme === 'dark' ? 'dark' : 'light');
+  useColorScheme();
+  const [mode, setModeState] = useState<ThemeMode>('light');
 
   useEffect(() => {
     AsyncStorage.getItem(THEME_KEY).then(saved => {
