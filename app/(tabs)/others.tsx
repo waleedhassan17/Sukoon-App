@@ -108,7 +108,7 @@ export default function OthersScreen() {
     <View style={[styles.container, { backgroundColor: theme.surface }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
       >
         {/* ═══════════════ HEADER ═══════════════ */}
         <LinearGradient

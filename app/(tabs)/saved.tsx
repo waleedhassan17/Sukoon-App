@@ -19,11 +19,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useFontSize } from '@/contexts/FontSizeContext';
 import { useSavedVerses } from '@/contexts/SavedVersesContext';
 
 export default function SavedScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
+  const { sizes } = useFontSize();
   const { savedVerses, removeVerse, clearAllVerses } = useSavedVerses();
 
   const headerFade = useRef(new Animated.Value(0)).current;
@@ -69,7 +71,7 @@ export default function SavedScreen() {
     <View style={[styles.container, { backgroundColor: theme.surface }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
       >
         {/* ═══════════════ HEADER ═══════════════ */}
         <LinearGradient
@@ -204,18 +206,18 @@ export default function SavedScreen() {
 
                   {/* Arabic Text */}
                   <View style={[styles.arabicWrap, { backgroundColor: theme.primaryMuted + '08' }]}>
-                    <Text style={[styles.arabicText, { color: theme.arabicText }]}>{verse.arabic}</Text>
+                    <Text style={[styles.arabicText, { color: theme.arabicText, fontSize: sizes.arabic, lineHeight: sizes.arabicLine }]}>{verse.arabic}</Text>
                   </View>
 
                   {/* Divider accent */}
                   <View style={[styles.verseDivider, { backgroundColor: theme.gold + '30' }]} />
 
                   {/* English */}
-                  <Text style={[styles.englishText, { color: theme.text }]}>{verse.english}</Text>
+                  <Text style={[styles.englishText, { color: theme.text, fontSize: sizes.english, lineHeight: sizes.englishLine }]}>{verse.english}</Text>
 
                   {/* Urdu */}
                   {verse.urdu && (
-                    <Text style={[styles.urduText, { color: theme.textSecondary }]}>{verse.urdu}</Text>
+                    <Text style={[styles.urduText, { color: theme.textSecondary, fontSize: sizes.urdu, lineHeight: sizes.urduLine }]}>{verse.urdu}</Text>
                   )}
 
                   {/* Footer */}

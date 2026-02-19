@@ -19,6 +19,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useFontSize } from '@/contexts/FontSizeContext';
 import { ReadingProgress } from '@/lib/readingProgress';
 import { QuranService } from '@/lib/quranService';
 import { PrayerTimesService, PrayerTimesData, HijriDate, IslamicCalendarData } from '@/lib/prayerTimes';
@@ -77,6 +78,7 @@ const SectionDivider = ({ borderColor }: { borderColor: string }) => (
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
+  const { sizes } = useFontSize();
   const router = useRouter();
 
   const heroFade = useRef(new Animated.Value(0)).current;
@@ -161,7 +163,7 @@ export default function HomeScreen() {
     <View style={[styles.container, { backgroundColor: theme.surface }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
       >
         {/* ═══════════════ HERO HEADER ═══════════════ */}
         <Animated.View style={{ opacity: heroFade, transform: [{ translateY: heroSlide }] }}>
@@ -263,8 +265,8 @@ export default function HomeScreen() {
                   <Ionicons name="moon-outline" size={16} color={theme.primary} />
                 </View>
                 <View style={styles.statTextWrap}>
-                  <Text style={[styles.statLabel, { color: theme.textTertiary }]}>Next Prayer</Text>
-                  <Text style={[styles.statValue, { color: theme.text }]}>{nextPrayer.name}</Text>
+                  <Text style={[styles.statLabel, { color: theme.textTertiary }]} numberOfLines={1}>NEXT PRAYER</Text>
+                  <Text style={[styles.statValue, { color: theme.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{nextPrayer.name}</Text>
                   <Text style={[styles.statSub, { color: theme.textTertiary }]}>{PrayerTimesService.formatTime(nextPrayer.time)}</Text>
                 </View>
               </View>
@@ -382,14 +384,14 @@ export default function HomeScreen() {
                     <Ionicons name="sparkles" size={14} color={theme.gold + '80'} />
                   </View>
 
-                  <Text style={styles.ayahArabic}>{dailyAyah.arabic}</Text>
+                  <Text style={[styles.ayahArabic, { fontSize: sizes.arabic, lineHeight: sizes.arabicLine }]}>{dailyAyah.arabic}</Text>
 
                   <View style={[styles.ayahDividerLine, { backgroundColor: theme.gold + '4D' }]} />
 
-                  <Text style={styles.ayahEnglish}>{dailyAyah.english}</Text>
+                  <Text style={[styles.ayahEnglish, { fontSize: sizes.english, lineHeight: sizes.englishLine }]}>{dailyAyah.english}</Text>
 
                   {dailyAyah.urdu && (
-                    <Text style={styles.ayahUrdu}>{dailyAyah.urdu}</Text>
+                    <Text style={[styles.ayahUrdu, { fontSize: sizes.urdu, lineHeight: sizes.urduLine }]}>{dailyAyah.urdu}</Text>
                   )}
 
                   <View style={styles.ayahFooter}>
@@ -637,14 +639,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   statLabel: {
-    fontSize: 11,
-    fontWeight: '500',
-    letterSpacing: 0.3,
+    fontSize: 9,
+    fontWeight: '600',
+    letterSpacing: 0.2,
     textTransform: 'uppercase',
-    marginBottom: 1,
+    marginBottom: 2,
   },
   statValue: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
   },
   statUnit: {

@@ -9,6 +9,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { FontSizeProvider } from '@/contexts/FontSizeContext';
 import { SavedVersesProvider } from '@/contexts/SavedVersesContext';
 import SukoonSplash from '@/components/SukoonSplash';
 
@@ -95,9 +96,11 @@ function RootLayoutInner() {
 export default function RootLayout() {
   return (
     <ThemeProvider>
-      <SavedVersesProvider>
-        <RootLayoutInner />
-      </SavedVersesProvider>
+      <FontSizeProvider>
+        <SavedVersesProvider>
+          <RootLayoutInner />
+        </SavedVersesProvider>
+      </FontSizeProvider>
     </ThemeProvider>
   );
 }

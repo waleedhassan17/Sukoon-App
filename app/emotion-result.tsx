@@ -22,6 +22,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useFontSize } from '@/contexts/FontSizeContext';
 import { useSavedVerses } from '@/contexts/SavedVersesContext';
 import { EmotionService } from '@/lib/emotionService';
 import { EMOTION_MAP } from '@/constants/theme';
@@ -59,6 +60,7 @@ function Ornament({ theme }: { theme: any }) {
 export default function EmotionResultScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
+  const { sizes } = useFontSize();
   const { saveVerse, removeVerse, isVerseSaved } = useSavedVerses();
   const params = useLocalSearchParams();
   const router = useRouter();
@@ -299,18 +301,18 @@ export default function EmotionResultScreen() {
 
                     {/* Arabic */}
                     <View style={[s.arabicWrap, { backgroundColor: theme.primaryMuted + '08' }]}>
-                      <Text style={[s.arabicText, { color: theme.arabicText }]}>{verse.arabic}</Text>
+                      <Text style={[s.arabicText, { color: theme.arabicText, fontSize: sizes.arabic, lineHeight: sizes.arabicLine }]}>{verse.arabic}</Text>
                     </View>
 
                     {/* Gold divider */}
                     <View style={[s.goldLine, { backgroundColor: theme.goldLight }]} />
 
                     {/* English */}
-                    <Text style={[s.englishText, { color: theme.textSecondary }]}>{verse.english}</Text>
+                    <Text style={[s.englishText, { color: theme.textSecondary, fontSize: sizes.english, lineHeight: sizes.englishLine }]}>{verse.english}</Text>
 
                     {/* Urdu */}
                     {verse.urdu && (
-                      <Text style={[s.urduText, { color: theme.textSecondary }]}>{verse.urdu}</Text>
+                      <Text style={[s.urduText, { color: theme.textSecondary, fontSize: sizes.urdu, lineHeight: sizes.urduLine }]}>{verse.urdu}</Text>
                     )}
 
                     {/* Emotion tags */}

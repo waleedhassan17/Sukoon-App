@@ -22,6 +22,7 @@ export interface Ayah {
   text: string; // Arabic
   translation?: string; // English
   urduTranslation?: string;
+  tafseer?: string;
   audio?: string;
   juz: number;
   page: number;

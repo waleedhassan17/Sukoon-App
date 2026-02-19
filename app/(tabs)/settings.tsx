@@ -14,12 +14,17 @@ import {
   Alert,
   Animated,
   Platform,
+  StyleProp,
+  ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useFontSize } from '@/contexts/FontSizeContext';
 import { QuranService } from '@/lib/quranService';
+import FontSizeSlider from '@/components/FontSizeSlider';
 
 /* ─── Staggered entry hook ─── */
 function useStaggeredEntry(count: number, baseDelay = 70) {
@@ -52,14 +57,27 @@ function useStaggeredEntry(count: number, baseDelay = 70) {
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { theme, mode, toggleTheme } = useTheme();
+  const { fontScale, setFontScale, reset: resetFontScale, sizes } = useFontSize();
   const [notifications, setNotifications] = useState(true);
   const [dailyAyah, setDailyAyah] = useState(true);
 
   const headerFade = useRef(new Animated.Value(0)).current;
   const headerSlide = useRef(new Animated.Value(24)).current;
 
-  // 4 section groups + credits + closing card = 6
-  const sectionAnims = useStaggeredEntry(6, 80);
+  // 5 section groups + credits + closing card = 7
+  const sectionAnims = useStaggeredEntry(7, 80);
+
+  const handlePresetSelect = (presetValue: number) => {
+    setFontScale(presetValue);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  };
+
+  const handleResetFontSize = () => {
+    resetFontScale();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  };
+
+  const isPresetActive = (preset: number) => Math.abs(fontScale - preset) < 0.05;
 
   useEffect(() => {
     Animated.parallel([
@@ -87,7 +105,7 @@ export default function SettingsScreen() {
     <View style={[styles.container, { backgroundColor: theme.surface }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
       >
         {/* ═══════════════ HEADER ═══════════════ */}
         <LinearGradient
@@ -156,8 +174,105 @@ export default function SettingsScreen() {
             </View>
           </Animated.View>
 
-          {/* ═══════════════ NOTIFICATIONS ═══════════════ */}
+          {/* ═══════════════ READING ═══════════════ */}
           <Animated.View style={sectionAnims[1]}>
+            <Text style={[styles.sectionLabel, { color: theme.textTertiary }]}>READING</Text>
+            <View style={[styles.group, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
+              {/* Header Row */}
+              <View style={styles.row}>
+                <View style={styles.rowLeft}>
+                  <View style={[styles.iconWrap, { backgroundColor: theme.primaryMuted + '14' }]}>
+                    <Ionicons name="text-outline" size={18} color={theme.primaryMuted} />
+                  </View>
+                  <View style={styles.rowTextWrap}>
+                    <Text style={[styles.rowTitle, { color: theme.text }]}>Font Size</Text>
+                    <Text style={[styles.rowSub, { color: theme.textSecondary }]}>
+                      Currently {Math.round(fontScale * 100)}%
+                    </Text>
+                  </View>
+                </View>
+                {fontScale !== 1.0 && (
+                  <TouchableOpacity
+                    style={[styles.resetPill, { backgroundColor: theme.primaryMuted + '12' }]}
+                    onPress={handleResetFontSize}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.resetPillText, { color: theme.primaryMuted }]}>Reset</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <View style={[styles.rowDivider, { backgroundColor: theme.border }]} />
+
+              {/* Live Preview Area */}
+              <View style={[styles.previewArea, { backgroundColor: theme.surfaceMuted }]}>
+                <Text
+                  style={[
+                    styles.previewArabic,
+                    { fontSize: sizes.arabic, color: theme.arabicText },
+                  ]}
+                >
+                  بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِيۡمِ
+                </Text>
+                <View style={styles.previewDivider} />
+                <Text
+                  style={[
+                    styles.previewEnglish,
+                    { fontSize: sizes.english, lineHeight: sizes.englishLine, color: theme.textSecondary },
+                  ]}
+                >
+                  In the name of Allah, the Most Gracious, the Most Merciful
+                </Text>
+              </View>
+
+              <View style={[styles.fullDivider, { backgroundColor: theme.border }]} />
+
+              {/* FontSizeSlider */}
+              <View style={styles.sliderWrap}>
+                <FontSizeSlider value={fontScale} onValueChange={setFontScale} />
+              </View>
+
+              <View style={[styles.fullDivider, { backgroundColor: theme.border }]} />
+
+              {/* Quick Preset Buttons */}
+              <View style={styles.presetsRow}>
+                {[
+                  { label: 'Small', value: 0.8 },
+                  { label: 'Default', value: 1.0 },
+                  { label: 'Large', value: 1.3 },
+                ].map((preset) => {
+                  const active = isPresetActive(preset.value);
+                  return (
+                    <TouchableOpacity
+                      key={preset.label}
+                      style={[
+                        styles.presetPill,
+                        active
+                          ? { backgroundColor: theme.primaryMuted + '14', borderColor: theme.primaryMuted + '25' }
+                          : { backgroundColor: theme.surfaceMuted, borderColor: 'transparent' },
+                      ]}
+                      onPress={() => handlePresetSelect(preset.value)}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.presetText,
+                          active
+                            ? { fontWeight: '600', color: theme.primaryMuted }
+                            : { fontWeight: '500', color: theme.textTertiary },
+                        ]}
+                      >
+                        {preset.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          </Animated.View>
+
+          {/* ═══════════════ NOTIFICATIONS ═══════════════ */}
+          <Animated.View style={sectionAnims[2]}>
             <Text style={[styles.sectionLabel, { color: theme.textTertiary }]}>NOTIFICATIONS</Text>
             <View style={[styles.group, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
               {/* Push */}
@@ -208,7 +323,7 @@ export default function SettingsScreen() {
           </Animated.View>
 
           {/* ═══════════════ DATA ═══════════════ */}
-          <Animated.View style={sectionAnims[2]}>
+          <Animated.View style={sectionAnims[3]}>
             <Text style={[styles.sectionLabel, { color: theme.textTertiary }]}>DATA</Text>
             <View style={[styles.group, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
               <TouchableOpacity
@@ -233,7 +348,7 @@ export default function SettingsScreen() {
           </Animated.View>
 
           {/* ═══════════════ ABOUT ═══════════════ */}
-          <Animated.View style={sectionAnims[3]}>
+          <Animated.View style={sectionAnims[4]}>
             <Text style={[styles.sectionLabel, { color: theme.textTertiary }]}>ABOUT</Text>
             <View style={[styles.group, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
               {/* Rate */}
@@ -277,7 +392,7 @@ export default function SettingsScreen() {
           </Animated.View>
 
           {/* ═══════════════ CREDITS ═══════════════ */}
-          <Animated.View style={sectionAnims[4]}>
+          <Animated.View style={sectionAnims[5]}>
             <View style={styles.dividerRow}>
               <View style={[styles.dividerDot, { backgroundColor: theme.border }]} />
               <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
@@ -301,7 +416,7 @@ export default function SettingsScreen() {
           </Animated.View>
 
           {/* ═══════════════ CLOSING VERSE ═══════════════ */}
-          <Animated.View style={sectionAnims[5]}>
+          <Animated.View style={sectionAnims[6]}>
             <View style={styles.closingCard}>
               <LinearGradient
                 colors={theme.headerGradient}
@@ -470,6 +585,58 @@ const styles = StyleSheet.create({
   versionPillText: {
     fontSize: 11,
     fontWeight: '600',
+  },
+
+  /* ─── Font Size / Reading Section ─── */
+  resetPill: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  resetPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  previewArea: {
+    borderRadius: 14,
+    padding: 16,
+    marginHorizontal: 16,
+    marginVertical: 10,
+  },
+  previewArabic: {
+    textAlign: 'right',
+  },
+  previewDivider: {
+    width: 24,
+    height: 1.5,
+    backgroundColor: 'rgba(212,163,115,0.3)',
+    marginVertical: 8,
+  },
+  previewEnglish: {
+    fontStyle: 'italic',
+  },
+  fullDivider: {
+    height: 1,
+  },
+  sliderWrap: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  presetsRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  presetPill: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  presetText: {
+    fontSize: 13,
   },
 
   /* ─── Divider Row ─── */
