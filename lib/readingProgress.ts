@@ -1,84 +1,197 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const LAST_SEEN_KEY = '@sukoon_last_seen';
-const STREAK_KEY = '@sukoon_reading_streak';
-const HISTORY_KEY = '@sukoon_reading_history';
+// ── Storage Keys ──
+const KEYS = {
+  LAST_SEEN:    'sukoon_last_seen',
+  LAST_AUDIO:   'sukoon_last_audio',
+  STREAK:       'sukoon_streak',
+  DAILY_PREFIX: 'sukoon_daily_read_',   // + "YYYY-MM-DD"
+  TOTAL_READ:   'sukoon_total_ayahs_read',
+  DAYS_ACTIVE:  'sukoon_days_active',
+};
 
-interface LastSeen {
-  surah: number;
-  ayah: number;
-  timestamp: string;
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-interface ReadingDay {
-  date: string;
-  ayahsRead: number;
-  minutesRead: number;
+function yesterdayStr(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export interface LastPosition {
+  surah: number;
+  surahName: string;
+  ayah: number;
+  timestamp: number;
 }
 
 export const ReadingProgress = {
-  async getLastSeen(): Promise<LastSeen | null> {
+
+  // ════════════════════════════════════════
+  // LAST SEEN — user's reading position
+  // ════════════════════════════════════════
+  async setLastSeen(surah: number, surahName: string, ayah: number): Promise<void> {
     try {
-      const data = await AsyncStorage.getItem(LAST_SEEN_KEY);
-      return data ? JSON.parse(data) : null;
+      const data: LastPosition = { surah, surahName, ayah, timestamp: Date.now() };
+      await AsyncStorage.setItem(KEYS.LAST_SEEN, JSON.stringify(data));
+    } catch {}
+  },
+
+  async getLastSeen(): Promise<LastPosition | null> {
+    try {
+      const raw = await AsyncStorage.getItem(KEYS.LAST_SEEN);
+      return raw ? JSON.parse(raw) : null;
     } catch { return null; }
   },
 
-  async setLastSeen(surah: number, ayah: number): Promise<void> {
-    const entry: LastSeen = { surah, ayah, timestamp: new Date().toISOString() };
-    await AsyncStorage.setItem(LAST_SEEN_KEY, JSON.stringify(entry));
+  // ════════════════════════════════════════
+  // LAST AUDIO — user's playback position
+  // ════════════════════════════════════════
+  async setLastAudio(surah: number, surahName: string, ayah: number): Promise<void> {
+    try {
+      const data: LastPosition = { surah, surahName, ayah, timestamp: Date.now() };
+      await AsyncStorage.setItem(KEYS.LAST_AUDIO, JSON.stringify(data));
+    } catch {}
+  },
+
+  async getLastAudio(): Promise<LastPosition | null> {
+    try {
+      const raw = await AsyncStorage.getItem(KEYS.LAST_AUDIO);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  },
+
+  // ════════════════════════════════════════
+  // MARK AYAH AS READ — call when ayah scrolls into view
+  // Deduplicates: same ayah read twice today = counted once
+  // ════════════════════════════════════════
+  async markAyahRead(surah: number, ayah: number): Promise<void> {
+    try {
+      const today = todayStr();
+      const dayKey = KEYS.DAILY_PREFIX + today;
+      const tag = `${surah}:${ayah}`;
+
+      // 1. Load today's read set
+      const raw = await AsyncStorage.getItem(dayKey);
+      const readSet: string[] = raw ? JSON.parse(raw) : [];
+
+      // 2. Deduplicate
+      if (readSet.includes(tag)) return; // already counted today
+
+      // 3. Add to today's set
+      readSet.push(tag);
+      await AsyncStorage.setItem(dayKey, JSON.stringify(readSet));
+
+      // 4. Increment lifetime total
+      const totalRaw = await AsyncStorage.getItem(KEYS.TOTAL_READ);
+      const total = totalRaw ? parseInt(totalRaw, 10) : 0;
+      await AsyncStorage.setItem(KEYS.TOTAL_READ, String(total + 1));
+
+      // 5. Add today to days-active set
+      const daysRaw = await AsyncStorage.getItem(KEYS.DAYS_ACTIVE);
+      const daysSet: string[] = daysRaw ? JSON.parse(daysRaw) : [];
+      if (!daysSet.includes(today)) {
+        daysSet.push(today);
+        await AsyncStorage.setItem(KEYS.DAYS_ACTIVE, JSON.stringify(daysSet));
+      }
+
+      // 6. Update streak
+      await this.incrementStreak();
+    } catch {}
+  },
+
+  // ════════════════════════════════════════
+  // COUNTS
+  // ════════════════════════════════════════
+  async getTodayReadCount(): Promise<number> {
+    try {
+      const raw = await AsyncStorage.getItem(KEYS.DAILY_PREFIX + todayStr());
+      return raw ? JSON.parse(raw).length : 0;
+    } catch { return 0; }
+  },
+
+  async getTotalReadCount(): Promise<number> {
+    try {
+      const raw = await AsyncStorage.getItem(KEYS.TOTAL_READ);
+      return raw ? parseInt(raw, 10) : 0;
+    } catch { return 0; }
+  },
+
+  async getDaysActive(): Promise<number> {
+    try {
+      const raw = await AsyncStorage.getItem(KEYS.DAYS_ACTIVE);
+      return raw ? JSON.parse(raw).length : 0;
+    } catch { return 0; }
+  },
+
+  // ════════════════════════════════════════
+  // STREAK — consecutive days with at least 1 ayah read
+  // ════════════════════════════════════════
+  async incrementStreak(): Promise<void> {
+    try {
+      const today = todayStr();
+      const raw = await AsyncStorage.getItem(KEYS.STREAK);
+      const streak = raw ? JSON.parse(raw) : { count: 0, lastDate: '' };
+
+      if (streak.lastDate === today) return; // already counted today
+
+      if (streak.lastDate === yesterdayStr()) {
+        // Consecutive day — increment
+        streak.count += 1;
+        streak.lastDate = today;
+      } else {
+        // Streak broken or first time — start fresh
+        streak.count = 1;
+        streak.lastDate = today;
+      }
+
+      await AsyncStorage.setItem(KEYS.STREAK, JSON.stringify(streak));
+    } catch {}
   },
 
   async getStreak(): Promise<number> {
     try {
-      const data = await AsyncStorage.getItem(STREAK_KEY);
-      if (!data) return 0;
-      const { streak, lastDate } = JSON.parse(data);
-      const today = new Date().toISOString().split('T')[0];
-      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-      if (lastDate === today || lastDate === yesterday) return streak;
-      return 0;
+      const raw = await AsyncStorage.getItem(KEYS.STREAK);
+      if (!raw) return 0;
+      const streak = JSON.parse(raw);
+      const today = todayStr();
+      const yesterday = yesterdayStr();
+      // Streak is only valid if last activity was today or yesterday
+      if (streak.lastDate === today || streak.lastDate === yesterday) {
+        return streak.count;
+      }
+      return 0; // streak broken
     } catch { return 0; }
   },
 
-  async incrementStreak(): Promise<number> {
+  // ════════════════════════════════════════
+  // DAILY BREAKDOWN — for charts/history
+  // ════════════════════════════════════════
+  async getDailyReadCounts(numDays: number = 7): Promise<{ date: string; count: number }[]> {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const data = await AsyncStorage.getItem(STREAK_KEY);
-      let streak = 1;
-      if (data) {
-        const prev = JSON.parse(data);
-        if (prev.lastDate === today) return prev.streak;
-        const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-        if (prev.lastDate === yesterday) streak = prev.streak + 1;
+      const results: { date: string; count: number }[] = [];
+      const d = new Date();
+      for (let i = 0; i < numDays; i++) {
+        const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const raw = await AsyncStorage.getItem(KEYS.DAILY_PREFIX + ds);
+        results.unshift({ date: ds, count: raw ? JSON.parse(raw).length : 0 });
+        d.setDate(d.getDate() - 1);
       }
-      await AsyncStorage.setItem(STREAK_KEY, JSON.stringify({ streak, lastDate: today }));
-      return streak;
-    } catch { return 1; }
-  },
-
-  async addReadingHistory(ayahsRead: number, minutesRead: number): Promise<void> {
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const data = await AsyncStorage.getItem(HISTORY_KEY);
-      const history: ReadingDay[] = data ? JSON.parse(data) : [];
-      const existing = history.find(h => h.date === today);
-      if (existing) {
-        existing.ayahsRead += ayahsRead;
-        existing.minutesRead += minutesRead;
-      } else {
-        history.push({ date: today, ayahsRead, minutesRead });
-      }
-      // Keep last 30 days
-      const trimmed = history.slice(-30);
-      await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
-    } catch {}
-  },
-
-  async getReadingHistory(): Promise<ReadingDay[]> {
-    try {
-      const data = await AsyncStorage.getItem(HISTORY_KEY);
-      return data ? JSON.parse(data) : [];
+      return results;
     } catch { return []; }
+  },
+
+  // ════════════════════════════════════════
+  // RESET — clear all tracking data
+  // ════════════════════════════════════════
+  async resetAll(): Promise<void> {
+    try {
+      const allKeys = await AsyncStorage.getAllKeys();
+      const sukoonKeys = allKeys.filter((k) => k.startsWith('sukoon_'));
+      if (sukoonKeys.length > 0) await AsyncStorage.multiRemove(sukoonKeys);
+    } catch {}
   },
 };

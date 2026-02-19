@@ -643,6 +643,7 @@ export default function SurahScreen() {
   const startAyahParam = params.startAyah ? Number(params.startAyah) : undefined;
 
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [meta, setMeta] = useState<any>(null);
   const [ayahs, setAyahs] = useState<Ayah[]>([]);
   const [showEnglish, setShowEnglish] = useState(false);
@@ -667,6 +668,12 @@ export default function SurahScreen() {
   const resumeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollFadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const spdScale = useRef(new Animated.Value(1)).current;
+
+  // ─── Tracking refs ───
+  const readTracker = useRef<Set<string>>(new Set());
+  const pendingReads = useRef<string[]>([]);
+  const flushTimer = useRef<ReturnType<typeof setTimeout>>();
+  const lastSeenTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const isPageMode = !showEnglish && !showUrdu && !showTafseer;
   const pages = useMemo(() => splitIntoPages(ayahs), [ayahs]);
@@ -742,22 +749,91 @@ export default function SurahScreen() {
           break;
         }
       }
+      
+      // ─── TRACK: visible ayahs in page mode ───
+      pages[Math.floor(currentPage - 1)]?.forEach((ay) => {
+        trackAyahRead(surahNumber, ay.numberInSurah);
+      });
     }
-  }, [isPageMode, pages.length, currentPage, autoScrollActive]);
+
+    // ─── TRACK: visible ayahs in card mode ───
+    if (!isPageMode) {
+      const viewportTop = y;
+      const viewportBottom = y + layoutHRef.current;
+      Object.entries(ayahLayouts.current).forEach(([idx, layout]) => {
+        const i = Number(idx);
+        if (layout.y >= viewportTop - 80 && layout.y <= viewportBottom) {
+          trackAyahRead(surahNumber, ayahs[i]?.numberInSurah);
+        }
+      });
+    }
+
+    // ─── TRACK: last seen (debounced - every 5 seconds) ───
+    if (lastSeenTimer.current) clearTimeout(lastSeenTimer.current);
+    lastSeenTimer.current = setTimeout(() => {
+      let closestIdx = 0;
+      let closestDist = Infinity;
+      Object.entries(ayahLayouts.current).forEach(([idx, layout]) => {
+        const dist = Math.abs(layout.y - y);
+        if (dist < closestDist) { closestDist = dist; closestIdx = Number(idx); }
+      });
+      if (ayahs[closestIdx] && meta?.englishName) {
+        ReadingProgress.setLastSeen(surahNumber, meta.englishName, ayahs[closestIdx].numberInSurah).catch(() => {});
+      }
+    }, 5000);
+  }, [isPageMode, pages, currentPage, surahNumber, ayahs, meta, trackAyahRead]);
 
   /* ─── Data ─── */
+  const trackAyahRead = useCallback((surahNum: number, ayahNum: number) => {
+    const key = `${surahNum}:${ayahNum}`;
+    if (readTracker.current.has(key)) return;
+    readTracker.current.add(key);
+    pendingReads.current.push(key);
+
+    if (!flushTimer.current) {
+      flushTimer.current = setTimeout(async () => {
+        const batch = [...pendingReads.current];
+        pendingReads.current = [];
+        flushTimer.current = undefined;
+        for (const k of batch) {
+          const [s, a] = k.split(':').map(Number);
+          await ReadingProgress.markAyahRead(s, a);
+        }
+      }, 3000);
+    }
+  }, []);
+
   const loadSurah = async () => {
     setLoading(true);
+    setError(null);
     try {
       const { meta: m, ayahs: a } = await QuranService.getSurah(surahNumber);
-      setMeta(m); setAyahs(a);
+      setMeta(m);
+      setAyahs(a);
+      setError(null);
       Animated.timing(contentFade, { toValue: 1, duration: 500, delay: 200, useNativeDriver: true }).start();
+      
       if (startAyahParam) {
         const idx = a.findIndex((x) => x.numberInSurah === startAyahParam);
-        if (idx >= 0) setTimeout(() => scrollToAyah(idx), 600);
+        if (idx >= 0) {
+          setTimeout(() => scrollToAyah(idx), 600);
+          
+          // Auto-play if requested
+          const autoPlayParam = params.autoPlay === 'true';
+          if (autoPlayParam && a[idx]?.audio) {
+            setTimeout(() => playIndex(idx), 1200);
+          }
+        }
       }
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : 'Failed to load Surah. Please check your internet connection.';
+      console.error('[SurahScreen] Load failed:', errorMsg);
+      setError(errorMsg);
+      setMeta(null);
+      setAyahs([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const scrollToAyah = useCallback((index: number) => {
@@ -776,13 +852,21 @@ export default function SurahScreen() {
   const playIndex = useCallback(async (index: number) => {
     const ay = ayahs[index]; if (!ay?.audio) return;
     try {
-      await audioPlayer.play(ay.audio); setCurrentIndex(index);
+      await audioPlayer.play(ay.audio);
+      setCurrentIndex(index);
+      
+      // ─── TRACK: mark as read ───
+      trackAyahRead(surahNumber, ay.numberInSurah);
+      
+      // ─── TRACK: last audio position ───
+      if (meta?.englishName) {
+        ReadingProgress.setLastAudio(surahNumber, meta.englishName, ay.numberInSurah).catch(() => {});
+      }
+      
       setTimeout(() => scrollToAyah(index), 200);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-      ReadingProgress.setLastSeen(surahNumber, ay.numberInSurah).catch(() => {});
-      ReadingProgress.incrementStreak().catch(() => {});
     } catch (e) { console.error(e); }
-  }, [ayahs, surahNumber, scrollToAyah]);
+  }, [ayahs, surahNumber, meta, scrollToAyah]);
 
   const togglePlayPause = useCallback(async () => { if (currentIndex === null) await playIndex(0); else await audioPlayer.togglePlayPause(); }, [currentIndex, playIndex]);
   const playPrev = useCallback(() => { if (currentIndex != null && currentIndex > 0) playIndex(currentIndex - 1); }, [currentIndex, playIndex]);
@@ -830,6 +914,43 @@ export default function SurahScreen() {
         </View>
         <View style={s.loadInner}>
           <ActivityIndicator size="small" color={theme.primaryMuted} />
+          <Text style={[s.loadText, { color: theme.textSecondary, marginTop: 12 }]}>Loading Surah...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (error || !meta || ayahs.length === 0) {
+    return (
+      <View style={[s.container, { backgroundColor: theme.surface }]}>
+        <StatusBar barStyle="light-content" backgroundColor={theme.primary} />
+        <View style={[s.loadWrap, { paddingBottom: 0 }]}>
+          <TouchableOpacity 
+            onPress={() => router.back()} 
+            style={[s.headerBtn, { marginTop: insets.top + 6, marginHorizontal: 20 }]} 
+            activeOpacity={0.7}
+          >
+            <Ionicons name="chevron-back" size={24} color={theme.text} />
+          </TouchableOpacity>
+          <View style={s.errorContent}>
+            <LinearGradient colors={[theme.primaryLight + '40', theme.primary + '20']} style={s.errorIcon}>
+              <Ionicons name="alert-circle-outline" size={48} color={theme.primary} />
+            </LinearGradient>
+            <Text style={[s.errorTitle, { color: theme.text }]}>Unable to Load Surah</Text>
+            <Text style={[s.errorMsg, { color: theme.textSecondary }]}>
+              {error || 'The Quran could not be loaded. Please check your internet connection and try again.'}
+            </Text>
+            <TouchableOpacity 
+              onPress={() => { setError(null); loadSurah(); }} 
+              activeOpacity={0.8}
+              style={s.retryBtn}
+            >
+              <LinearGradient colors={[theme.primaryLight, theme.primary]} style={s.retryBtnInner}>
+                <Ionicons name="refresh-outline" size={18} color="#fff" />
+                <Text style={s.retryBtnText}>Try Again</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     );
@@ -960,6 +1081,15 @@ const s = StyleSheet.create({
   loadInner: { position: 'absolute', bottom: 100, alignSelf: 'center', alignItems: 'center' },
   loadIcon: { width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   loadText: { fontSize: 16, fontWeight: '500' },
+
+  /* Error state */
+  errorContent: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 20 },
+  errorIcon: { width: 100, height: 100, borderRadius: 30, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  errorTitle: { fontSize: 22, fontWeight: '700', textAlign: 'center' },
+  errorMsg: { fontSize: 15, lineHeight: 22, textAlign: 'center' },
+  retryBtn: { marginTop: 12, borderRadius: 16, overflow: 'hidden', width: '100%' },
+  retryBtnInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 14, paddingHorizontal: 24 },
+  retryBtnText: { fontSize: 16, fontWeight: '700', color: '#fff' },
   
   // Skeleton loading styles
   skeletonHeader: { height: 160, width: '100%' },

@@ -9,7 +9,7 @@ export interface SavedVerse {
   english: string;
   urdu?: string;
   emotions?: string[];
-  savedAt: string;
+  savedAt: number;  // Changed to number (Date.now())
 }
 
 interface SavedVersesContextType {
@@ -18,6 +18,8 @@ interface SavedVersesContextType {
   removeVerse: (surah: number, ayah: number) => void;
   isVerseSaved: (surah: number, ayah: number) => boolean;
   clearAllVerses: () => void;
+  getSavedCount: () => number;
+  getTodaySavedCount: () => number;
 }
 
 const SavedVersesContext = createContext<SavedVersesContextType>({
@@ -26,9 +28,11 @@ const SavedVersesContext = createContext<SavedVersesContextType>({
   removeVerse: () => {},
   isVerseSaved: () => false,
   clearAllVerses: () => {},
+  getSavedCount: () => 0,
+  getTodaySavedCount: () => 0,
 });
 
-const STORAGE_KEY = '@sukoon_saved_verses';
+const STORAGE_KEY = 'sukoon_saved_verses';
 
 export function SavedVersesProvider({ children }: { children: React.ReactNode }) {
   const [savedVerses, setSavedVerses] = useState<SavedVerse[]>([]);
@@ -46,7 +50,7 @@ export function SavedVersesProvider({ children }: { children: React.ReactNode })
 
   const saveVerse = (verse: Omit<SavedVerse, 'savedAt'>) => {
     if (isVerseSaved(verse.surah, verse.ayah)) return;
-    persist([{ ...verse, savedAt: new Date().toISOString() }, ...savedVerses]);
+    persist([{ ...verse, savedAt: Date.now() }, ...savedVerses]);
   };
 
   const removeVerse = (surah: number, ayah: number) => {
@@ -58,8 +62,25 @@ export function SavedVersesProvider({ children }: { children: React.ReactNode })
 
   const clearAllVerses = () => persist([]);
 
+  const getSavedCount = () => savedVerses.length;
+
+  const getTodaySavedCount = () => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayMs = todayStart.getTime();
+    return savedVerses.filter(v => v.savedAt >= todayMs).length;
+  };
+
   return (
-    <SavedVersesContext.Provider value={{ savedVerses, saveVerse, removeVerse, isVerseSaved, clearAllVerses }}>
+    <SavedVersesContext.Provider value={{
+      savedVerses,
+      saveVerse,
+      removeVerse,
+      isVerseSaved,
+      clearAllVerses,
+      getSavedCount,
+      getTodaySavedCount,
+    }}>
       {children}
     </SavedVersesContext.Provider>
   );

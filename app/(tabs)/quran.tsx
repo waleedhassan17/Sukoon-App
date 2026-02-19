@@ -20,6 +20,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  RefreshControl,
   Animated,
   Dimensions,
   Platform,
@@ -39,6 +40,20 @@ const { width } = Dimensions.get('window');
 const ITEM_HEIGHT = 82;
 const SEPARATOR_HEIGHT = 1;
 
+function formatTimestamp(ts?: number | string): string {
+  if (!ts) return '';
+  const parsed = typeof ts === 'string' ? Date.parse(ts) : ts;
+  if (!parsed || Number.isNaN(parsed)) return '';
+  const d = new Date(parsed);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const isYesterday = new Date(now.getTime() - 86400000).toDateString() === d.toDateString();
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (isToday) return time;
+  if (isYesterday) return 'Yesterday';
+  return `${d.getDate()} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]}`;
+}
+
 export default function QuranListScreen() {
   const insets = useSafeAreaInsets();
   const { theme, mode, toggleTheme } = useTheme();
@@ -47,8 +62,10 @@ export default function QuranListScreen() {
 
   const [surahs, setSurahs] = useState<SurahMeta[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [lastSeen, setLastSeen] = useState<any>(null);
+  const [lastAudio, setLastAudio] = useState<any>(null);
   const [searchFocused, setSearchFocused] = useState(false);
 
   const headerFade = useRef(new Animated.Value(0)).current;
@@ -63,6 +80,7 @@ export default function QuranListScreen() {
     loadData();
     const unsub = navigation.addListener('focus', () => {
       ReadingProgress.getLastSeen().then(setLastSeen).catch(() => {});
+      ReadingProgress.getLastAudio().then(setLastAudio).catch(() => {});
     });
     return unsub;
   }, []);
@@ -73,14 +91,22 @@ export default function QuranListScreen() {
         QuranService.getAllSurahs(),
         ReadingProgress.getLastSeen(),
       ]);
+      const la = await ReadingProgress.getLastAudio();
       setSurahs(data);
       setLastSeen(ls);
+      setLastAudio(la);
     } catch (e) {
       Alert.alert('Error', 'Failed to load Surahs. Please try again.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadData();
+  }, []);
 
   const filtered = useMemo(() => {
     if (!search) return surahs;
@@ -137,9 +163,23 @@ export default function QuranListScreen() {
     }
   }, [lastSeen, surahs, router]);
 
+  const handleResumeAudio = useCallback(() => {
+    if (!lastAudio) return;
+    const surah = surahs.find((s) => s.number === lastAudio.surah);
+    if (surah) {
+      router.push(
+        `/quran/${surah.number}?surahName=${encodeURIComponent(surah.englishName)}&ayahCount=${surah.numberOfAyahs}&startAyah=${lastAudio.ayah}&autoPlay=true`
+      );
+    }
+  }, [lastAudio, surahs, router]);
+
   const lastSeenSurah = useMemo(() => 
     lastSeen ? surahs.find((s) => s.number === lastSeen.surah) : null
   , [lastSeen, surahs]);
+
+  const lastAudioSurah = useMemo(() => 
+    lastAudio ? surahs.find((s) => s.number === lastAudio.surah) : null
+  , [lastAudio, surahs]);
 
   /* ─── Surah Row ─── */
   const renderSurahItem = useCallback(
@@ -209,20 +249,8 @@ export default function QuranListScreen() {
     [lastSeen, handleSurahPress, handleResume, theme]
   );
 
-  /* ─── Loading ─── */
-  if (loading) {
-    return (
-      <View style={[styles.container, { backgroundColor: theme.surface }]}>
-        <View style={styles.loadingWrap}>
-          <ActivityIndicator size="large" color={theme.primaryMuted} />
-          <Text style={[styles.loadingText, { color: theme.textSecondary }]}>Loading the Holy Quran…</Text>
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={[styles.container, { backgroundColor: theme.surface }]}>
+  const listHeader = useMemo(() => (
+    <>
       {/* ═══════════════ HEADER ═══════════════ */}
       <LinearGradient
         colors={theme.headerGradient}
@@ -271,32 +299,53 @@ export default function QuranListScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Resume card */}
-          {lastSeen && lastSeenSurah && (
-            <TouchableOpacity
-              onPress={handleResume}
-              activeOpacity={0.85}
-              style={styles.resumeCard}
-            >
-              <View style={styles.resumeLeft}>
-                <View style={styles.resumeIconWrap}>
-                  <Ionicons name="bookmark" size={16} color="#fff" />
-                </View>
-                <View style={styles.resumeTextWrap}>
-                  <Text style={styles.resumeTitle}>Continue Reading</Text>
-                  <Text style={styles.resumeSub}>
-                    {lastSeenSurah.englishName} · Ayah {lastSeen.ayah}
-                  </Text>
-                </View>
+          {/* Resume section */}
+          {(lastSeen || lastAudio) && (
+            <View style={styles.resumeSection}>
+              <View style={styles.resumeRowHeader}>
+                <Text style={styles.resumeHeaderLabel}>Last Seen</Text>
+                <Text style={styles.resumeHeaderLabel}>Last Audio</Text>
               </View>
-              <View style={styles.resumeArrow}>
-                <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.6)" />
+
+              <View style={styles.resumeRow}>
+                <TouchableOpacity
+                  onPress={handleResume}
+                  activeOpacity={0.85}
+                  disabled={!lastSeenSurah}
+                  style={[styles.resumeTile, !lastSeenSurah && styles.resumeTileDisabled]}
+                >
+                  <View style={styles.resumeTileTop}>
+                    <View style={styles.resumeIconWrap}>
+                      <Ionicons name="eye-outline" size={16} color="#fff" />
+                    </View>
+                    <Text style={styles.resumeTimeText}>{formatTimestamp(lastSeen?.timestamp) || 'Not set'}</Text>
+                  </View>
+                  <Text style={styles.resumeTileTitle}>{lastSeenSurah?.englishName || 'Not set'}</Text>
+                  <Text style={styles.resumeTileSub}>{lastSeenSurah ? `Ayah ${lastSeen?.ayah}` : 'Tap to begin'}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleResumeAudio}
+                  activeOpacity={0.85}
+                  disabled={!lastAudioSurah}
+                  style={[styles.resumeTile, !lastAudioSurah && styles.resumeTileDisabled]}
+                >
+                  <View style={styles.resumeTileTop}>
+                    <View style={[styles.resumeIconWrap, styles.resumeIconAudio]}>
+                      <Ionicons name="headset-outline" size={16} color="#fff" />
+                    </View>
+                    <Text style={styles.resumeTimeText}>{formatTimestamp(lastAudio?.timestamp) || 'Not set'}</Text>
+                  </View>
+                  <Text style={styles.resumeTileTitle}>{lastAudioSurah?.englishName || 'Not set'}</Text>
+                  <Text style={styles.resumeTileSub}>{lastAudioSurah ? `Ayah ${lastAudio?.ayah}` : 'Tap to listen'}</Text>
+                </TouchableOpacity>
               </View>
-            </TouchableOpacity>
+            </View>
           )}
 
           {/* Search bar */}
-          <View style={[styles.searchBar, { backgroundColor: theme.surfaceElevated }, searchFocused && { shadowColor: theme.gold }]}>
+          <View style={[styles.searchBar, { backgroundColor: theme.surfaceElevated }, searchFocused && { shadowColor: theme.gold }]}
+          >
             <Ionicons name="search-outline" size={16} color={theme.textTertiary} />
             <TextInput
               style={[styles.searchInput, { color: theme.text }]}
@@ -320,10 +369,42 @@ export default function QuranListScreen() {
 
       {/* ═══════════════ SURAH COUNTER ═══════════════ */}
       <View style={styles.listHeader}>
+        <Text style={[styles.listHeaderText, { color: theme.textTertiary }]}
+          {filtered.length} {filtered.length === 1 ? 'Surah' : 'Surahs'}
+        </Text>
+        {search.length > 0 && (
+          <TouchableOpacity onPress={() => setSearch('')} activeOpacity={0.6}>
+            <Text style={[styles.clearSearch, { color: theme.primaryMuted }]}>Clear</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </>
+  ), [
+    theme,
+    insets.top,
+    mode,
+    toggleTheme,
+    headerFade,
+    headerSlide,
+    lastSeen,
+    lastAudio,
+    lastSeenSurah,
+    lastAudioSurah,
+    handleResume,
+    handleResumeAudio,
+    search,
+    searchFocused,
+    filtered.length,
+  ]);
+
+  /* ─── Loading ─── */
+  if (loading) {
+      <View style={styles.listHeader}>
         <Text style={[styles.listHeaderText, { color: theme.textTertiary }]}>
           {filtered.length} {filtered.length === 1 ? 'Surah' : 'Surahs'}
         </Text>
         {search.length > 0 && (
+        ListHeaderComponent={listHeader}
           <TouchableOpacity onPress={() => setSearch('')} activeOpacity={0.6}>
             <Text style={[styles.clearSearch, { color: theme.primaryMuted }]}>Clear</Text>
           </TouchableOpacity>
@@ -337,6 +418,15 @@ export default function QuranListScreen() {
         renderItem={renderSurahItem}
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.primaryMuted}
+            colors={[theme.primaryMuted]}
+            progressBackgroundColor={theme.surfaceElevated}
+          />
+        }
         // Performance optimizations
         initialNumToRender={12}
         maxToRenderPerBatch={8}
@@ -427,53 +517,67 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  /* ─── Resume Card ─── */
-  resumeCard: {
+  /* ─── Resume Section ─── */
+  resumeSection: {
+    marginBottom: 14,
+  },
+  resumeRowHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 8,
+    paddingHorizontal: 2,
+  },
+  resumeHeaderLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+  },
+  resumeRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  resumeTile: {
+    flex: 1,
     backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 14,
-    padding: 14,
-    marginBottom: 14,
+    padding: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
-  resumeLeft: {
+  resumeTileDisabled: {
+    opacity: 0.6,
+  },
+  resumeTileTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
   resumeIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
-  resumeTextWrap: {
-    flex: 1,
+  resumeIconAudio: {
+    backgroundColor: 'rgba(255,255,255,0.22)',
   },
-  resumeTitle: {
-    fontSize: 14,
+  resumeTimeText: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.6)',
     fontWeight: '600',
+  },
+  resumeTileTitle: {
+    fontSize: 13,
+    fontWeight: '700',
     color: '#fff',
     marginBottom: 2,
   },
-  resumeSub: {
-    fontSize: 12,
+  resumeTileSub: {
+    fontSize: 11,
     color: 'rgba(255,255,255,0.65)',
-  },
-  resumeArrow: {
-    width: 26,
-    height: 26,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 8,
   },
 
   /* ─── Search ─── */

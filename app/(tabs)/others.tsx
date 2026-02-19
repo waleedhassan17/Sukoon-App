@@ -25,6 +25,14 @@ const { width } = Dimensions.get('window');
 
 const TOOLS = [
   {
+    key: 'salah-tracker',
+    label: 'Salah Tracker',
+    route: '/tools/salah-tracker',
+    icon: 'checkmark-circle-outline' as const,
+    gradient: ['#1B4332', '#0B3D2C'],
+    desc: 'Track and log your daily prayers',
+  },
+  {
     key: 'tasbeeh',
     label: 'Tasbeeh Counter',
     route: '/tools/tasbeeh',
@@ -49,12 +57,12 @@ const TOOLS = [
     desc: 'Accurate local prayer schedule',
   },
   {
-    key: 'dashboard',
-    label: 'Insights & Stats',
-    route: '/tools/dashboard',
+    key: 'insights',
+    label: 'Spiritual Progress',
+    route: '/insights',
     icon: 'analytics-outline' as const,
     gradient: ['#74C69D', '#52B788'],
-    desc: 'Track your spiritual journey',
+    desc: 'View your reading stats & achievements',
   },
 ];
 

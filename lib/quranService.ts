@@ -1,19 +1,22 @@
 /**
- * QuranService - Optimized Quran API with intelligent caching
+ * QuranService - Production-Ready Quran API with Robust Error Handling
  * 
- * Performance optimizations:
- * - AsyncStorage persistence for offline-first experience
- * - In-memory cache for instant access
- * - Stale-while-revalidate pattern
- * - Prefetch support for app startup
- * - Non-blocking architecture
+ * Features:
+ * - Multiple API fallbacks (alquran.cloud → quran.com → local cache)
+ * - Automatic retry with exponential backoff
+ * - Request timeouts (15s)
  * - Request deduplication
+ * - AsyncStorage persistence for offline support
+ * - In-memory caching for instant access
+ * - Stale-while-revalidate pattern
+ * - Comprehensive error logging
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ALQURAN_BASE = 'https://api.alquran.cloud/v1';
 const QURANCOM_BASE = 'https://api.quran.com/api/v4';
+const BACKUP_QURAN_BASE = 'https://quran-api.com/api/v2';
 
 // Cache keys
 const CACHE_KEYS = {
@@ -71,6 +74,79 @@ const pendingRequests: Map<string, Promise<any>> = new Map();
 // Prefetch state
 let isPrefetched = false;
 let prefetchPromise: Promise<void> | null = null;
+
+// Retry configuration
+const RETRY_CONFIG = {
+  maxAttempts: 3,
+  initialDelay: 1000, // 1 second
+  maxDelay: 10000, // 10 seconds
+  backoffMultiplier: 2,
+};
+
+const REQUEST_TIMEOUT = 15000; // 15 seconds
+
+/**
+ * Retry utility with exponential backoff
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxAttempts = RETRY_CONFIG.maxAttempts,
+  initialDelay = RETRY_CONFIG.initialDelay,
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await Promise.race([
+        fn(),
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error('Request timeout')), REQUEST_TIMEOUT)
+        ),
+      ]);
+    } catch (error) {
+      lastError = error as Error;
+      
+      // Don't retry on 404s or similar client errors
+      const message = lastError?.message || '';
+      if (message.includes('404') || message.includes('not found')) {
+        throw lastError;
+      }
+      
+      if (attempt < maxAttempts - 1) {
+        const delay = Math.min(
+          initialDelay * Math.pow(RETRY_CONFIG.backoffMultiplier, attempt),
+          RETRY_CONFIG.maxDelay,
+        );
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  throw lastError || new Error('Failed after max retries');
+}
+
+/**
+ * Fetch with error handling and logging
+ */
+async function safeFetch(url: string, label: string = ''): Promise<any> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+    
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(`[QuranService] ${label} failed: ${msg}`);
+    throw error;
+  }
+}
 
 /**
  * Check if cache entry is stale
@@ -194,42 +270,70 @@ export const QuranService = {
   },
 
   /**
-   * Fetch surahs from API and cache
+   * Fetch surahs from API and cache with retry
    */
   async fetchAndCacheSurahs(): Promise<SurahMeta[]> {
     try {
-      const res = await fetch(`${ALQURAN_BASE}/surah`);
-      const json = await res.json();
+      // Try primary API with retry
+      const result = await retryWithBackoff(
+        async () => {
+          const json = await safeFetch(`${ALQURAN_BASE}/surah`, 'Fetch all surahs');
+          if (!json || json.code !== 200 || !json.data) {
+            throw new Error('Invalid response format');
+          }
+          return json.data.map((s: any) => ({
+            number: s.number,
+            name: s.name,
+            englishName: s.englishName,
+            englishNameTranslation: s.englishNameTranslation,
+            numberOfAyahs: s.numberOfAyahs,
+            revelationType: s.revelationType,
+          }));
+        },
+        RETRY_CONFIG.maxAttempts,
+      );
+
+      surahsCache = result;
+      setCache(CACHE_KEYS.SURAHS_META, result).catch(() => {});
+      return result;
+    } catch (primaryError) {
+      console.warn('[QuranService] Primary API failed for surahs list, trying fallback...');
       
-      if (json.code === 200 && json.data) {
-        surahsCache = json.data.map((s: any) => ({
-          number: s.number,
-          name: s.name,
-          englishName: s.englishName,
-          englishNameTranslation: s.englishNameTranslation,
-          numberOfAyahs: s.numberOfAyahs,
-          revelationType: s.revelationType,
+      try {
+        // Fallback to quran.com
+        const json = await safeFetch(
+          `${QURANCOM_BASE}/chapters?language=en`,
+          'Fetch surahs from quran.com',
+        );
+        const result = json.chapters.map((s: any) => ({
+          number: s.id,
+          name: s.name_arabic || 'Unknown',
+          englishName: s.name_simple || 'Unknown',
+          englishNameTranslation: s.translated_name?.name || 'Unknown',
+          numberOfAyahs: s.verses_count,
+          revelationType: s.revelation_place === 'makkah' ? 'Meccan' : 'Medinan',
         }));
-        // Persist to AsyncStorage (non-blocking)
-        setCache(CACHE_KEYS.SURAHS_META, surahsCache).catch(() => {});
-        return surahsCache!;
+
+        surahsCache = result;
+        setCache(CACHE_KEYS.SURAHS_META, result).catch(() => {});
+        return result;
+      } catch (fallbackError) {
+        console.error('[QuranService] Both APIs failed for surahs list');
+        
+        // Return cached version if available
+        const cached = await getCached<SurahMeta[]>(CACHE_KEYS.SURAHS_META);
+        if (cached?.data) {
+          console.warn('[QuranService] Using stale cache for surahs list');
+          surahsCache = cached.data;
+          return cached.data;
+        }
+        
+        throw new Error(
+          `Failed to load surahs list. ` +
+          `Primary: ${primaryError instanceof Error ? primaryError.message : 'Unknown'}. ` +
+          `Fallback: ${fallbackError instanceof Error ? fallbackError.message : 'Unknown'}`
+        );
       }
-      throw new Error('API error');
-    } catch (e) {
-      // Fallback to quran.com
-      const res = await fetch(`${QURANCOM_BASE}/chapters?language=en`);
-      const json = await res.json();
-      surahsCache = json.chapters.map((s: any) => ({
-        number: s.id,
-        name: s.name_arabic,
-        englishName: s.name_simple,
-        englishNameTranslation: s.translated_name.name,
-        numberOfAyahs: s.verses_count,
-        revelationType: s.revelation_place,
-      }));
-      // Persist to AsyncStorage (non-blocking)
-      setCache(CACHE_KEYS.SURAHS_META, surahsCache).catch(() => {});
-      return surahsCache!;
     }
   },
 
@@ -263,51 +367,14 @@ export const QuranService = {
   },
 
   /**
-   * Fetch surah from API and cache
+   * Fetch surah from API with retries and fallbacks
    */
   async fetchAndCacheSurah(surahNumber: number): Promise<{ meta: SurahMeta; ayahs: Ayah[] }> {
     try {
-      // Fetch Arabic + English + Urdu in parallel for maximum speed
-      const [arabicRes, englishRes, urduRes] = await Promise.all([
-        fetch(`${ALQURAN_BASE}/surah/${surahNumber}/ar.alafasy`),
-        fetch(`${ALQURAN_BASE}/surah/${surahNumber}/en.sahih`),
-        fetch(`${ALQURAN_BASE}/surah/${surahNumber}/ur.jalandhry`),
-      ]);
-
-      const [arabicJson, englishJson, urduJson] = await Promise.all([
-        arabicRes.json(),
-        englishRes.json(),
-        urduRes.json(),
-      ]);
-
-      if (arabicJson.code !== 200) throw new Error('Failed to load surah');
-
-      const arabicData = arabicJson.data;
-      const englishData = englishJson.data;
-      const urduData = urduJson.data;
-
-      const meta: SurahMeta = {
-        number: arabicData.number,
-        name: arabicData.name,
-        englishName: arabicData.englishName,
-        englishNameTranslation: arabicData.englishNameTranslation,
-        numberOfAyahs: arabicData.numberOfAyahs,
-        revelationType: arabicData.revelationType,
-      };
-
-      const ayahs: Ayah[] = arabicData.ayahs.map((a: any, i: number) => ({
-        number: a.number,
-        numberInSurah: a.numberInSurah,
-        text: a.text,
-        translation: englishData?.ayahs?.[i]?.text || '',
-        urduTranslation: urduData?.ayahs?.[i]?.text || '',
-        audio: a.audio || a.audioSecondary?.[0] || null,
-        juz: a.juz,
-        page: a.page,
-        hizbQuarter: a.hizbQuarter,
-      }));
-
-      const result = { meta, ayahs };
+      // Try primary API with retry
+      const result = await retryWithBackoff(async () => {
+        return await this.fetchSurahFromPrimaryAPI(surahNumber);
+      }, RETRY_CONFIG.maxAttempts);
       
       // Store in memory cache
       surahDataCache.set(surahNumber, result);
@@ -316,10 +383,137 @@ export const QuranService = {
       setCache(CACHE_KEYS.SURAH_DATA(surahNumber), result).catch(() => {});
       
       return result;
-    } catch (e) {
-      console.error('Error loading surah:', e);
-      throw e;
+    } catch (primaryError) {
+      console.warn(`[QuranService] Primary API failed for Surah ${surahNumber}, trying fallback...`);
+      
+      try {
+        // Try fallback API
+        const result = await retryWithBackoff(async () => {
+          return await this.fetchSurahFromFallbackAPI(surahNumber);
+        }, 2);
+        
+        // Store in memory cache
+        surahDataCache.set(surahNumber, result);
+        
+        // Persist to AsyncStorage (non-blocking)
+        setCache(CACHE_KEYS.SURAH_DATA(surahNumber), result).catch(() => {});
+        
+        return result;
+      } catch (fallbackError) {
+        console.error(`[QuranService] Fallback API also failed for Surah ${surahNumber}`);
+        
+        // Return cached version if available
+        const cached = await getCached<{ meta: SurahMeta; ayahs: Ayah[] }>(
+          CACHE_KEYS.SURAH_DATA(surahNumber)
+        );
+        if (cached?.data) {
+          console.warn('[QuranService] Using stale cache for Surah', surahNumber);
+          surahDataCache.set(surahNumber, cached.data);
+          return cached.data;
+        }
+        
+        throw new Error(
+          `Failed to load Surah ${surahNumber}. Primary: ${primaryError instanceof Error ? primaryError.message : 'Unknown'}. ` +
+          `Fallback: ${fallbackError instanceof Error ? fallbackError.message : 'Unknown'}`
+        );
+      }
     }
+  },
+
+  /**
+   * Fetch from primary API (alquran.cloud)
+   */
+  async fetchSurahFromPrimaryAPI(surahNumber: number): Promise<{ meta: SurahMeta; ayahs: Ayah[] }> {
+    const [arabicJson, englishJson, urduJson] = await Promise.all([
+      safeFetch(
+        `${ALQURAN_BASE}/surah/${surahNumber}/ar.alafasy`,
+        `Fetch Arabic Surah ${surahNumber}`,
+      ),
+      safeFetch(
+        `${ALQURAN_BASE}/surah/${surahNumber}/en.sahih`,
+        `Fetch English Surah ${surahNumber}`,
+      ),
+      safeFetch(
+        `${ALQURAN_BASE}/surah/${surahNumber}/ur.jalandhry`,
+        `Fetch Urdu Surah ${surahNumber}`,
+      ),
+    ]);
+
+    // Validate responses
+    if (!arabicJson || arabicJson.code !== 200 || !arabicJson.data) {
+      throw new Error('Invalid response from primary API');
+    }
+
+    const arabicData = arabicJson.data;
+    const englishData = englishJson?.data;
+    const urduData = urduJson?.data;
+
+    const meta: SurahMeta = {
+      number: arabicData.number,
+      name: arabicData.name,
+      englishName: arabicData.englishName,
+      englishNameTranslation: arabicData.englishNameTranslation,
+      numberOfAyahs: arabicData.numberOfAyahs,
+      revelationType: arabicData.revelationType,
+    };
+
+    const ayahs: Ayah[] = arabicData.ayahs.map((a: any, i: number) => ({
+      number: a.number,
+      numberInSurah: a.numberInSurah,
+      text: a.text,
+      translation: englishData?.ayahs?.[i]?.text || '',
+      urduTranslation: urduData?.ayahs?.[i]?.text || '',
+      audio: a.audio || a.audioSecondary?.[0] || null,
+      juz: a.juz,
+      page: a.page,
+      hizbQuarter: a.hizbQuarter,
+    }));
+
+    return { meta, ayahs };
+  },
+
+  /**
+   * Fetch from fallback API (quran.com)
+   */
+  async fetchSurahFromFallbackAPI(surahNumber: number): Promise<{ meta: SurahMeta; ayahs: Ayah[] }> {
+    const [chapterJson, versesJson] = await Promise.all([
+      safeFetch(`${QURANCOM_BASE}/chapters/${surahNumber}?language=en`, 'Fetch chapter from quran.com'),
+      safeFetch(
+        `${QURANCOM_BASE}/verses/by_chapter/${surahNumber}` +
+          `?language=en&translations=131,149` +
+          `&fields=text_uthmani,verse_number,juz_number,page_number,hizb_number` +
+          `&page=1&per_page=300`,
+        'Fetch verses from quran.com',
+      ),
+    ]);
+
+    if (!chapterJson || !chapterJson.chapter) {
+      throw new Error('Invalid response from quran.com');
+    }
+
+    const chapter = chapterJson.chapter;
+    const meta: SurahMeta = {
+      number: chapter.id,
+      name: chapter.name_arabic || 'Unknown',
+      englishName: chapter.name_simple || 'Unknown',
+      englishNameTranslation: chapter.translated_name?.name || 'Unknown',
+      numberOfAyahs: chapter.verses_count,
+      revelationType: chapter.revelation_place === 'makkah' ? 'Meccan' : 'Medinan',
+    };
+
+    const ayahs: Ayah[] = (versesJson?.verses || []).map((v: any) => ({
+      number: v.id,
+      numberInSurah: v.verse_number,
+      text: v.text_uthmani || v.text_imlaei || '',
+      translation: v.translations?.[0]?.text || '',
+      urduTranslation: v.translations?.[1]?.text || '',
+      audio: v.audio?.url || null,
+      juz: v.juz_number || 1,
+      page: v.page_number || 1,
+      hizbQuarter: v.hizb_number || 1,
+    }));
+
+    return { meta, ayahs };
   },
 
   /**
@@ -361,26 +555,31 @@ export const QuranService = {
   },
 
   /**
-   * Get a random Ayah with translation
+   * Get a random Ayah with translation - uses retry logic
    */
   async getRandomAyah(): Promise<{ arabic: string; english: string; urdu: string; surah: number; ayah: number; surahName: string }> {
     try {
-      const randomAyah = Math.floor(Math.random() * 6236) + 1;
-      const [arRes, enRes, urRes] = await Promise.all([
-        fetch(`${ALQURAN_BASE}/ayah/${randomAyah}`),
-        fetch(`${ALQURAN_BASE}/ayah/${randomAyah}/en.sahih`),
-        fetch(`${ALQURAN_BASE}/ayah/${randomAyah}/ur.jalandhry`),
-      ]);
-      const [ar, en, ur] = await Promise.all([arRes.json(), enRes.json(), urRes.json()]);
-      return {
-        arabic: ar.data.text,
-        english: en.data.text,
-        urdu: ur.data.text,
-        surah: ar.data.surah.number,
-        ayah: ar.data.numberInSurah,
-        surahName: ar.data.surah.englishName,
-      };
+      return await retryWithBackoff(async () => {
+        const randomAyah = Math.floor(Math.random() * 6236) + 1;
+        const [ar, en, ur] = await Promise.all([
+          safeFetch(`${ALQURAN_BASE}/ayah/${randomAyah}`, `Fetch random ayah ${randomAyah}`),
+          safeFetch(`${ALQURAN_BASE}/ayah/${randomAyah}/en.sahih`, `Fetch random ayah translation`),
+          safeFetch(`${ALQURAN_BASE}/ayah/${randomAyah}/ur.jalandhry`, `Fetch random ayah Urdu`),
+        ]);
+
+        if (!ar || !ar.data) throw new Error('Invalid response');
+
+        return {
+          arabic: ar.data.text,
+          english: en?.data?.text || '',
+          urdu: ur?.data?.text || '',
+          surah: ar.data.surah.number,
+          ayah: ar.data.numberInSurah,
+          surahName: ar.data.surah.englishName,
+        };
+      }, 2);
     } catch (e) {
+      console.warn('[QuranService] Failed to fetch random ayah, using fallback');
       // Fallback
       return {
         arabic: 'أَلَا بِذِكْرِ اللَّهِ تَطْمَئِنُّ الْقُلُوبُ',
@@ -394,40 +593,54 @@ export const QuranService = {
   },
 
   /**
-   * Search Quran for keywords
+   * Search Quran for keywords with retry
    */
   async searchQuran(query: string, language: string = 'en'): Promise<any[]> {
     try {
       const edition = language === 'ur' ? 'ur.jalandhry' : 'en.sahih';
-      const res = await fetch(`${ALQURAN_BASE}/search/${encodeURIComponent(query)}/all/${edition}`);
-      const json = await res.json();
-      if (json.code === 200) return json.data.matches || [];
-      return [];
+      return await retryWithBackoff(
+        async () => {
+          const json = await safeFetch(
+            `${ALQURAN_BASE}/search/${encodeURIComponent(query)}/all/${edition}`,
+            `Search query: ${query}`,
+          );
+          if (!json || json.code !== 200) return [];
+          return json.data?.matches || [];
+        },
+        2,
+      );
     } catch {
+      console.warn('[QuranService] Search failed');
       return [];
     }
   },
 
   /**
-   * Get Juz data
+   * Get Juz data with retry
    */
   async getJuz(juzNumber: number): Promise<Ayah[]> {
     try {
-      const res = await fetch(`${ALQURAN_BASE}/juz/${juzNumber}/ar.alafasy`);
-      const json = await res.json();
-      if (json.code === 200) {
-        return json.data.ayahs.map((a: any) => ({
-          number: a.number,
-          numberInSurah: a.numberInSurah,
-          text: a.text,
-          audio: a.audio,
-          juz: a.juz,
-          page: a.page,
-          hizbQuarter: a.hizbQuarter,
-        }));
-      }
-      return [];
-    } catch {
+      return await retryWithBackoff(
+        async () => {
+          const json = await safeFetch(
+            `${ALQURAN_BASE}/juz/${juzNumber}/ar.alafasy`,
+            `Fetch Juz ${juzNumber}`,
+          );
+          if (!json || json.code !== 200 || !json.data) return [];
+          return json.data.ayahs.map((a: any) => ({
+            number: a.number,
+            numberInSurah: a.numberInSurah,
+            text: a.text,
+            audio: a.audio,
+            juz: a.juz,
+            page: a.page,
+            hizbQuarter: a.hizbQuarter,
+          }));
+        },
+        2,
+      );
+    } catch (e) {
+      console.warn('[QuranService] Failed to fetch Juz', juzNumber);
       return [];
     }
   },
