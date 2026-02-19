@@ -672,8 +672,8 @@ export default function SurahScreen() {
   // ─── Tracking refs ───
   const readTracker = useRef<Set<string>>(new Set());
   const pendingReads = useRef<string[]>([]);
-  const flushTimer = useRef<ReturnType<typeof setTimeout>>();
-  const lastSeenTimer = useRef<ReturnType<typeof setTimeout>>();
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSeenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isPageMode = !showEnglish && !showUrdu && !showTafseer;
   const pages = useMemo(() => splitIntoPages(ayahs), [ayahs]);
@@ -729,6 +729,26 @@ export default function SurahScreen() {
   const spdUp = useCallback(() => { if (scrollSpeed < 5) { const n = scrollSpeed + 1; setScrollSpeed(n); Haptics.selectionAsync().catch(() => {}); AsyncStorage.setItem('sukoon_autoscroll_speed', String(n)).catch(() => {}); bumpSpd(); } }, [scrollSpeed]);
   const spdDown = useCallback(() => { if (scrollSpeed > 1) { const n = scrollSpeed - 1; setScrollSpeed(n); Haptics.selectionAsync().catch(() => {}); AsyncStorage.setItem('sukoon_autoscroll_speed', String(n)).catch(() => {}); bumpSpd(); } }, [scrollSpeed]);
 
+  /* ─── Data ─── */
+  const trackAyahRead = useCallback((surahNum: number, ayahNum: number) => {
+    const key = `${surahNum}:${ayahNum}`;
+    if (readTracker.current.has(key)) return;
+    readTracker.current.add(key);
+    pendingReads.current.push(key);
+
+    if (!flushTimer.current) {
+      flushTimer.current = setTimeout(async () => {
+        const batch = [...pendingReads.current];
+        pendingReads.current = [];
+        flushTimer.current = null;
+        for (const k of batch) {
+          const [s, a] = k.split(':').map(Number);
+          await ReadingProgress.markAyahRead(s, a);
+        }
+      }, 3000);
+    }
+  }, []);
+
   /* ─── Scroll handler: track position + detect current page ─── */
   const handleScroll = useCallback((e: any) => {
     const y = e.nativeEvent.contentOffset.y;
@@ -749,10 +769,10 @@ export default function SurahScreen() {
           break;
         }
       }
-      
+
       // ─── TRACK: visible ayahs in page mode ───
       pages[Math.floor(currentPage - 1)]?.forEach((ay) => {
-        trackAyahRead(surahNumber, ay.numberInSurah);
+        if (ay?.numberInSurah) trackAyahRead(surahNumber, ay.numberInSurah);
       });
     }
 
@@ -762,8 +782,9 @@ export default function SurahScreen() {
       const viewportBottom = y + layoutHRef.current;
       Object.entries(ayahLayouts.current).forEach(([idx, layout]) => {
         const i = Number(idx);
-        if (layout.y >= viewportTop - 80 && layout.y <= viewportBottom) {
-          trackAyahRead(surahNumber, ayahs[i]?.numberInSurah);
+        const ayahNum = ayahs[i]?.numberInSurah;
+        if (layout.y >= viewportTop - 80 && layout.y <= viewportBottom && ayahNum) {
+          trackAyahRead(surahNumber, ayahNum);
         }
       });
     }
@@ -781,27 +802,7 @@ export default function SurahScreen() {
         ReadingProgress.setLastSeen(surahNumber, meta.englishName, ayahs[closestIdx].numberInSurah).catch(() => {});
       }
     }, 5000);
-  }, [isPageMode, pages, currentPage, surahNumber, ayahs, meta, trackAyahRead]);
-
-  /* ─── Data ─── */
-  const trackAyahRead = useCallback((surahNum: number, ayahNum: number) => {
-    const key = `${surahNum}:${ayahNum}`;
-    if (readTracker.current.has(key)) return;
-    readTracker.current.add(key);
-    pendingReads.current.push(key);
-
-    if (!flushTimer.current) {
-      flushTimer.current = setTimeout(async () => {
-        const batch = [...pendingReads.current];
-        pendingReads.current = [];
-        flushTimer.current = undefined;
-        for (const k of batch) {
-          const [s, a] = k.split(':').map(Number);
-          await ReadingProgress.markAyahRead(s, a);
-        }
-      }, 3000);
-    }
-  }, []);
+  }, [isPageMode, pages, currentPage, autoScrollActive, surahNumber, ayahs, meta, trackAyahRead]);
 
   const loadSurah = async () => {
     setLoading(true);
