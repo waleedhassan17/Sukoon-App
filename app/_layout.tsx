@@ -3,28 +3,40 @@
  * Hides expo-splash-screen, runs SukoonSplash animation, then renders app
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, StyleSheet } from 'react-native';
-import { Stack } from 'expo-router';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, StyleSheet, AppState, AppStateStatus } from 'react-native';
+import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { FontSizeProvider } from '@/contexts/FontSizeContext';
 import { SavedVersesProvider } from '@/contexts/SavedVersesContext';
 import SukoonSplash from '@/components/SukoonSplash';
 import { QuranService } from '@/lib/quranService';
+import { NotificationService } from '@/lib/notificationService';
 
 // Prevent auto-hide so we control the transition
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function RootLayoutInner() {
   const { theme, mode } = useTheme();
+  const router = useRouter();
   const [appReady, setAppReady] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
+  const responseListener = useRef<Notifications.Subscription>();
+  const appStateRef = useRef<AppStateStatus>('active');
 
   useEffect(() => {
     async function prepare() {
       try {
+        // Initialize Notification Service (channels, handlers, etc.)
+        await NotificationService.init();
+
+        // Register background task for daily rescheduling
+        await NotificationService.registerBackgroundTask();
+
         // Initialize QuranService cache from AsyncStorage (non-blocking read)
         await QuranService.initializeCache();
         
@@ -40,6 +52,46 @@ function RootLayoutInner() {
 
     prepare();
   }, []);
+
+  // Set up notification response handler (when user taps notification)
+  useEffect(() => {
+    if (!appReady) return;
+
+    responseListener.current = NotificationService.setupResponseHandler(router);
+
+    return () => {
+      if (responseListener.current) {
+        Notifications.removeNotificationSubscription(responseListener.current);
+      }
+    };
+  }, [appReady, router]);
+
+  // Handle app state changes (foreground/background)
+  useEffect(() => {
+    if (!appReady) return;
+
+    const subscription = AppState.addEventListener('change', async (state) => {
+      appStateRef.current = state;
+
+      // When app comes to foreground, check if we need to reschedule
+      if (state === 'active') {
+        const prefs = await NotificationService.getPreferences();
+        if (prefs.enabled) {
+          const lastScheduled = await AsyncStorage.getItem('sukoon_notif_last_scheduled');
+          const today = new Date().toDateString();
+          if (lastScheduled !== today) {
+            // New day! Notifications need rescheduling
+            // They will be rescheduled when prayer times are next fetched
+            console.log('[Sukoon] New day detected — notifications will reschedule on next prayer times fetch');
+          }
+        }
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [appReady]);
 
   // Once app is ready, hide the native expo splash screen
   // and let our custom animated splash take over

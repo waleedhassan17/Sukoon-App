@@ -10,10 +10,10 @@
  *  - Sukoon green/gold palette
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Switch, StyleSheet,
-  StatusBar, Platform, Alert, Share, LayoutAnimation, UIManager,
+  StatusBar, Platform, Alert, Share, LayoutAnimation, UIManager, Linking,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -21,7 +21,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
+import * as Notifications from 'expo-notifications';
 import { useTheme } from '@/contexts/ThemeContext';
+import { NotificationService, NotificationPreferences, PrayerName } from '@/lib/notificationService';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -65,6 +67,84 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/* ─── Pre-Alert Selector ─── */
+function PreAlertSelector({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const { theme } = useTheme();
+  const options = [
+    { label: 'Off', value: 0 },
+    { label: '5 min', value: 5 },
+    { label: '10 min', value: 10 },
+    { label: '15 min', value: 15 },
+    { label: '30 min', value: 30 },
+  ];
+
+  return (
+    <View style={{ flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+      {options.map((opt) => (
+        <TouchableOpacity
+          key={opt.value}
+          onPress={() => {
+            onChange(opt.value);
+            Haptics.selectionAsync().catch(() => {});
+          }}
+          style={{
+            paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
+            backgroundColor: value === opt.value ? theme.primary : theme.surfaceMuted,
+          }}
+        >
+          <Text style={{
+            fontSize: 12, fontWeight: '600',
+            color: value === opt.value ? '#fff' : theme.textSecondary,
+          }}>{opt.label}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
+/* ─── Time Picker Placeholder ─── */
+function TimePickerButton({ time, onChange }: { time: string; onChange: (t: string) => void }) {
+  const { theme } = useTheme();
+  const handlePress = () => {
+    // Simple time picker: show alert with options
+    const [h, m] = time.split(':').map(Number);
+    Alert.prompt(
+      'Set Time',
+      'Enter time in HH:MM format (24-hour)',
+      [
+        { text: 'Cancel', onPress: () => {}, style: 'cancel' },
+        {
+          text: 'OK',
+          onPress: (input: string | undefined) => {
+            if (input && /^\d{2}:\d{2}$/.test(input)) {
+              onChange(input);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+            } else {
+              Alert.alert('Invalid Format', 'Please use HH:MM format');
+            }
+          },
+        },
+      ],
+      'plain-text',
+      time,
+    );
+  };
+
+  return (
+    <TouchableOpacity
+      onPress={handlePress}
+      style={{
+        paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+        backgroundColor: theme.surfaceMuted,
+        borderColor: theme.borderLight,
+        borderWidth: 1,
+      }}
+    >
+      <Text style={{ color: theme.text, fontSize: 13, fontWeight: '500' }}>{time}</Text>
+    </TouchableOpacity>
+  );
+}
+
 /* ─── Row ─── */
 function SettingRow({
   icon, iconBg, label, subtitle, right, onPress, last,
@@ -102,24 +182,160 @@ export default function SalahTrackerSettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [notifOn, setNotifOn] = useState(false);
-  const [reminders, setReminders] = useState<Record<string, boolean>>({
-    fajr: true, zuhr: true, asr: true, maghrib: true, isha: true,
-  });
+  // Notification preferences
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Other settings
   const [jamaahDefault, setJamaahDefault] = useState(false);
   const [weekStart, setWeekStart] = useState<'sun' | 'mon'>('sun');
 
-  const toggleNotif = useCallback((val: boolean) => {
-    LayoutAnimation.configureNext(LAYOUT_ANIM);
-    setNotifOn(val);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    // TODO: schedule/cancel actual push notifications
+  // Load notification preferences on mount
+  useEffect(() => {
+    const loadPrefs = async () => {
+      try {
+        const prefs = await NotificationService.getPreferences();
+        setNotifPrefs(prefs);
+      } catch (e) {
+        console.warn('Failed to load notification preferences:', e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadPrefs();
   }, []);
 
-  const toggleReminder = useCallback((key: string) => {
-    setReminders((p) => ({ ...p, [key]: !p[key] }));
+  // Master notification toggle
+  const toggleMasterNotif = useCallback(async (val: boolean) => {
+    if (!notifPrefs) return;
+    
+    LayoutAnimation.configureNext(LAYOUT_ANIM);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+
+    if (val) {
+      // Enable notifications
+      const granted = await NotificationService.enableNotifications();
+      if (!granted) {
+        Alert.alert(
+          'Notifications Blocked',
+          'Please enable notifications in your device settings to receive prayer reminders.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Open Settings',
+              onPress: () => {
+                if (Platform.OS === 'android') {
+                  Linking.openSettings();
+                } else {
+                  Linking.openURL('app-settings:');
+                }
+              },
+            },
+          ],
+        );
+        return;
+      }
+      const updated = { ...notifPrefs, enabled: true };
+      setNotifPrefs(updated);
+    } else {
+      // Disable notifications
+      await NotificationService.disableNotifications();
+      const updated = { ...notifPrefs, enabled: false };
+      setNotifPrefs(updated);
+    }
+  }, [notifPrefs]);
+
+  // Toggle individual prayer alert
+  const togglePrayerAlert = useCallback(async (prayer: PrayerName) => {
+    if (!notifPrefs) return;
+    const updated = {
+      ...notifPrefs,
+      prayerAlerts: {
+        ...notifPrefs.prayerAlerts,
+        [prayer]: !notifPrefs.prayerAlerts[prayer],
+      },
+    };
+    setNotifPrefs(updated);
+    await NotificationService.savePreferences(updated);
     Haptics.selectionAsync().catch(() => {});
-  }, []);
+  }, [notifPrefs]);
+
+  // Set pre-alert minutes
+  const setPreAlertMinutes = useCallback(async (minutes: number) => {
+    if (!notifPrefs) return;
+    const updated = { ...notifPrefs, preAlertMinutes: minutes };
+    setNotifPrefs(updated);
+    await NotificationService.savePreferences(updated);
+  }, [notifPrefs]);
+
+  // Toggle azan sound
+  const toggleAzanSound = useCallback(async (enabled: boolean) => {
+    if (!notifPrefs) return;
+    const updated = { ...notifPrefs, azanSound: enabled };
+    setNotifPrefs(updated);
+    await NotificationService.savePreferences(updated);
+    Haptics.selectionAsync().catch(() => {});
+  }, [notifPrefs]);
+
+  // Toggle Fajr special sound
+  const toggleFajrSound = useCallback(async (enabled: boolean) => {
+    if (!notifPrefs) return;
+    const updated = { ...notifPrefs, fajrSpecialSound: enabled };
+    setNotifPrefs(updated);
+    await NotificationService.savePreferences(updated);
+    Haptics.selectionAsync().catch(() => {});
+  }, [notifPrefs]);
+
+  // Toggle salah tracker reminder
+  const toggleTrackerReminder = useCallback(async (enabled: boolean) => {
+    if (!notifPrefs) return;
+    const updated = { ...notifPrefs, salahTrackerReminder: enabled };
+    setNotifPrefs(updated);
+    await NotificationService.savePreferences(updated);
+    Haptics.selectionAsync().catch(() => {});
+  }, [notifPrefs]);
+
+  // Set tracker reminder time
+  const setTrackerTime = useCallback(async (time: string) => {
+    if (!notifPrefs) return;
+    const updated = { ...notifPrefs, salahTrackerTime: time };
+    setNotifPrefs(updated);
+    await NotificationService.savePreferences(updated);
+  }, [notifPrefs]);
+
+  // Toggle Quran reminder
+  const toggleQuranReminder = useCallback(async (enabled: boolean) => {
+    if (!notifPrefs) return;
+    const updated = { ...notifPrefs, quranReminder: enabled };
+    setNotifPrefs(updated);
+    await NotificationService.savePreferences(updated);
+    Haptics.selectionAsync().catch(() => {});
+  }, [notifPrefs]);
+
+  // Set Quran reminder time
+  const setQuranTime = useCallback(async (time: string) => {
+    if (!notifPrefs) return;
+    const updated = { ...notifPrefs, quranReminderTime: time };
+    setNotifPrefs(updated);
+    await NotificationService.savePreferences(updated);
+  }, [notifPrefs]);
+
+  // Test notification
+  const testNotification = async () => {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Sukoon Test ✅',
+        body: 'If you see this, notifications are working!',
+        sound: 'reminder.wav',
+        data: { type: 'test' },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: 2,
+      },
+    });
+    Alert.alert('Sent!', 'Check in 2 seconds...');
+  };
 
   const handleReset = () => {
     Alert.alert(
@@ -199,49 +415,176 @@ export default function SalahTrackerSettingsScreen() {
         </LinearGradient>
 
         {/* ═══ NOTIFICATIONS ═══ */}
-        <Section title="NOTIFICATIONS">
-          <SettingRow
-            icon="notifications-outline"
-            iconBg="#40916C"
-            label="Prayer Reminders"
-            subtitle={notifOn ? 'Get reminded to log your prayers' : 'Disabled'}
-            right={
-              <Switch
-                value={notifOn}
-                onValueChange={toggleNotif}
-                trackColor={{ false: `${theme.textTertiary}30`, true: `${theme.primary}50` }}
-                thumbColor={notifOn ? theme.primary : theme.textTertiary}
+        {!loading && notifPrefs && (
+          <>
+            <Section title="PRAYER NOTIFICATIONS">
+              <SettingRow
+                icon="notifications-outline"
+                iconBg="#40916C"
+                label="Prayer Time Alerts"
+                subtitle={notifPrefs.enabled ? 'Enabled - Get azan at prayer time' : 'Disabled'}
+                right={
+                  <Switch
+                    value={notifPrefs.enabled}
+                    onValueChange={toggleMasterNotif}
+                    trackColor={{ false: `${theme.textTertiary}30`, true: `${theme.primary}50` }}
+                    thumbColor={notifPrefs.enabled ? theme.primary : theme.textTertiary}
+                  />
+                }
+                last={!notifPrefs.enabled}
               />
-            }
-            last={!notifOn}
-          />
 
-          {notifOn && (
-            <View style={st.reminderList}>
-              <Text style={[st.reminderHint, { color: theme.textTertiary }]}>Choose which prayers to be reminded for</Text>
-              {PRAYER_LIST.map((p, i) => (
-                <TouchableOpacity
-                  key={p.key}
-                  onPress={() => toggleReminder(p.key)}
-                  activeOpacity={0.7}
-                  style={[st.reminderRow, i === PRAYER_LIST.length - 1 && { marginBottom: 0 }]}
-                >
-                  <LinearGradient colors={p.gradient} style={st.reminderBadge}>
-                    <Ionicons name={p.icon as any} size={13} color="#fff" />
-                  </LinearGradient>
-                  <Text style={[st.reminderName, { color: theme.text }]}>{p.name}</Text>
-                  <View style={[
-                    st.reminderCheck,
-                    { borderColor: reminders[p.key] ? theme.primary : `${theme.textTertiary}35` },
-                    reminders[p.key] && { backgroundColor: theme.primary, borderColor: theme.primary },
-                  ]}>
-                    {reminders[p.key] && <Ionicons name="checkmark-sharp" size={10} color="#fff" />}
+              {notifPrefs.enabled && (
+                <View style={st.reminderList}>
+                  <Text style={[st.reminderHint, { color: theme.textTertiary }]}>Choose which prayers to alert for</Text>
+                  {[
+                    { key: 'fajr', name: 'Fajr', icon: 'sunny-outline', gradient: ['#56A8E2', '#3D8FCC'] as [string, string] },
+                    { key: 'dhuhr', name: 'Dhuhr', icon: 'sunny', gradient: ['#F0C146', '#DBA830'] as [string, string] },
+                    { key: 'asr', name: 'Asr', icon: 'partly-sunny-outline', gradient: ['#F09846', '#DB7F30'] as [string, string] },
+                    { key: 'maghrib', name: 'Maghrib', icon: 'cloudy-night-outline', gradient: ['#9B72CF', '#7C56B2'] as [string, string] },
+                    { key: 'isha', name: 'Isha', icon: 'moon-outline', gradient: ['#4568B8', '#3350A0'] as [string, string] },
+                  ].map((p) => (
+                    <TouchableOpacity
+                      key={p.key}
+                      onPress={() => togglePrayerAlert(p.key as PrayerName)}
+                      activeOpacity={0.7}
+                      style={st.reminderRow}
+                    >
+                      <LinearGradient colors={p.gradient} style={st.reminderBadge}>
+                        <Ionicons name={p.icon as any} size={13} color="#fff" />
+                      </LinearGradient>
+                      <Text style={[st.reminderName, { color: theme.text }]}>{p.name}</Text>
+                      <View style={[
+                        st.reminderCheck,
+                        { borderColor: notifPrefs.prayerAlerts[p.key as PrayerName] ? theme.primary : `${theme.textTertiary}35` },
+                        notifPrefs.prayerAlerts[p.key as PrayerName] && { backgroundColor: theme.primary, borderColor: theme.primary },
+                      ]}>
+                        {notifPrefs.prayerAlerts[p.key as PrayerName] && <Ionicons name="checkmark-sharp" size={10} color="#fff" />}
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </Section>
+
+            {notifPrefs.enabled && (
+              <>
+                <Section title="AZAN SOUND">
+                  <SettingRow
+                    icon="volume-high-outline"
+                    iconBg="#F0C146"
+                    label="Play Azan Sound"
+                    subtitle={notifPrefs.azanSound ? 'Playing on prayer time' : 'Silent notifications'}
+                    right={
+                      <Switch
+                        value={notifPrefs.azanSound}
+                        onValueChange={toggleAzanSound}
+                        trackColor={{ false: `${theme.textTertiary}30`, true: `${theme.primary}50` }}
+                        thumbColor={notifPrefs.azanSound ? theme.primary : theme.textTertiary}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    icon="sunny-outline"
+                    iconBg="#56A8E2"
+                    label="Special Fajr Azan"
+                    subtitle={notifPrefs.fajrSpecialSound ? 'Unique sound for Fajr' : 'Same as other prayers'}
+                    right={
+                      <Switch
+                        value={notifPrefs.fajrSpecialSound}
+                        onValueChange={toggleFajrSound}
+                        trackColor={{ false: `${theme.textTertiary}30`, true: `${theme.primary}50` }}
+                        thumbColor={notifPrefs.fajrSpecialSound ? theme.primary : theme.textTertiary}
+                      />
+                    }
+                    last
+                  />
+                </Section>
+
+                <Section title="PRE-PRAYER ALERT">
+                  <View style={st.row}>
+                    <View style={[st.rowIcon, { backgroundColor: '#8B6BBF' }]}>
+                      <Ionicons name="time-outline" size={16} color="#fff" />
+                    </View>
+                    <View style={st.rowInfo}>
+                      <Text style={[st.rowLabel, { color: theme.text }]}>Remind Before Prayer</Text>
+                      <Text style={[st.rowSub, { color: theme.textTertiary }]}>
+                        {notifPrefs.preAlertMinutes > 0 ? `${notifPrefs.preAlertMinutes} minutes before` : 'Disabled'}
+                      </Text>
+                      <PreAlertSelector value={notifPrefs.preAlertMinutes} onChange={setPreAlertMinutes} />
+                    </View>
                   </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </Section>
+                </Section>
+              </>
+            )}
+
+            <Section title="DAILY REMINDERS">
+              <SettingRow
+                icon="checkmark-circle-outline"
+                iconBg="#40916C"
+                label="Salah Tracker Reminder"
+                subtitle={notifPrefs.salahTrackerReminder ? `Daily at ${notifPrefs.salahTrackerTime}` : 'Disabled'}
+                right={
+                  <Switch
+                    value={notifPrefs.salahTrackerReminder}
+                    onValueChange={toggleTrackerReminder}
+                    trackColor={{ false: `${theme.textTertiary}30`, true: `${theme.primary}50` }}
+                    thumbColor={notifPrefs.salahTrackerReminder ? theme.primary : theme.textTertiary}
+                  />
+                }
+              />
+              {notifPrefs.salahTrackerReminder && (
+                <View style={[st.row, { paddingBottom: 0 }]}>
+                  <View style={[st.rowIcon, { backgroundColor: '#56A8E2', opacity: 0 }]}>
+                    <Ionicons name="time" size={16} color="#fff" />
+                  </View>
+                  <View style={[st.rowInfo, { paddingLeft: 0 }]}>
+                    <Text style={[st.rowLabel, { color: theme.text, marginBottom: 8 }]}>Time</Text>
+                    <TimePickerButton time={notifPrefs.salahTrackerTime} onChange={setTrackerTime} />
+                  </View>
+                </View>
+              )}
+              <View style={[st.rowDiv, { backgroundColor: theme.border }]} />
+
+              <SettingRow
+                icon="book-outline"
+                iconBg="#F09846"
+                label="Quran Reading Reminder"
+                subtitle={notifPrefs.quranReminder ? `Daily at ${notifPrefs.quranReminderTime}` : 'Disabled'}
+                right={
+                  <Switch
+                    value={notifPrefs.quranReminder}
+                    onValueChange={toggleQuranReminder}
+                    trackColor={{ false: `${theme.textTertiary}30`, true: `${theme.primary}50` }}
+                    thumbColor={notifPrefs.quranReminder ? theme.primary : theme.textTertiary}
+                  />
+                }
+              />
+              {notifPrefs.quranReminder && (
+                <View style={[st.row, { paddingBottom: 0 }]}>
+                  <View style={[st.rowIcon, { backgroundColor: '#56A8E2', opacity: 0 }]}>
+                    <Ionicons name="time" size={16} color="#fff" />
+                  </View>
+                  <View style={[st.rowInfo, { paddingLeft: 0 }]}>
+                    <Text style={[st.rowLabel, { color: theme.text, marginBottom: 8 }]}>Time</Text>
+                    <TimePickerButton time={notifPrefs.quranReminderTime} onChange={setQuranTime} />
+                  </View>
+                </View>
+              )}
+            </Section>
+
+            <Section title="DEBUG">
+              <SettingRow
+                icon="beaker-outline"
+                iconBg="#D97706"
+                label="Test Notification"
+                subtitle="Send a test notification in 2 seconds"
+                onPress={testNotification}
+                last
+              />
+            </Section>
+          </>
+        )}
 
         {/* ═══ PREFERENCES ═══ */}
         <Section title="PREFERENCES">

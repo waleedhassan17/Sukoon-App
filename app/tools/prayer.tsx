@@ -11,6 +11,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Location from 'expo-location';
 import { useTheme } from '@/contexts/ThemeContext';
 import { PrayerTimesService, PrayerTimesData } from '@/lib/prayerTimes';
+import { scheduleFromPrayerTimes } from '@/lib/prayerTimeNotifBridge';
 import { SHADOWS, RADIUS } from '@/constants/theme';
 
 const PRAYER_ICONS: Record<string, { icon: string; color: string }> = {
@@ -183,6 +184,14 @@ export default function PrayerTimesScreen() {
         if (data) {
           setTimes(data);
           setNextPrayer(PrayerTimesService.getNextPrayer(data));
+
+          // Schedule notifications with the new prayer times
+          try {
+            await scheduleFromPrayerTimes(data);
+          } catch (notifError) {
+            console.warn('[Sukoon] Notification scheduling error:', notifError);
+            // Continue even if notifications fail
+          }
         }
       }
     } catch (e) {
