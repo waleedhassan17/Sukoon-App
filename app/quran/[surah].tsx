@@ -305,12 +305,12 @@ const PageFrame = React.memo(function PageFrame({
                   <Text
                     onPress={() => { setSelected(sel ? null : i); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); }}
                     style={[
-                      playing && { color: theme.primaryMuted, backgroundColor: `${theme.primaryMuted}0C` },
+                      playing && { fontWeight: '700' },
                       sel && { backgroundColor: `${theme.gold}14` },
                       saved && !playing && !sel && { color: theme.primary },
                     ]}
                   >{ay.text}</Text>
-                  <Text style={{ color: theme.primaryMuted, fontSize: sizes.arabic - 4 }}>
+                  <Text style={{ color: theme.primaryMuted, fontSize: sizes.arabic - 4, fontWeight: playing ? '700' : '400' }}>
                     {' ﴿'}{ay.numberInSurah.toLocaleString('ar-SA')}{'﴾ '}
                   </Text>
                 </Text>
@@ -329,8 +329,20 @@ const PageFrame = React.memo(function PageFrame({
               <Text style={[s.pageActLabel, { color: theme.textSecondary }]}>Ayah {ayahs[selected].numberInSurah}</Text>
             </View>
             <View style={s.pageActBtns}>
-              <TouchableOpacity style={[s.pageActBtn, { backgroundColor: `${theme.primaryMuted}12` }]} onPress={() => onPlayVerse(globalOffset + selected)} activeOpacity={0.7}>
-                <Ionicons name="play" size={14} color={theme.primaryMuted} />
+              <TouchableOpacity 
+                style={[
+                  s.pageActBtn, 
+                  { backgroundColor: `${theme.primary}15` },
+                  currentIndex === (globalOffset + selected) && { backgroundColor: theme.primary }
+                ]} 
+                onPress={() => onPlayVerse(globalOffset + selected)} 
+                activeOpacity={0.7}
+              >
+                <Ionicons 
+                  name={currentIndex === (globalOffset + selected) ? 'pause' : 'play'} 
+                  size={14} 
+                  color={currentIndex === (globalOffset + selected) ? '#fff' : theme.primary} 
+                />
               </TouchableOpacity>
               <TouchableOpacity style={[s.pageActBtn, { backgroundColor: `${theme.gold}12` }]} onPress={() => onBookmark(ayahs[selected])} activeOpacity={0.7}>
                 <Ionicons name={isVerseSaved(surahNumber, ayahs[selected].numberInSurah) ? 'bookmark' : 'bookmark-outline'} size={14} color={isVerseSaved(surahNumber, ayahs[selected].numberInSurah) ? theme.gold : theme.textTertiary} />
@@ -416,15 +428,22 @@ const VerseCard = React.memo(function VerseCard({
   const hasTrans = (showEnglish && englishText) || (showUrdu && urduText) || (showTafseer && tafseerText);
 
   return (
-    <View style={[s.vCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }, isPlaying && { borderColor: `${theme.primaryMuted}25` }]}>
-      <View style={[s.vAccent, { backgroundColor: theme.border }, isPlaying && { backgroundColor: theme.primaryMuted }]} />
+    <View style={[s.vCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
+      <View style={[s.vAccent, { backgroundColor: theme.border }, isPlaying && { backgroundColor: theme.primary }]} />
       <View style={s.vInner}>
         <View style={s.vTopRow}>
-          <LinearGradient colors={isPlaying ? [theme.primaryLight, theme.primary] : [theme.surfaceMuted, theme.surfaceMuted]} style={s.vBadge}>
+          <LinearGradient 
+            colors={isPlaying ? [theme.primaryLight, theme.primary] : [theme.surfaceMuted, theme.surfaceMuted]} 
+            style={s.vBadge}
+          >
             <Text style={[s.vBadgeT, { color: theme.textSecondary }, isPlaying && { color: '#fff' }]}>{ayahNumber}</Text>
           </LinearGradient>
           <View style={s.vActions}>
-            <TouchableOpacity style={[s.vActBtn, isPlaying && { backgroundColor: theme.primaryMuted }]} onPress={onPlay} activeOpacity={0.7}>
+            <TouchableOpacity 
+              style={[s.vActBtn, isPlaying && { backgroundColor: theme.primary }]} 
+              onPress={onPlay} 
+              activeOpacity={0.7}
+            >
               <Ionicons name={isPlaying ? 'pause' : 'play'} size={14} color={isPlaying ? '#fff' : theme.textTertiary} />
             </TouchableOpacity>
             <TouchableOpacity style={s.vActBtn} onPress={onBookmark} activeOpacity={0.7}>
@@ -435,7 +454,11 @@ const VerseCard = React.memo(function VerseCard({
             </TouchableOpacity>
           </View>
         </View>
-        <Text style={[s.vArabic, { color: theme.arabicText, fontSize: sizes.arabic, lineHeight: sizes.arabicLine }]}>{arabicText}</Text>
+        <Text style={[
+          s.vArabic, 
+          { color: theme.arabicText, fontSize: sizes.arabic, lineHeight: sizes.arabicLine },
+          isPlaying && { fontWeight: '700' }
+        ]}>{arabicText}</Text>
         {hasTrans && (
           <View style={s.vTransWrap}>
             <View style={[s.vGoldLine, { backgroundColor: `${theme.gold}4D` }]} />
@@ -515,25 +538,54 @@ const PersistentPlayer = React.memo(function PersistentPlayer({
 
           {/* Right: transport */}
           <View style={s.ppCtrls}>
-            <TouchableOpacity onPress={onPrev} disabled={!isActive || currentIndex === 0} style={s.ppCtrlBtn} activeOpacity={0.7}>
-              <Ionicons name="play-skip-back" size={16} color={isActive && currentIndex! > 0 ? theme.textSecondary : `${theme.textTertiary}50`} />
+            <TouchableOpacity 
+              onPress={onPrev} 
+              disabled={!isActive || currentIndex === 0} 
+              style={s.ppCtrlBtn} 
+              activeOpacity={0.7}
+            >
+              <Ionicons 
+                name="play-skip-back" 
+                size={16} 
+                color={isActive && currentIndex! > 0 ? theme.text : `${theme.textTertiary}50`} 
+              />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => { if (!isActive) onPlayIndex(0); else onTogglePlayPause(); }} activeOpacity={0.8}>
-              <LinearGradient colors={[theme.primaryLight, theme.primary]} style={s.ppPlayBtn}>
+            <TouchableOpacity 
+              onPress={() => { if (!isActive) onPlayIndex(0); else onTogglePlayPause(); }} 
+              activeOpacity={0.8}
+            >
+              <LinearGradient 
+                colors={[theme.primaryLight, theme.primary]} 
+                style={s.ppPlayBtn}
+              >
                 {ps.isBuffering ? <ActivityIndicator size="small" color="#fff" /> : (
                   <Ionicons name={ps.isPlaying ? 'pause' : 'play'} size={18} color="#fff" style={!ps.isPlaying ? { marginLeft: 2 } : undefined} />
                 )}
               </LinearGradient>
             </TouchableOpacity>
-            <TouchableOpacity onPress={onNext} disabled={!isActive || currentIndex === ayahs.length - 1} style={s.ppCtrlBtn} activeOpacity={0.7}>
-              <Ionicons name="play-skip-forward" size={16} color={isActive && currentIndex! < ayahs.length - 1 ? theme.textSecondary : `${theme.textTertiary}50`} />
+            <TouchableOpacity 
+              onPress={onNext} 
+              disabled={!isActive || currentIndex === ayahs.length - 1} 
+              style={s.ppCtrlBtn} 
+              activeOpacity={0.7}
+            >
+              <Ionicons 
+                name="play-skip-forward" 
+                size={16} 
+                color={isActive && currentIndex! < ayahs.length - 1 ? theme.text : `${theme.textTertiary}50`} 
+              />
             </TouchableOpacity>
           </View>
         </View>
 
         {isActive && !expanded && (
           <View style={[s.ppThin, { backgroundColor: theme.surfaceMuted }]}>
-            <LinearGradient colors={[theme.primaryLight, theme.primaryMuted]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[s.ppThinFill, { width: `${dp * 100}%` }]} />
+            <LinearGradient 
+              colors={[theme.primary, theme.primaryLight]} 
+              start={{ x: 0, y: 0 }} 
+              end={{ x: 1, y: 0 }} 
+              style={[s.ppThinFill, { width: `${dp * 100}%` }]} 
+            />
           </View>
         )}
 
@@ -543,8 +595,28 @@ const PersistentPlayer = React.memo(function PersistentPlayer({
               <Text style={[s.ppTime, { color: theme.textTertiary }]}>{formatMs(ps.positionMs)}</Text>
               <View style={s.ppTrack} onLayout={(e) => { trackW.current = e.nativeEvent.layout.width; }} {...pan.panHandlers}>
                 <View style={[s.ppTrackBg, { backgroundColor: theme.surfaceMuted }]} />
-                <LinearGradient colors={[theme.primaryLight, theme.primaryMuted]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[s.ppTrackFill, { width: `${dp * 100}%` }]} />
-                <View style={[s.ppThumb, { left: `${dp * 100}%`, backgroundColor: theme.primaryLight, shadowColor: theme.shadowColor }, seeking && [s.ppThumbS, { backgroundColor: theme.primary }]]} />
+                <LinearGradient 
+                  colors={[theme.primary, theme.primaryLight]} 
+                  start={{ x: 0, y: 0 }} 
+                  end={{ x: 1, y: 0 }} 
+                  style={[s.ppTrackFill, { width: `${dp * 100}%` }]} 
+                />
+                <View style={[
+                  s.ppThumb, 
+                  { 
+                    left: `${dp * 100}%`, 
+                    backgroundColor: theme.primary, 
+                    shadowColor: theme.primary 
+                  }, 
+                  seeking && [
+                    s.ppThumbS, 
+                    { 
+                      backgroundColor: theme.primaryLight,
+                      shadowOpacity: 0.4,
+                      shadowRadius: 8,
+                    }
+                  ]
+                ]} />
               </View>
               <Text style={[s.ppTime, { color: theme.textTertiary }]}>{formatMs(ps.durationMs)}</Text>
             </View>
@@ -668,6 +740,8 @@ export default function SurahScreen() {
   const resumeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollFadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const spdScale = useRef(new Animated.Value(1)).current;
+  const audioClickDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isAudioChangingRef = useRef(false);
 
   // ─── Tracking refs ───
   const readTracker = useRef<Set<string>>(new Set());
@@ -688,10 +762,22 @@ export default function SurahScreen() {
   useEffect(() => {
     audioPlayer.setStatusCallback((st) => setPlayerState(st));
     audioPlayer.setFinishCallback(() => {
+      // Auto-continue to next ayah until manually stopped
       if (currentIndex != null) {
         const next = currentIndex + 1;
-        if (next < ayahs.length && ayahs[next]?.audio) playIndex(next);
-        else { setCurrentIndex(null); audioPlayer.stop().catch(() => {}); }
+        if (next < ayahs.length && ayahs[next]?.audio) {
+          // Automatically play next ayah
+          const ay = ayahs[next];
+          if (ay?.audio) {
+            audioPlayer.play(ay.audio).then(() => {
+              setCurrentIndex(next);
+            }).catch((e) => console.error('[Audio] Auto-play error:', e));
+          }
+        } else {
+          // Reached end of surah
+          setCurrentIndex(null);
+          audioPlayer.stop().catch(() => {});
+        }
       }
     });
     return () => { audioPlayer.setStatusCallback(null); audioPlayer.setFinishCallback(null); };
@@ -851,7 +937,21 @@ export default function SurahScreen() {
   }, [isPageMode, pages]);
 
   const playIndex = useCallback(async (index: number) => {
-    const ay = ayahs[index]; if (!ay?.audio) return;
+    const ay = ayahs[index]; 
+    if (!ay?.audio) return;
+    
+    // Prevent rapid clicks - debounce audio changes
+    if (isAudioChangingRef.current) {
+      console.log('[Audio] Ignoring rapid click');
+      return;
+    }
+    
+    if (audioClickDebounceRef.current) {
+      clearTimeout(audioClickDebounceRef.current);
+    }
+    
+    isAudioChangingRef.current = true;
+    
     try {
       await audioPlayer.play(ay.audio);
       setCurrentIndex(index);
@@ -866,8 +966,15 @@ export default function SurahScreen() {
       
       setTimeout(() => scrollToAyah(index), 200);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    } catch (e) { console.error(e); }
-  }, [ayahs, surahNumber, meta, scrollToAyah]);
+    } catch (e) { 
+      console.error('[Audio] Play error:', e); 
+    } finally {
+      // Reset debounce after 500ms
+      audioClickDebounceRef.current = setTimeout(() => {
+        isAudioChangingRef.current = false;
+      }, 500);
+    }
+  }, [ayahs, surahNumber, meta, scrollToAyah, trackAyahRead]);
 
   const togglePlayPause = useCallback(async () => { if (currentIndex === null) await playIndex(0); else await audioPlayer.togglePlayPause(); }, [currentIndex, playIndex]);
   const playPrev = useCallback(() => { if (currentIndex != null && currentIndex > 0) playIndex(currentIndex - 1); }, [currentIndex, playIndex]);
@@ -898,7 +1005,7 @@ export default function SurahScreen() {
   if (loading) {
     return (
       <View style={[s.loadWrap, { backgroundColor: theme.surface }]}>
-        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={theme.surface} />
+        <StatusBar barStyle="light-content" backgroundColor={theme.primary} />
         {/* Skeleton loading with animated placeholders */}
         <View style={s.skeletonHeader}>
           <LinearGradient colors={theme.headerGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.skeletonHeaderBg} />

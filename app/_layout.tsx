@@ -60,7 +60,7 @@ function RootLayoutInner() {
 
   return (
     <View style={styles.container}>
-      <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
+      <StatusBar style="light" />
 
       {/* Main app navigation */}
       <Stack

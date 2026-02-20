@@ -157,20 +157,25 @@ class AudioPlayer {
     await this.init();
 
     try {
-      // Same URI → restart
-      if (this.sound && this.currentUri === uri) {
-        await this.sound.setPositionAsync(0);
-        await this.sound.playAsync();
-        return;
+      // CRITICAL FIX: Always stop any existing playback first
+      // This prevents parallel audio issues when switching between surahs
+      if (this.sound) {
+        // If it's the same URI, restart from beginning
+        if (this.currentUri === uri) {
+          await this.sound.setPositionAsync(0);
+          await this.sound.playAsync();
+          return;
+        }
+        
+        // Different URI: stop current completely before loading new one
+        if (this.state.isPlaying) {
+          await this.fadeOut();
+        }
+        await this.unload();
+        
+        // Small delay to ensure cleanup is complete
+        await this.delay(50);
       }
-
-      // Fade out current if playing
-      if (this.sound && this.state.isPlaying) {
-        await this.fadeOut();
-      }
-
-      // Unload previous
-      await this.unload();
 
       this.updateState({ isBuffering: true, error: null });
 

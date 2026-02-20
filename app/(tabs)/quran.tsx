@@ -256,7 +256,7 @@ export default function QuranListScreen() {
         colors={theme.headerGradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={[styles.header, { paddingTop: insets.top + 12 }]}
+        style={[styles.header, { paddingTop: insets.top + 24, marginTop: -insets.top }]}
       >
         {/* Decorative circles */}
         <View style={styles.headerPattern}>
