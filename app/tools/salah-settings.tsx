@@ -21,9 +21,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
-import * as Notifications from 'expo-notifications';
 import { useTheme } from '@/contexts/ThemeContext';
 import { NotificationService, NotificationPreferences, PrayerName } from '@/lib/notificationService';
+
+// Lazy-load expo-notifications — not available in Expo Go (SDK 53+)
+let Notifications: any = null;
+try {
+  const mod = require('expo-notifications');
+  if (mod && typeof mod.scheduleNotificationAsync === 'function') {
+    Notifications = mod;
+  }
+} catch {}
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -322,6 +330,10 @@ export default function SalahTrackerSettingsScreen() {
 
   // Test notification
   const testNotification = async () => {
+    if (!Notifications) {
+      Alert.alert('Not Available', 'Notifications require a development build. They are not supported in Expo Go.');
+      return;
+    }
     await Notifications.scheduleNotificationAsync({
       content: {
         title: 'Sukoon Test ✅',

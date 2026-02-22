@@ -1,6 +1,26 @@
-import * as Notifications from 'expo-notifications';
-import * as TaskManager from 'expo-task-manager';
-import * as BackgroundFetch from 'expo-background-fetch';
+/**
+ * Safe lazy imports — expo-notifications was removed from Expo Go in SDK 53.
+ * We lazy-load all notification modules so the app doesn't crash on import.
+ * Each module is loaded independently to prevent one failure from blocking others.
+ */
+let Notifications: any = null;
+let TaskManager: any = null;
+let BackgroundFetch: any = null;
+let _modulesLoaded = false;
+
+function loadModules(): boolean {
+  if (_modulesLoaded) return !!Notifications;
+  _modulesLoaded = true;
+  try { Notifications = require('expo-notifications'); } catch {}
+  try { TaskManager = require('expo-task-manager'); } catch {}
+  try { BackgroundFetch = require('expo-background-fetch'); } catch {}
+
+  if (!Notifications && __DEV__) {
+    console.warn('[Sukoon] Notification modules not available (Expo Go?)');
+  }
+  return !!Notifications;
+}
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform, AppState } from 'react-native';
 
@@ -27,6 +47,8 @@ export interface NotificationPreferences {
   quranReminder: boolean;                // daily reading reminder
   quranReminderTime: string;             // "08:00" — morning nudge
 }
+
+import { AzanPlayer } from './azanPlayer';
 
 // ══════════════════════════════════════════════
 // STORAGE KEYS
@@ -68,7 +90,16 @@ const DEFAULT_PREFS: NotificationPreferences = {
 // ══════════════════════════════════════════════
 
 async function setupChannels(): Promise<void> {
-  if (Platform.OS !== 'android') return;
+  if (Platform.OS !== 'android' || !Notifications) return;
+
+  // Delete old channels so Android picks up updated sound files
+  // (Android caches channel config — once created, sound can't change without deleting)
+  try {
+    await Notifications.deleteNotificationChannelAsync('prayer-azan').catch(() => {});
+    await Notifications.deleteNotificationChannelAsync('prayer-fajr').catch(() => {});
+    await Notifications.deleteNotificationChannelAsync('prayer-reminder').catch(() => {});
+    await Notifications.deleteNotificationChannelAsync('daily-reminder').catch(() => {});
+  } catch {}
 
   // High-importance channel for azan
   await Notifications.setNotificationChannelAsync('prayer-azan', {
@@ -87,7 +118,7 @@ async function setupChannels(): Promise<void> {
   await Notifications.setNotificationChannelAsync('prayer-fajr', {
     name: 'Fajr Prayer',
     importance: Notifications.AndroidImportance.HIGH,
-    sound: 'azan-fajr.wav',
+    sound: 'azan_fajr.wav',
     vibrationPattern: [0, 500, 250, 500],
     lightColor: '#56A8E2',
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
@@ -117,6 +148,7 @@ async function setupChannels(): Promise<void> {
 // ══════════════════════════════════════════════
 
 async function requestPermissions(): Promise<boolean> {
+  if (!Notifications) return false;
   // Check existing permissions first
   const { status: existing } = await Notifications.getPermissionsAsync();
   if (existing === 'granted') return true;
@@ -142,9 +174,14 @@ export const NotificationService = {
 
   // ── INITIALIZE (call once on app start) ──
   async init(): Promise<void> {
+    if (!loadModules()) {
+      if (__DEV__) console.log('[Sukoon] Notifications unavailable — skipping init');
+      return;
+    }
+
     // Set up notification handler (how to display when app is foreground)
     Notifications.setNotificationHandler({
-      handleNotification: async (notification) => {
+      handleNotification: async (notification: any) => {
         const data = notification.request.content.data;
         // Always show prayer notifications even in foreground
         return {
@@ -199,6 +236,7 @@ export const NotificationService = {
 
   // ── MASTER ENABLE/DISABLE ──
   async enableNotifications(): Promise<boolean> {
+    if (!loadModules()) return false;
     const granted = await requestPermissions();
     if (!granted) return false;
 
@@ -227,6 +265,7 @@ export const NotificationService = {
   async schedulePrayerNotifications(
     prayerTimes: PrayerTimeEntry[]
   ): Promise<number> {
+    if (!loadModules()) return 0;
     const prefs = await this.getPreferences();
     if (!prefs.enabled) return 0;
 
@@ -249,7 +288,7 @@ export const NotificationService = {
       if (prayerTime > now) {
         const isFajr = prayer.name === 'fajr';
         const soundFile = isFajr && prefs.fajrSpecialSound
-          ? 'azan-fajr.wav'
+          ? 'azan_fajr.wav'
           : prefs.azanSound ? 'azan.wav' : undefined;
 
         const channelId = isFajr ? 'prayer-fajr' : 'prayer-azan';
@@ -376,6 +415,7 @@ export const NotificationService = {
 
   // ── Cancel helpers ──
   async cancelPrayerNotifications(): Promise<void> {
+    if (!Notifications) return;
     const all = await Notifications.getAllScheduledNotificationsAsync();
     for (const notif of all) {
       const id = notif.identifier;
@@ -386,11 +426,13 @@ export const NotificationService = {
   },
 
   async cancelAll(): Promise<void> {
+    if (!Notifications) return;
     await Notifications.cancelAllScheduledNotificationsAsync();
   },
 
   // ── Debug: list all scheduled ──
-  async getScheduledNotifications(): Promise<Notifications.NotificationRequest[]> {
+  async getScheduledNotifications(): Promise<any[]> {
+    if (!Notifications) return [];
     return Notifications.getAllScheduledNotificationsAsync();
   },
 
@@ -400,9 +442,13 @@ export const NotificationService = {
   // ══════════════════════════════════════════
   setupResponseHandler(
     router: { push: (path: string, params?: any) => void }
-  ): Notifications.Subscription {
-    return Notifications.addNotificationResponseReceivedListener((response) => {
+  ): any {
+    if (!Notifications) return { remove: () => {} };
+    return Notifications.addNotificationResponseReceivedListener((response: any) => {
       const data = response.notification.request.content.data;
+
+      // Stop azan sound when user taps the notification
+      AzanPlayer.stop().catch(() => {});
 
       if (!data) return;
 
@@ -429,6 +475,7 @@ export const NotificationService = {
   // PUSH TOKEN (for Firebase remote pushes)
   // ══════════════════════════════════════════
   async getExpoPushToken(): Promise<string | null> {
+    if (!loadModules()) return null;
     try {
       const granted = await requestPermissions();
       if (!granted) return null;
@@ -451,7 +498,20 @@ export const NotificationService = {
   // for the new day (prayer times change daily)
   // ══════════════════════════════════════════
   async registerBackgroundTask(): Promise<void> {
+    if (!loadModules() || !TaskManager || !BackgroundFetch) return;
     try {
+      // Define the task handler first (must happen before register)
+      TaskManager.defineTask(BACKGROUND_TASK_NAME, async () => {
+        try {
+          const prefs = await NotificationService.getPreferences();
+          if (!prefs.enabled) return BackgroundFetch.BackgroundFetchResult.NoData;
+          console.log('[Sukoon] Background: rescheduled notifications');
+          return BackgroundFetch.BackgroundFetchResult.NewData;
+        } catch {
+          return BackgroundFetch.BackgroundFetchResult.Failed;
+        }
+      });
+
       const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_TASK_NAME);
       if (isRegistered) return;
 
@@ -463,11 +523,12 @@ export const NotificationService = {
 
       console.log('[Sukoon] Background task registered');
     } catch (e) {
-      console.error('[Sukoon] Background task registration failed:', e);
+      if (__DEV__) console.warn('[Sukoon] Background task registration failed:', e);
     }
   },
 
   async unregisterBackgroundTask(): Promise<void> {
+    if (!TaskManager) return;
     try {
       const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_TASK_NAME);
       if (isRegistered) {
@@ -479,22 +540,6 @@ export const NotificationService = {
 
 // ══════════════════════════════════════════════
 // BACKGROUND TASK DEFINITION
-// Must be at module level (outside component)
+// Registered lazily inside registerBackgroundTask()
+// No module-level defineTask — prevents crash when TaskManager is null
 // ══════════════════════════════════════════════
-
-TaskManager.defineTask(BACKGROUND_TASK_NAME, async () => {
-  try {
-    const prefs = await NotificationService.getPreferences();
-    if (!prefs.enabled) return BackgroundFetch.BackgroundFetchResult.NoData;
-
-    // Fetch fresh prayer times for today
-    // You'll need to import your prayer times fetcher here
-    // const prayerTimes = await fetchPrayerTimesForToday();
-    // await NotificationService.schedulePrayerNotifications(prayerTimes);
-
-    console.log('[Sukoon] Background: rescheduled notifications');
-    return BackgroundFetch.BackgroundFetchResult.NewData;
-  } catch {
-    return BackgroundFetch.BackgroundFetchResult.Failed;
-  }
-});

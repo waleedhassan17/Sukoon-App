@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DataSyncService } from '@/lib/dataSyncService';
 
 export interface SavedVerse {
   surah: number;
@@ -46,6 +47,8 @@ export function SavedVersesProvider({ children }: { children: React.ReactNode })
   const persist = (verses: SavedVerse[]) => {
     setSavedVerses(verses);
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(verses)).catch(() => {});
+    // Background cloud sync
+    DataSyncService.saveSavedAyahs(verses).catch(() => {});
   };
 
   const saveVerse = (verse: Omit<SavedVerse, 'savedAt'>) => {

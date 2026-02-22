@@ -23,6 +23,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
+import { DataSyncService } from '@/lib/dataSyncService';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -342,6 +343,8 @@ export default function SalahTrackerScreen() {
     setDayData(data);
     setCache((p) => ({ ...p, [selKey]: data }));
     try { await AsyncStorage.setItem(sk(selKey), JSON.stringify(data)); } catch {}
+    // Background cloud sync
+    DataSyncService.saveSalahData(selKey, data).catch(() => {});
   };
 
   const calcStreak = () => {

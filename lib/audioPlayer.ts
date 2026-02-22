@@ -104,6 +104,9 @@ class AudioPlayer {
      ═══════════════════════════════════════════ */
 
   private onStatus = (status: AVPlaybackStatus): void => {
+    // Guard: ignore stale callbacks from unloaded/previous sounds
+    if (!this.sound) return;
+
     if (!status.isLoaded) {
       this.updateState({
         isLoaded: false,
@@ -157,42 +160,59 @@ class AudioPlayer {
     await this.init();
 
     try {
-      // CRITICAL FIX: Always stop any existing playback first
-      // This prevents parallel audio issues when switching between surahs
       if (this.sound) {
-        // If it's the same URI, restart from beginning
+        // Same URI: just restart from beginning (no reload needed)
         if (this.currentUri === uri) {
           await this.sound.setPositionAsync(0);
           await this.sound.playAsync();
           return;
         }
         
-        // Different URI: stop current completely before loading new one
-        if (this.state.isPlaying) {
-          await this.fadeOut();
-        }
+        // Different URI: properly await cleanup to prevent Android race conditions
         await this.unload();
-        
-        // Small delay to ensure cleanup is complete
-        await this.delay(50);
       }
 
-      this.updateState({ isBuffering: true, error: null });
+      this.updateState({ isBuffering: true, isPlaying: false, error: null });
 
-      const { sound } = await Audio.Sound.createAsync(
-        { uri },
-        {
-          shouldPlay: true,
-          rate: this.speed,
-          shouldCorrectPitch: true,
-          progressUpdateIntervalMillis: 250,
-        },
-        this.onStatus
-      );
+      // Re-initialize audio mode before each play (handles interruptions like phone calls)
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        staysActiveInBackground: true,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      }).catch(() => {});
 
-      this.sound = sound;
-      this.currentUri = uri;
-      this.updateState({ currentUri: uri });
+      // Retry logic for network audio loading (CDN can be flaky on mobile)
+      let lastErr: any = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const { sound } = await Audio.Sound.createAsync(
+            { uri },
+            {
+              shouldPlay: true,
+              rate: this.speed,
+              shouldCorrectPitch: true,
+              progressUpdateIntervalMillis: 250,
+              volume: 1.0,
+            },
+            this.onStatus
+          );
+
+          this.sound = sound;
+          this.currentUri = uri;
+          this.updateState({ currentUri: uri });
+          return; // Success — exit
+        } catch (e) {
+          lastErr = e;
+          if (attempt < 1) {
+            await this.delay(500); // Brief wait before retry
+          }
+        }
+      }
+
+      // Both attempts failed
+      throw lastErr;
     } catch (e: any) {
       const errorMsg = e?.message || 'Failed to play audio';
       console.error('[AudioPlayer] Play error:', errorMsg);
@@ -219,6 +239,14 @@ class AudioPlayer {
   async resume(): Promise<void> {
     try {
       if (this.sound && !this.state.isPlaying) {
+        // Re-claim audio focus on Android (lost after phone calls / other apps)
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          staysActiveInBackground: true,
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        }).catch(() => {});
         await this.sound.playAsync();
         await this.fadeIn();
       }

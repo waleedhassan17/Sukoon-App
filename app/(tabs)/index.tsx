@@ -20,10 +20,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
+import { VoiceInputButton } from '@/components/VoiceInputButton';
 import { ReadingProgress } from '@/lib/readingProgress';
 import { QuranService } from '@/lib/quranService';
 import { PrayerTimesService, PrayerTimesData, HijriDate, IslamicCalendarData } from '@/lib/prayerTimes';
+import { NotificationService } from '@/lib/notificationService';
+import { scheduleFromPrayerTimes, RawPrayerTimes } from '@/lib/prayerTimeNotifBridge';
 import { SHADOWS, RADIUS, SPACING, TYPOGRAPHY } from '@/constants/theme';
+import { EmotionService } from '@/lib/emotionService';
 import * as Location from 'expo-location';
 
 const { width } = Dimensions.get('window');
@@ -92,6 +96,7 @@ export default function HomeScreen() {
   const [nextPrayer, setNextPrayer] = useState<any>(null);
   const [inputFocused, setInputFocused] = useState(false);
   const [islamicDate, setIslamicDate] = useState<IslamicCalendarData | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
 
   // 8 staggered sections
   const sectionAnims = useStaggeredEntry(8, 90);
@@ -125,6 +130,7 @@ export default function HomeScreen() {
     ReadingProgress.getLastSeen().then(setLastSeen).catch(() => {});
     QuranService.getRandomAyah().then(setDailyAyah).catch(() => {});
     PrayerTimesService.getIslamicDate().then(setIslamicDate).catch(() => {});
+    EmotionService.warmUp().catch(() => {}); // Pre-warm ML API
     loadPrayerTimes();
   };
 
@@ -140,11 +146,28 @@ export default function HomeScreen() {
         if (times) {
           setPrayerTimes(times);
           setNextPrayer(PrayerTimesService.getNextPrayer(times));
+          
+          // Schedule prayer notifications if enabled
+          try {
+            const prefs = await NotificationService.getPreferences();
+            if (prefs.enabled) {
+              const rawTimes: RawPrayerTimes = {
+                Fajr: times.Fajr?.split(' ')[0] || '05:00',
+                Sunrise: times.Sunrise?.split(' ')[0] || '06:30',
+                Dhuhr: times.Dhuhr?.split(' ')[0] || '12:00',
+                Asr: times.Asr?.split(' ')[0] || '15:30',
+                Maghrib: times.Maghrib?.split(' ')[0] || '18:00',
+                Isha: times.Isha?.split(' ')[0] || '19:30',
+              };
+              await scheduleFromPrayerTimes(rawTimes);
+            }
+          } catch (notifErr) {
+            if (__DEV__) console.warn('Failed to schedule prayer notifications:', notifErr);
+          }
         }
       }
     } catch (e) {
-      console.error('Prayer times error:', e);
-      // No static fallback - show nothing if location unavailable
+      if (__DEV__) console.error('Prayer times error:', e);
     }
   };
 
@@ -154,7 +177,8 @@ export default function HomeScreen() {
   }, [emotionText]);
 
   const handleEmotionQuick = useCallback((name: string) => {
-    router.push({ pathname: '/emotion-result', params: { text: `I'm feeling ${name.toLowerCase()}` } });
+    // Static 6 emotions bypass the ML API — use curated verses directly
+    router.push({ pathname: '/emotion-result', params: { text: `I'm feeling ${name.toLowerCase()}`, staticEmotion: name } });
   }, []);
 
   const canAnalyze = emotionText.trim().length > 0;
@@ -202,11 +226,8 @@ export default function HomeScreen() {
                 </Text>
               </View>
               <View style={styles.heroTopRight}>
-                <TouchableOpacity style={styles.heroIconBtn} activeOpacity={0.7}>
+                <TouchableOpacity style={styles.heroIconBtn} activeOpacity={0.7} onPress={() => router.push('/notifications' as any)}>
                   <Ionicons name="notifications-outline" size={20} color="rgba(255,255,255,0.85)" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.heroIconBtn} activeOpacity={0.7}>
-                  <Ionicons name="settings-outline" size={20} color="rgba(255,255,255,0.85)" />
                 </TouchableOpacity>
               </View>
             </View>
@@ -226,14 +247,33 @@ export default function HomeScreen() {
                   placeholder="What's on your heart today?"
                   placeholderTextColor={theme.textTertiary}
                   value={emotionText}
-                  onChangeText={setEmotionText}
+                  onChangeText={(text) => {
+                    setEmotionText(text);
+                    setVoiceError(null); // Clear error when user types
+                  }}
                   onFocus={() => setInputFocused(true)}
                   onBlur={() => setInputFocused(false)}
                   onSubmitEditing={handleAnalyze}
                   returnKeyType="search"
                   multiline={false}
                 />
+                <VoiceInputButton
+                  currentText={emotionText}
+                  onTextAppended={(newText) => {
+                    setEmotionText(newText);
+                    setVoiceError(null);
+                  }}
+                  onError={(error) => setVoiceError(error)}
+                  iconSize={18}
+                  iconColor={theme.textTertiary}
+                  disabled={false}
+                />
               </View>
+              {voiceError && (
+                <Text style={[styles.errorText, { color: theme.emotionAnxious }]}>
+                  {voiceError}
+                </Text>
+              )}
               <TouchableOpacity
                 onPress={handleAnalyze}
                 disabled={!canAnalyze}
@@ -598,6 +638,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     letterSpacing: 0.2,
+  },
+  errorText: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginHorizontal: 2,
+    marginBottom: 8,
   },
 
   /* ─── Body ─── */

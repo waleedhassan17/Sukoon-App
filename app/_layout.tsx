@@ -4,11 +4,10 @@
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, StyleSheet, AppState, AppStateStatus } from 'react-native';
+import { View, StyleSheet, AppState, AppStateStatus, Platform } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { FontSizeProvider } from '@/contexts/FontSizeContext';
@@ -16,6 +15,22 @@ import { SavedVersesProvider } from '@/contexts/SavedVersesContext';
 import SukoonSplash from '@/components/SukoonSplash';
 import { QuranService } from '@/lib/quranService';
 import { NotificationService } from '@/lib/notificationService';
+import { NotificationHistory } from '@/app/notifications';
+import { AzanPlayer } from '@/lib/azanPlayer';
+import { DataSyncService } from '@/lib/dataSyncService';
+import { FCMService } from '@/lib/fcmService';
+
+// Lazy-load expo-notifications — not available in Expo Go (SDK 53+)
+let ExpoNotifications: any = null;
+try {
+  const mod = require('expo-notifications');
+  // Verify the module is functional (Expo Go may import but throw on use)
+  if (mod && typeof mod.getPermissionsAsync === 'function') {
+    ExpoNotifications = mod;
+  }
+} catch {
+  // Silently ignore — running in Expo Go without native notification support
+}
 
 // Prevent auto-hide so we control the transition
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -25,12 +40,37 @@ function RootLayoutInner() {
   const router = useRouter();
   const [appReady, setAppReady] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
-  const responseListener = useRef<Notifications.Subscription>();
+  const responseListener = useRef<any>(null);
+  const receivedListener = useRef<any>(null);
   const appStateRef = useRef<AppStateStatus>('active');
+
+  // Keep Android system navigation bar matching tab bar per theme
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      try {
+        const NavigationBar = require('expo-navigation-bar');
+        const navColor = mode === 'dark' ? '#1A1A1A' : '#FFFFFF';
+        const btnStyle = mode === 'dark' ? 'light' : 'dark';
+        NavigationBar.setBackgroundColorAsync(navColor);
+        NavigationBar.setButtonStyleAsync(btnStyle);
+      } catch {}
+    }
+  }, [mode]);
 
   useEffect(() => {
     async function prepare() {
       try {
+        // Set Android system navigation bar (corrected per theme in useEffect)
+        if (Platform.OS === 'android') {
+          try {
+            const NavigationBar = require('expo-navigation-bar');
+            const navColor = mode === 'dark' ? '#1A1A1A' : '#FFFFFF';
+            const btnStyle = mode === 'dark' ? 'light' : 'dark';
+            NavigationBar.setBackgroundColorAsync(navColor);
+            NavigationBar.setButtonStyleAsync(btnStyle);
+          } catch {}
+        }
+
         // Initialize Notification Service (channels, handlers, etc.)
         await NotificationService.init();
 
@@ -43,6 +83,14 @@ function RootLayoutInner() {
         // Prefetch Quran surahs list in background for instant first interaction
         // This is fire-and-forget, doesn't block app startup
         QuranService.prefetch();
+
+        // Initialize DataSync (anonymous auth + cloud sync readiness)
+        DataSyncService.init().catch(() => {});
+
+        // Initialize FCM push notifications (after DataSync for user ID)
+        FCMService.init().then(() => {
+          FCMService.subscribeToDefaultTopics().catch(() => {});
+        }).catch(() => {});
       } catch (e) {
         console.warn('App preparation error:', e);
       } finally {
@@ -57,12 +105,22 @@ function RootLayoutInner() {
   useEffect(() => {
     if (!appReady) return;
 
-    responseListener.current = NotificationService.setupResponseHandler(router);
+    responseListener.current = NotificationService.setupResponseHandler(router as any);
+
+    // Handle incoming notifications: store in history + play azan sound
+    if (ExpoNotifications) {
+      receivedListener.current = ExpoNotifications.addNotificationReceivedListener((notification: any) => {
+        // Save to notification history
+        NotificationHistory.add(notification).catch(() => {});
+
+        // Play azan sound if this is a prayer notification (foreground only)
+        AzanPlayer.handleNotification(notification).catch(() => {});
+      });
+    }
 
     return () => {
-      if (responseListener.current) {
-        Notifications.removeNotificationSubscription(responseListener.current);
-      }
+      responseListener.current?.remove();
+      receivedListener.current?.remove();
     };
   }, [appReady, router]);
 
@@ -82,7 +140,7 @@ function RootLayoutInner() {
           if (lastScheduled !== today) {
             // New day! Notifications need rescheduling
             // They will be rescheduled when prayer times are next fetched
-            console.log('[Sukoon] New day detected — notifications will reschedule on next prayer times fetch');
+            if (__DEV__) console.log('[Sukoon] New day detected — notifications will reschedule on next prayer times fetch');
           }
         }
       }
@@ -131,16 +189,22 @@ function RootLayoutInner() {
           }}
         />
         <Stack.Screen
-          name="quran/[surah]"
+          name="notifications"
           options={{
             headerShown: false,
             animation: 'slide_from_right',
           }}
         />
-        <Stack.Screen name="tools/tasbeeh" options={{ headerShown: false }} />
-        <Stack.Screen name="tools/qiblah" options={{ headerShown: false }} />
-        <Stack.Screen name="tools/prayer" options={{ headerShown: false }} />
-        <Stack.Screen name="tools/dashboard" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="insights"
+          options={{
+            headerShown: false,
+            animation: 'slide_from_right',
+          }}
+        />
+        {/* quran/ and tools/ have their own _layout.tsx — just declare the directory */}
+        <Stack.Screen name="quran" options={{ headerShown: false }} />
+        <Stack.Screen name="tools" options={{ headerShown: false }} />
       </Stack>
 
       {/* Custom animated splash overlay — renders on top, self-removes */}

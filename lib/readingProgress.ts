@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DataSyncService } from './dataSyncService';
 
 // ── Storage Keys ──
 const KEYS = {
@@ -37,6 +38,8 @@ export const ReadingProgress = {
     try {
       const data: LastPosition = { surah, surahName, ayah, timestamp: Date.now() };
       await AsyncStorage.setItem(KEYS.LAST_SEEN, JSON.stringify(data));
+      // Background cloud sync
+      DataSyncService.saveReadingProgress({ lastSeen: data }).catch(() => {});
     } catch {}
   },
 
@@ -54,6 +57,8 @@ export const ReadingProgress = {
     try {
       const data: LastPosition = { surah, surahName, ayah, timestamp: Date.now() };
       await AsyncStorage.setItem(KEYS.LAST_AUDIO, JSON.stringify(data));
+      // Background cloud sync
+      DataSyncService.saveReadingProgress({ lastAudio: data }).catch(() => {});
     } catch {}
   },
 

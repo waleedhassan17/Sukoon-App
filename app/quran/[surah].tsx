@@ -766,12 +766,25 @@ export default function SurahScreen() {
       if (currentIndex != null) {
         const next = currentIndex + 1;
         if (next < ayahs.length && ayahs[next]?.audio) {
-          // Automatically play next ayah
           const ay = ayahs[next];
           if (ay?.audio) {
-            audioPlayer.play(ay.audio).then(() => {
-              setCurrentIndex(next);
-            }).catch((e) => console.error('[Audio] Auto-play error:', e));
+            // Optimistic: update index + scroll BEFORE loading audio
+            setCurrentIndex(next);
+            // scrollToAyah uses refs so we call it directly
+            setTimeout(() => {
+              if (isPageMode) {
+                const pageIdx = findPageForIndex(pages, next);
+                const pl = pageLayouts.current[pageIdx];
+                if (pl && scrollRef.current) scrollRef.current.scrollTo({ y: Math.max(0, pl.y - 20), animated: true });
+              } else {
+                const l = ayahLayouts.current[next];
+                if (l && scrollRef.current) scrollRef.current.scrollTo({ y: Math.max(0, l.y - 100), animated: true });
+              }
+            }, 50);
+            audioPlayer.play(ay.audio).catch((e) => {
+              console.error('[Audio] Auto-play error:', e);
+              setCurrentIndex(null);
+            });
           }
         } else {
           // Reached end of surah
@@ -781,7 +794,7 @@ export default function SurahScreen() {
       }
     });
     return () => { audioPlayer.setStatusCallback(null); audioPlayer.setFinishCallback(null); };
-  }, [currentIndex, ayahs]);
+  }, [currentIndex, ayahs, isPageMode, pages]);
 
   /* ─── Unified auto-scroll (same smooth engine for both modes) ─── */
   useEffect(() => {
@@ -936,43 +949,48 @@ export default function SurahScreen() {
     }
   }, [isPageMode, pages]);
 
+  /* ─── Auto-scroll to currently playing ayah whenever it changes ─── */
+  useEffect(() => {
+    if (currentIndex === null) return;
+    // Small delay to let layout settle (especially after first render)
+    const timer = setTimeout(() => {
+      scrollToAyah(currentIndex);
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [currentIndex, scrollToAyah]);
+
   const playIndex = useCallback(async (index: number) => {
     const ay = ayahs[index]; 
     if (!ay?.audio) return;
     
-    // Prevent rapid clicks - debounce audio changes
-    if (isAudioChangingRef.current) {
-      console.log('[Audio] Ignoring rapid click');
-      return;
-    }
-    
-    if (audioClickDebounceRef.current) {
-      clearTimeout(audioClickDebounceRef.current);
-    }
-    
+    // Light debounce — prevent truly simultaneous taps only
+    if (isAudioChangingRef.current) return;
     isAudioChangingRef.current = true;
+    
+    if (audioClickDebounceRef.current) clearTimeout(audioClickDebounceRef.current);
+    
+    // ─── OPTIMISTIC: update UI immediately before audio loads ───
+    setCurrentIndex(index);
+    scrollToAyah(index);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    
+    // ─── TRACK: mark as read ───
+    trackAyahRead(surahNumber, ay.numberInSurah);
+    if (meta?.englishName) {
+      ReadingProgress.setLastAudio(surahNumber, meta.englishName, ay.numberInSurah).catch(() => {});
+    }
     
     try {
       await audioPlayer.play(ay.audio);
-      setCurrentIndex(index);
-      
-      // ─── TRACK: mark as read ───
-      trackAyahRead(surahNumber, ay.numberInSurah);
-      
-      // ─── TRACK: last audio position ───
-      if (meta?.englishName) {
-        ReadingProgress.setLastAudio(surahNumber, meta.englishName, ay.numberInSurah).catch(() => {});
-      }
-      
-      setTimeout(() => scrollToAyah(index), 200);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     } catch (e) { 
-      console.error('[Audio] Play error:', e); 
+      console.error('[Audio] Play error:', e);
+      // Revert optimistic update on failure
+      setCurrentIndex(null);
     } finally {
-      // Reset debounce after 500ms
+      // Short debounce — just enough to prevent double-tap
       audioClickDebounceRef.current = setTimeout(() => {
         isAudioChangingRef.current = false;
-      }, 500);
+      }, 150);
     }
   }, [ayahs, surahNumber, meta, scrollToAyah, trackAyahRead]);
 

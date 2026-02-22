@@ -13,16 +13,21 @@ import { useSavedVerses } from '@/contexts/SavedVersesContext';
 import { ReadingProgress } from '@/lib/readingProgress';
 import { SHADOWS, RADIUS } from '@/constants/theme';
 
+interface ReadingHistoryItem {
+  date: string;
+  count: number;
+}
+
 export default function DashboardScreen() {
   const { theme } = useTheme();
   const router = useRouter();
   const { savedVerses } = useSavedVerses();
   const [streak, setStreak] = useState(0);
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<ReadingHistoryItem[]>([]);
 
   useEffect(() => {
     ReadingProgress.getStreak().then(setStreak).catch(() => {});
-    ReadingProgress.getReadingHistory().then(setHistory).catch(() => {});
+    ReadingProgress.getDailyReadCounts(7).then(setHistory).catch(() => {});
   }, []);
 
   const totalAyahs = history.reduce((sum, d) => sum + d.ayahsRead, 0);

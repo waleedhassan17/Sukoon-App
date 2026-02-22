@@ -175,7 +175,7 @@ export default function QiblahScreen() {
       setIsRunningOnEmulator(onEmulator);
       
       if (onEmulator) {
-        console.log('Running on emulator - compass not available');
+        if (__DEV__) console.log('Running on emulator - compass not available');
         setSensorAvailable(false);
         setSensorType('none');
         return false; // No error, just use static mode
@@ -188,7 +188,7 @@ export default function QiblahScreen() {
       if (Platform.OS === 'ios') {
         const deviceMotionAvailable = await DeviceMotion.isAvailableAsync();
         if (deviceMotionAvailable) {
-          console.log('Using DeviceMotion for compass (iOS)');
+          if (__DEV__) console.log('Using DeviceMotion for compass (iOS)');
           DeviceMotion.setUpdateInterval(MAGNETOMETER_UPDATE_INTERVAL);
           
           deviceMotionSubscription.current = DeviceMotion.addListener((data) => {
@@ -215,7 +215,7 @@ export default function QiblahScreen() {
       const magnetometerAvailable = await Magnetometer.isAvailableAsync();
       
       if (magnetometerAvailable) {
-        console.log('Using Magnetometer for compass');
+        if (__DEV__) console.log('Using Magnetometer for compass');
         Magnetometer.setUpdateInterval(MAGNETOMETER_UPDATE_INTERVAL);
         
         magnetometerSubscription.current = Magnetometer.addListener((data) => {
@@ -245,7 +245,7 @@ export default function QiblahScreen() {
       // Try DeviceMotion as last resort on Android
       const deviceMotionAvailable = await DeviceMotion.isAvailableAsync();
       if (deviceMotionAvailable) {
-        console.log('Using DeviceMotion for compass (Android fallback)');
+        if (__DEV__) console.log('Using DeviceMotion for compass (Android fallback)');
         DeviceMotion.setUpdateInterval(MAGNETOMETER_UPDATE_INTERVAL);
         
         deviceMotionSubscription.current = DeviceMotion.addListener((data) => {
@@ -262,7 +262,7 @@ export default function QiblahScreen() {
         return true;
       }
       
-      console.log('No compass sensor available');
+      if (__DEV__) console.log('No compass sensor available');
       setSensorAvailable(false);
       setSensorType('none');
       return false;
@@ -340,7 +340,7 @@ export default function QiblahScreen() {
           // If API succeeds and differs significantly, log it
           const diff = Math.abs(apiData.direction - localDirection);
           if (diff > 1) {
-            console.log(`API direction: ${apiData.direction}°, Local: ${localDirection}° (diff: ${diff.toFixed(2)}°)`);
+            if (__DEV__) console.log(`API direction: ${apiData.direction}°, Local: ${localDirection}° (diff: ${diff.toFixed(2)}°)`);
           }
         })
         .catch(() => {
@@ -349,7 +349,7 @@ export default function QiblahScreen() {
       
       return true;
     } catch (error) {
-      console.error('Qiblah calculation error:', error);
+      if (__DEV__) console.error('Qiblah calculation error:', error);
       return false;
     }
   }, [qiblahNeedleRotation]);

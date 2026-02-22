@@ -25,9 +25,16 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { useSavedVerses } from '@/contexts/SavedVersesContext';
 import { EmotionService } from '@/lib/emotionService';
+import type { EmotionResult, VerseRecommendation, AnalysisResult } from '@/lib/emotionService';
+import { getStaticEmotionData } from '@/lib/staticVerses';
 import { EMOTION_MAP } from '@/constants/theme';
 
 const { width: SW } = Dimensions.get('window');
+
+interface ThemeInterface {
+  border: string;
+  [key: string]: any;
+}
 
 /* ─── Staggered entry hook ─── */
 function useStagger(count: number, delay = 80) {
@@ -47,7 +54,7 @@ function useStagger(count: number, delay = 80) {
 }
 
 /* ─── Ornament ─── */
-function Ornament({ theme }: { theme: any }) {
+function Ornament({ theme }: { theme: ThemeInterface }) {
   return (
     <View style={s.ornRow}>
       <View style={[s.ornLine, { backgroundColor: theme.border }]} />
@@ -65,10 +72,14 @@ export default function EmotionResultScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const text = (params.text as string) || '';
+  const staticEmotion = (params.staticEmotion as string) || '';
 
   const [loading, setLoading] = useState(true);
-  const [emotions, setEmotions] = useState<any[]>([]);
-  const [verses, setVerses] = useState<any[]>([]);
+  const [emotions, setEmotions] = useState<EmotionResult[]>([]);
+  const [verses, setVerses] = useState<VerseRecommendation[]>([]);
+  const [analysisSource, setAnalysisSource] = useState<'api' | 'fallback'>('api');
+  const [modelVersion, setModelVersion] = useState('');
+  const [languageDetected, setLanguageDetected] = useState('');
 
   // We'll create stagger anims after loading
   // For now, use a simple content fade
@@ -77,27 +88,46 @@ export default function EmotionResultScreen() {
 
   useEffect(() => {
     analyzeAndFetch();
-  }, [text]);
+  }, [text, staticEmotion]);
 
   const analyzeAndFetch = async () => {
     setLoading(true);
     try {
-      const detected = EmotionService.analyzeEmotion(text);
-      setEmotions(detected);
-      const recommended = await EmotionService.getRecommendedVerses(detected, 5);
-      setVerses(recommended);
+      // ── Static emotion card path: skip API entirely ──
+      if (staticEmotion) {
+        const staticData = getStaticEmotionData(staticEmotion);
+        if (staticData) {
+          setEmotions(staticData.emotions);
+          setVerses(staticData.verses);
+          setAnalysisSource('api'); // show as confident
+          setModelVersion('static-curated');
+          setLanguageDetected('en');
+          Animated.parallel([
+            Animated.timing(contentFade, { toValue: 1, duration: 500, delay: 150, useNativeDriver: true }),
+            Animated.timing(contentSlide, { toValue: 0, duration: 500, delay: 150, useNativeDriver: true }),
+          ]).start();
+          return;
+        }
+      }
+      // ── Normal path: call the ML emotion API ──
+      const result: AnalysisResult = await EmotionService.analyze(text, 5, 5);
+      setEmotions(result.emotions);
+      setVerses(result.verses);
+      setAnalysisSource(result.source);
+      setModelVersion(result.modelVersion);
+      setLanguageDetected(result.languageDetected);
       Animated.parallel([
         Animated.timing(contentFade, { toValue: 1, duration: 500, delay: 150, useNativeDriver: true }),
         Animated.timing(contentSlide, { toValue: 0, duration: 500, delay: 150, useNativeDriver: true }),
       ]).start();
     } catch (e) {
-      console.error('Analysis error:', e);
+      if (__DEV__) console.error('Analysis error:', e);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleShare = async (verse: any) => {
+  const handleShare = async (verse: VerseRecommendation) => {
     try {
       await Share.share({
         message: `📖 ${verse.surahName} (${verse.surah}:${verse.ayah})\n\n${verse.arabic}\n\n"${verse.english}"\n\n— Sukoon App`,
@@ -105,7 +135,7 @@ export default function EmotionResultScreen() {
     } catch {}
   };
 
-  const toggleBookmark = (verse: any) => {
+  const toggleBookmark = (verse: VerseRecommendation) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     if (isVerseSaved(verse.surah, verse.ayah)) {
       removeVerse(verse.surah, verse.ayah);
@@ -117,7 +147,7 @@ export default function EmotionResultScreen() {
         english: verse.english,
         urdu: verse.urdu,
         surahName: verse.surahName,
-        emotions: verse.emotions,
+        emotions: verse.matchedEmotion ? [verse.matchedEmotion] : [],
       });
     }
   };
@@ -213,7 +243,14 @@ export default function EmotionResultScreen() {
           {/* ═══════════════ EMOTIONS ═══════════════ */}
           <View style={s.section}>
             <View style={s.sectionHeader}>
-              <Text style={[s.sectionTitle, { color: theme.text }]}>Detected Emotions</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={[s.sectionTitle, { color: theme.text }]}>Detected Emotions</Text>
+                {analysisSource === 'api' && (
+                  <View style={{ backgroundColor: '#2D6A4F18', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#2D6A4F' }}>AI</Text>
+                  </View>
+                )}
+              </View>
             </View>
             <View style={[s.emotionsCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
               {emotions.map((em, i) => {
@@ -228,7 +265,7 @@ export default function EmotionResultScreen() {
                     <View style={[s.emotionIconWrap, { backgroundColor: info.color + '12' }]}>
                       <Ionicons name={info.icon as any} size={16} color={info.color} />
                     </View>
-                    <Text style={[s.emotionLabel, { color: theme.text }]}>{info.label}</Text>
+                    <Text numberOfLines={1} style={[s.emotionLabel, { color: theme.text }]}>{info.label}</Text>
                     <View style={[s.emotionBarTrack, { backgroundColor: theme.surfaceMuted }]}>
                       <View
                         style={[
@@ -315,14 +352,17 @@ export default function EmotionResultScreen() {
                       <Text style={[s.urduText, { color: theme.textSecondary, fontSize: sizes.urdu, lineHeight: sizes.urduLine }]}>{verse.urdu}</Text>
                     )}
 
-                    {/* Emotion tags */}
-                    {verse.emotions?.length > 0 && (
+                    {/* Matched emotion tag */}
+                    {verse.matchedEmotion && (
                       <View style={[s.tagsRow, { borderTopColor: theme.border }]}>
-                        {verse.emotions.map((em: string, j: number) => (
-                          <View key={j} style={[s.tag, { backgroundColor: theme.accent + '14' }]}>
-                            <Text style={[s.tagText, { color: theme.accent }]}>{em}</Text>
+                        <View style={[s.tag, { backgroundColor: (EMOTION_MAP[verse.matchedEmotion]?.color || theme.accent) + '14' }]}>
+                          <Text style={[s.tagText, { color: EMOTION_MAP[verse.matchedEmotion]?.color || theme.accent }]}>{verse.matchedEmotion}</Text>
+                        </View>
+                        {verse.relevanceScore > 0 && (
+                          <View style={[s.tag, { backgroundColor: theme.surfaceMuted }]}>
+                            <Text style={[s.tagText, { color: theme.textTertiary }]}>{Math.round(verse.relevanceScore * 100)}% match</Text>
                           </View>
-                        ))}
+                        )}
                       </View>
                     )}
                   </View>
@@ -572,7 +612,8 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     textTransform: 'capitalize',
-    width: 72,
+    minWidth: 80,
+    maxWidth: 110,
   },
   emotionBarTrack: {
     flex: 1,

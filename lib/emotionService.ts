@@ -1,221 +1,349 @@
 /**
- * EmotionService - Emotion detection & Quranic verse recommendation
- * Uses keyword-based analysis (mocked ML) with real Quran API data
+ * EmotionService v2.0 — Production ML-Powered Emotion Detection
+ * 
+ * Backend: https://waleedhassan-sukoon-emotion-api.hf.space
+ * Model: Custom fine-tuned transformer, 50 emotion classes
+ * Languages: English, Urdu, Roman Urdu
+ * 
+ * Architecture:
+ * - Primary: POST /predict → real ML inference + Quranic verses
+ * - Fallback: Local keyword matching (if API unreachable)
+ * - Voice: POST /predict/voice → voice-based emotion detection
  */
 
-import { QuranService } from './quranService';
+// ══════════════════════════════════════════════
+// TYPES
+// ══════════════════════════════════════════════
 
-interface EmotionResult {
+export interface EmotionResult {
   emotion: string;
   confidence: number;
 }
 
-interface VerseRecommendation {
+export interface VerseRecommendation {
   surah: number;
   ayah: number;
   arabic: string;
   english: string;
   urdu?: string;
   surahName: string;
-  emotions: string[];
+  reference: string;
+  matchedEmotion: string;
+  relevanceScore: number;
 }
 
-// Keyword to emotion mapping
-const EMOTION_KEYWORDS: Record<string, string[]> = {
-  peace: ['calm', 'peace', 'tranquil', 'serene', 'quiet', 'still', 'relaxed', 'content', 'sukoon'],
-  hope: ['hope', 'optimistic', 'bright', 'future', 'better', 'positive', 'looking forward', 'inshallah'],
-  gratitude: ['grateful', 'thankful', 'blessed', 'alhamdulillah', 'appreciate', 'gift', 'gratitude'],
-  fear: ['afraid', 'fear', 'scared', 'worry', 'terror', 'dread', 'frightened', 'nervous'],
-  sadness: ['sad', 'unhappy', 'depressed', 'cry', 'tears', 'sorrow', 'grief', 'heartbroken', 'down'],
-  anxiety: ['anxious', 'stressed', 'overwhelmed', 'panic', 'restless', 'uneasy', 'tension', 'worried'],
-  guidance: ['lost', 'confused', 'direction', 'guide', 'path', 'way', 'seek', 'searching'],
-  patience: ['patient', 'waiting', 'endure', 'difficult', 'test', 'trial', 'struggle', 'hard'],
-  forgiveness: ['forgive', 'sorry', 'regret', 'mistake', 'sin', 'repent', 'guilt', 'ashamed', 'wrong'],
-  love: ['love', 'care', 'affection', 'family', 'heart', 'companion', 'together', 'miss'],
-  strength: ['strong', 'strength', 'courage', 'brave', 'fight', 'resilient', 'power', 'overcome'],
-  trust: ['trust', 'faith', 'believe', 'tawakkul', 'rely', 'depend', 'confidence', 'iman'],
-  loneliness: ['lonely', 'alone', 'isolated', 'nobody', 'abandoned', 'solitude', 'friendless'],
-  anger: ['angry', 'frustrated', 'mad', 'furious', 'rage', 'annoyed', 'irritated', 'upset'],
-  joy: ['happy', 'joy', 'delighted', 'excited', 'wonderful', 'amazing', 'celebrate', 'smile'],
-  wisdom: ['understand', 'knowledge', 'learn', 'wisdom', 'insight', 'reflect', 'think', 'ponder'],
+export interface AnalysisResult {
+  emotions: EmotionResult[];
+  verses: VerseRecommendation[];
+  languageDetected: string;
+  modelVersion: string;
+  inferenceTime: number;
+  source: 'api' | 'fallback';
+}
+
+interface APIResponse {
+  input_text: string;
+  predicted_emotions: string[];
+  confidence_scores: number[];
+  language_detected: string;
+  model_version: string;
+  inference_time: number;
+  verses: APIVerse[];
+}
+
+interface APIVerse {
+  reference: string;
+  surah_name: string;
+  surah_number: number;
+  ayah: number;
+  arabic: string;
+  english: string;
+  urdu: string;
+  matched_emotion: string;
+  relevance_score: number;
+}
+
+// ══════════════════════════════════════════════
+// CONFIG
+// ══════════════════════════════════════════════
+
+const API_BASE = 'https://waleedhassan-sukoon-emotion-api.hf.space';
+const TIMEOUT_MS = 30000; // 30s (HF spaces can cold-start)
+const MAX_RETRIES = 2;
+
+// ══════════════════════════════════════════════
+// FETCH WITH TIMEOUT + RETRY
+// ══════════════════════════════════════════════
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchWithRetry(url: string, options: RequestInit, retries = MAX_RETRIES): Promise<Response> {
+  let lastError: Error | null = null;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetchWithTimeout(url, options, TIMEOUT_MS);
+      if (res.ok) return res;
+      if (res.status >= 500 && i < retries) {
+        await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+        continue;
+      }
+      throw new Error(`API returned ${res.status}: ${res.statusText}`);
+    } catch (e: any) {
+      lastError = e;
+      if (e.name === 'AbortError') {
+        lastError = new Error('Request timed out');
+      }
+      if (i < retries) {
+        await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+      }
+    }
+  }
+  throw lastError || new Error('API request failed');
+}
+
+// ══════════════════════════════════════════════
+// LOCAL FALLBACK (when API is down)
+// ══════════════════════════════════════════════
+
+const FALLBACK_KEYWORDS: Record<string, string[]> = {
+  peace: ['calm', 'peace', 'tranquil', 'serene', 'relaxed', 'sukoon'],
+  hope: ['hope', 'optimistic', 'future', 'better', 'inshallah'],
+  gratitude: ['grateful', 'thankful', 'blessed', 'alhamdulillah'],
+  sadness: ['sad', 'unhappy', 'depressed', 'cry', 'tears', 'grief', 'heartbroken'],
+  anxiety: ['anxious', 'stressed', 'overwhelmed', 'panic', 'worried'],
+  fear: ['afraid', 'fear', 'scared', 'worry', 'frightened'],
+  guidance: ['lost', 'confused', 'direction', 'guide', 'searching'],
+  patience: ['patient', 'waiting', 'endure', 'struggle', 'difficult'],
+  forgiveness: ['forgive', 'sorry', 'regret', 'mistake', 'guilt'],
+  love: ['love', 'care', 'family', 'heart', 'miss'],
+  anger: ['angry', 'frustrated', 'furious', 'rage', 'annoyed'],
+  joy: ['happy', 'joy', 'excited', 'wonderful', 'celebrate'],
+  loneliness: ['lonely', 'alone', 'isolated', 'abandoned'],
+  trust: ['trust', 'faith', 'believe', 'tawakkul', 'iman'],
+  strength: ['strong', 'courage', 'brave', 'resilient', 'overcome'],
 };
 
-// Curated verse recommendations by emotion
-const VERSE_MAP: Record<string, { surah: number; ayah: number }[]> = {
-  peace: [
-    { surah: 13, ayah: 28 }, { surah: 89, ayah: 27 }, { surah: 2, ayah: 286 },
-    { surah: 48, ayah: 4 }, { surah: 6, ayah: 127 },
-  ],
-  hope: [
-    { surah: 94, ayah: 5 }, { surah: 94, ayah: 6 }, { surah: 65, ayah: 3 },
-    { surah: 12, ayah: 87 }, { surah: 39, ayah: 53 },
-  ],
-  gratitude: [
-    { surah: 14, ayah: 7 }, { surah: 2, ayah: 152 }, { surah: 31, ayah: 12 },
-    { surah: 16, ayah: 18 }, { surah: 55, ayah: 13 },
-  ],
-  fear: [
-    { surah: 2, ayah: 286 }, { surah: 3, ayah: 173 }, { surah: 9, ayah: 51 },
-    { surah: 65, ayah: 3 }, { surah: 8, ayah: 46 },
-  ],
+const FALLBACK_VERSES: Record<string, { surah: number; ayah: number; surahName: string; arabic: string; english: string; urdu: string }[]> = {
   sadness: [
-    { surah: 93, ayah: 3 }, { surah: 93, ayah: 4 }, { surah: 94, ayah: 5 },
-    { surah: 2, ayah: 155 }, { surah: 3, ayah: 139 },
+    { surah: 93, ayah: 3, surahName: 'Ad-Duha', arabic: 'مَا وَدَّعَكَ رَبُّكَ وَمَا قَلَىٰ', english: 'Your Lord has not forsaken you, nor is He displeased.', urdu: 'تمہارے رب نے نہ تمہیں چھوڑا اور نہ ناراض ہوا۔' },
+    { surah: 94, ayah: 5, surahName: 'Ash-Sharh', arabic: 'فَإِنَّ مَعَ الْعُسْرِ يُسْرًا', english: 'Indeed, with hardship comes ease.', urdu: 'بے شک مشکل کے ساتھ آسانی ہے۔' },
   ],
   anxiety: [
-    { surah: 13, ayah: 28 }, { surah: 94, ayah: 5 }, { surah: 2, ayah: 286 },
-    { surah: 65, ayah: 3 }, { surah: 3, ayah: 173 },
+    { surah: 13, ayah: 28, surahName: 'Ar-Ra\'d', arabic: 'أَلَا بِذِكْرِ اللَّهِ تَطْمَئِنُّ الْقُلُوبُ', english: 'Verily, in the remembrance of Allah do hearts find rest.', urdu: 'خبردار! اللہ کی یاد سے دلوں کو سکون ملتا ہے۔' },
+  ],
+  peace: [
+    { surah: 89, ayah: 27, surahName: 'Al-Fajr', arabic: 'يَا أَيَّتُهَا النَّفْسُ الْمُطْمَئِنَّةُ', english: 'O soul at peace!', urdu: 'اے مطمئن نفس!' },
   ],
   guidance: [
-    { surah: 1, ayah: 6 }, { surah: 93, ayah: 7 }, { surah: 2, ayah: 186 },
-    { surah: 20, ayah: 114 }, { surah: 6, ayah: 161 },
+    { surah: 1, ayah: 6, surahName: 'Al-Fatiha', arabic: 'اهْدِنَا الصِّرَاطَ الْمُسْتَقِيمَ', english: 'Guide us to the straight path.', urdu: 'ہمیں سیدھے راستے کی ہدایت دے۔' },
   ],
-  patience: [
-    { surah: 2, ayah: 153 }, { surah: 2, ayah: 155 }, { surah: 3, ayah: 200 },
-    { surah: 11, ayah: 115 }, { surah: 103, ayah: 3 },
+  hope: [
+    { surah: 94, ayah: 6, surahName: 'Ash-Sharh', arabic: 'إِنَّ مَعَ الْعُسْرِ يُسْرًا', english: 'Indeed, with hardship comes ease.', urdu: 'بے شک مشکل کے ساتھ آسانی ہے۔' },
+  ],
+  gratitude: [
+    { surah: 14, ayah: 7, surahName: 'Ibrahim', arabic: 'لَئِن شَكَرْتُمْ لَأَزِيدَنَّكُمْ', english: 'If you are grateful, I will give you more.', urdu: 'اگر تم شکر کرو گے تو میں تمہیں اور زیادہ دوں گا۔' },
   ],
   forgiveness: [
-    { surah: 39, ayah: 53 }, { surah: 4, ayah: 110 }, { surah: 3, ayah: 135 },
-    { surah: 11, ayah: 114 }, { surah: 25, ayah: 70 },
+    { surah: 39, ayah: 53, surahName: 'Az-Zumar', arabic: 'لَا تَقْنَطُوا مِن رَّحْمَةِ اللَّهِ', english: 'Do not despair of the mercy of Allah.', urdu: 'اللہ کی رحمت سے ناامید نہ ہو۔' },
   ],
   love: [
-    { surah: 30, ayah: 21 }, { surah: 3, ayah: 31 }, { surah: 19, ayah: 96 },
-    { surah: 85, ayah: 14 }, { surah: 2, ayah: 165 },
+    { surah: 30, ayah: 21, surahName: 'Ar-Rum', arabic: 'وَجَعَلَ بَيْنَكُم مَّوَدَّةً وَرَحْمَةً', english: 'And He placed between you affection and mercy.', urdu: 'اور تمہارے درمیان محبت اور رحمت رکھ دی۔' },
   ],
-  strength: [
-    { surah: 8, ayah: 46 }, { surah: 3, ayah: 139 }, { surah: 29, ayah: 69 },
-    { surah: 2, ayah: 286 }, { surah: 47, ayah: 7 },
+  fear: [
+    { surah: 3, ayah: 173, surahName: 'Al-Imran', arabic: 'حَسْبُنَا اللَّهُ وَنِعْمَ الْوَكِيلُ', english: 'Sufficient for us is Allah, and He is the best disposer of affairs.', urdu: 'ہمارے لیے اللہ کافی ہے اور وہ بہترین کارساز ہے۔' },
   ],
-  trust: [
-    { surah: 3, ayah: 173 }, { surah: 65, ayah: 3 }, { surah: 9, ayah: 51 },
-    { surah: 14, ayah: 12 }, { surah: 8, ayah: 2 },
-  ],
-  loneliness: [
-    { surah: 2, ayah: 186 }, { surah: 93, ayah: 3 }, { surah: 20, ayah: 46 },
-    { surah: 94, ayah: 5 }, { surah: 29, ayah: 69 },
+  patience: [
+    { surah: 2, ayah: 153, surahName: 'Al-Baqarah', arabic: 'إِنَّ اللَّهَ مَعَ الصَّابِرِينَ', english: 'Indeed, Allah is with the patient.', urdu: 'بے شک اللہ صبر کرنے والوں کے ساتھ ہے۔' },
   ],
   anger: [
-    { surah: 3, ayah: 134 }, { surah: 42, ayah: 37 }, { surah: 41, ayah: 34 },
-    { surah: 7, ayah: 199 }, { surah: 16, ayah: 126 },
+    { surah: 3, ayah: 134, surahName: 'Al-Imran', arabic: 'وَالْكَاظِمِينَ الْغَيْظَ وَالْعَافِينَ عَنِ النَّاسِ', english: 'Those who restrain anger and pardon people.', urdu: 'غصہ پینے والے اور لوگوں سے درگزر کرنے والے۔' },
   ],
   joy: [
-    { surah: 55, ayah: 13 }, { surah: 10, ayah: 58 }, { surah: 30, ayah: 4 },
-    { surah: 14, ayah: 7 }, { surah: 3, ayah: 170 },
+    { surah: 10, ayah: 58, surahName: 'Yunus', arabic: 'بِفَضْلِ اللَّهِ وَبِرَحْمَتِهِ فَبِذَٰلِكَ فَلْيَفْرَحُوا', english: 'In the bounty of Allah and in His mercy — in that let them rejoice.', urdu: 'اللہ کے فضل اور اس کی رحمت پر خوش ہو جائیں۔' },
   ],
-  wisdom: [
-    { surah: 2, ayah: 269 }, { surah: 31, ayah: 12 }, { surah: 20, ayah: 114 },
-    { surah: 39, ayah: 9 }, { surah: 96, ayah: 1 },
+  trust: [
+    { surah: 65, ayah: 3, surahName: 'At-Talaq', arabic: 'وَمَن يَتَوَكَّلْ عَلَى اللَّهِ فَهُوَ حَسْبُهُ', english: 'Whoever relies upon Allah — He is sufficient for him.', urdu: 'جو اللہ پر بھروسہ کرے اللہ اسے کافی ہے۔' },
+  ],
+  strength: [
+    { surah: 8, ayah: 46, surahName: 'Al-Anfal', arabic: 'وَاصْبِرُوا ۚ إِنَّ اللَّهَ مَعَ الصَّابِرِينَ', english: 'And be patient. Indeed, Allah is with the patient.', urdu: 'اور صبر کرو بے شک اللہ صبر والوں کے ساتھ ہے۔' },
+  ],
+  loneliness: [
+    { surah: 2, ayah: 186, surahName: 'Al-Baqarah', arabic: 'فَإِنِّي قَرِيبٌ', english: 'Indeed I am near.', urdu: 'میں قریب ہوں۔' },
   ],
 };
+
+function localFallbackAnalyze(text: string): { emotions: EmotionResult[]; verses: VerseRecommendation[] } {
+  const lower = text.toLowerCase();
+  const scores: Record<string, number> = {};
+
+  for (const [emotion, keywords] of Object.entries(FALLBACK_KEYWORDS)) {
+    let matchCount = 0;
+    for (const keyword of keywords) {
+      if (lower.includes(keyword)) matchCount++;
+    }
+    if (matchCount > 0) {
+      scores[emotion] = Math.min(matchCount / 3, 1.0);
+    }
+  }
+
+  if (Object.keys(scores).length === 0) {
+    scores['guidance'] = 0.6;
+    scores['peace'] = 0.4;
+  }
+
+  const emotions = Object.entries(scores)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 3)
+    .map(([emotion, confidence]) => ({ emotion, confidence: Math.round(confidence * 100) / 100 }));
+
+  const verses: VerseRecommendation[] = [];
+  const seen = new Set<string>();
+  for (const { emotion, confidence } of emotions) {
+    const pool = FALLBACK_VERSES[emotion] || FALLBACK_VERSES['guidance'] || [];
+    for (const v of pool) {
+      const key = `${v.surah}:${v.ayah}`;
+      if (!seen.has(key) && verses.length < 5) {
+        seen.add(key);
+        verses.push({
+          surah: v.surah,
+          ayah: v.ayah,
+          arabic: v.arabic,
+          english: v.english,
+          urdu: v.urdu,
+          surahName: v.surahName,
+          reference: `Surah ${v.surahName} ${v.surah}:${v.ayah}`,
+          matchedEmotion: emotion,
+          relevanceScore: confidence,
+        });
+      }
+    }
+  }
+
+  return { emotions, verses };
+}
+
+// ══════════════════════════════════════════════
+// MAIN SERVICE
+// ══════════════════════════════════════════════
 
 export const EmotionService = {
+
   /**
-   * Analyze text for emotions using keyword matching
+   * Analyze text via ML API → returns emotions + Quranic verses
+   * Falls back to local keyword matching if API is down
+   */
+  async analyze(text: string, maxEmotions = 5, maxVerses = 5): Promise<AnalysisResult> {
+    try {
+      const res = await fetchWithRetry(`${API_BASE}/predict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          max_emotions: maxEmotions,
+          max_verses: maxVerses,
+          threshold: null,
+        }),
+      });
+
+      const data: APIResponse = await res.json();
+
+      const emotions: EmotionResult[] = data.predicted_emotions.map((em, i) => ({
+        emotion: em,
+        confidence: data.confidence_scores[i] ?? 0,
+      }));
+
+      const verses: VerseRecommendation[] = (data.verses || []).map(v => ({
+        surah: v.surah_number,
+        ayah: v.ayah,
+        arabic: v.arabic,
+        english: v.english,
+        urdu: v.urdu || '',
+        surahName: v.surah_name,
+        reference: v.reference,
+        matchedEmotion: v.matched_emotion,
+        relevanceScore: v.relevance_score,
+      }));
+
+      return {
+        emotions,
+        verses,
+        languageDetected: data.language_detected || 'en',
+        modelVersion: data.model_version || 'v2.0',
+        inferenceTime: data.inference_time || 0,
+        source: 'api',
+      };
+    } catch (error) {
+      if (__DEV__) console.warn('[EmotionService] API failed, using fallback:', error);
+
+      const fallback = localFallbackAnalyze(text);
+      return {
+        ...fallback,
+        languageDetected: 'unknown',
+        modelVersion: 'local',
+        inferenceTime: 0,
+        source: 'fallback',
+      };
+    }
+  },
+
+  /**
+   * Legacy compatibility: synchronous emotion analysis (local only)
    */
   analyzeEmotion(text: string): EmotionResult[] {
-    const lower = text.toLowerCase();
-    const scores: Record<string, number> = {};
-
-    for (const [emotion, keywords] of Object.entries(EMOTION_KEYWORDS)) {
-      let matchCount = 0;
-      for (const keyword of keywords) {
-        if (lower.includes(keyword)) matchCount++;
-      }
-      if (matchCount > 0) {
-        scores[emotion] = Math.min(matchCount / 3, 1.0);
-      }
-    }
-
-    // If no matches, default to "guidance" and "peace"
-    if (Object.keys(scores).length === 0) {
-      scores['guidance'] = 0.6;
-      scores['peace'] = 0.4;
-    }
-
-    return Object.entries(scores)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 5)
-      .map(([emotion, confidence]) => ({ emotion, confidence: Math.round(confidence * 100) / 100 }));
+    return localFallbackAnalyze(text).emotions;
   },
 
   /**
-   * Get recommended verses based on detected emotions
+   * Legacy compatibility: get verse recommendations (local only)
    */
-  async getRecommendedVerses(emotions: EmotionResult[], count: number = 5): Promise<VerseRecommendation[]> {
-    const versesToFetch: { surah: number; ayah: number; emotions: string[] }[] = [];
+  async getRecommendedVerses(emotions: EmotionResult[], count = 5): Promise<VerseRecommendation[]> {
+    const allVerses: VerseRecommendation[] = [];
     const seen = new Set<string>();
-
-    for (const { emotion } of emotions) {
-      const emotionVerses = VERSE_MAP[emotion] || VERSE_MAP['guidance'];
-      for (const v of emotionVerses) {
+    for (const { emotion, confidence } of emotions) {
+      const pool = FALLBACK_VERSES[emotion] || FALLBACK_VERSES['guidance'] || [];
+      for (const v of pool) {
         const key = `${v.surah}:${v.ayah}`;
-        if (!seen.has(key) && versesToFetch.length < count) {
+        if (!seen.has(key) && allVerses.length < count) {
           seen.add(key);
-          versesToFetch.push({ ...v, emotions: [emotion] });
-        }
-      }
-    }
-
-    // Fetch actual verse data from API
-    const results: VerseRecommendation[] = [];
-    for (const v of versesToFetch.slice(0, count)) {
-      try {
-        const globalAyahNum = await getGlobalAyahNumber(v.surah, v.ayah);
-        const [arRes, enRes, urRes] = await Promise.all([
-          fetch(`https://api.alquran.cloud/v1/ayah/${globalAyahNum}`),
-          fetch(`https://api.alquran.cloud/v1/ayah/${globalAyahNum}/en.sahih`),
-          fetch(`https://api.alquran.cloud/v1/ayah/${globalAyahNum}/ur.jalandhry`),
-        ]);
-        const [ar, en, ur] = await Promise.all([arRes.json(), enRes.json(), urRes.json()]);
-        
-        if (ar.code === 200) {
-          results.push({
+          allVerses.push({
             surah: v.surah,
             ayah: v.ayah,
-            arabic: ar.data.text,
-            english: en.data.text,
-            urdu: ur.data?.text,
-            surahName: ar.data.surah.englishName,
-            emotions: v.emotions,
+            arabic: v.arabic,
+            english: v.english,
+            urdu: v.urdu,
+            surahName: v.surahName,
+            reference: `Surah ${v.surahName} ${v.surah}:${v.ayah}`,
+            matchedEmotion: emotion,
+            relevanceScore: confidence,
           });
         }
-      } catch (e) {
-        console.error('Error fetching verse:', e);
       }
     }
+    return allVerses;
+  },
 
-    return results;
+  /**
+   * Pre-warm API (HF spaces sleep after inactivity)
+   * Call on app launch in background
+   */
+  async warmUp(): Promise<boolean> {
+    try {
+      const res = await fetchWithTimeout(`${API_BASE}/health`, { method: 'GET' }, 10000);
+      const data = await res.json();
+      return data.status === 'healthy' && data.model_loaded === true;
+    } catch {
+      return false;
+    }
   },
 };
-
-// Helper to calculate global ayah number
-async function getGlobalAyahNumber(surah: number, ayah: number): Promise<number> {
-  // Surah starting ayah numbers (approximate, for the first few surahs)
-  const surahStarts: Record<number, number> = {
-    1: 1, 2: 8, 3: 294, 4: 494, 5: 670, 6: 790, 7: 957, 8: 1163, 9: 1236,
-    10: 1365, 11: 1474, 12: 1597, 13: 1708, 14: 1751, 15: 1803, 16: 1852,
-    17: 1981, 18: 2092, 19: 2203, 20: 2302, 21: 2437, 22: 2549, 23: 2627,
-    24: 2746, 25: 2810, 26: 2887, 27: 3114, 28: 3207, 29: 3296, 30: 3365,
-    31: 3425, 32: 3459, 33: 3489, 34: 3563, 35: 3608, 36: 3654, 37: 3737,
-    38: 3919, 39: 4007, 40: 4082, 41: 4167, 42: 4221, 43: 4274, 44: 4363,
-    45: 4400, 46: 4437, 47: 4472, 48: 4510, 49: 4539, 50: 4557, 51: 4602,
-    52: 4662, 53: 4711, 54: 4773, 55: 4828, 56: 4906, 57: 5002, 58: 5031,
-    59: 5053, 60: 5077, 61: 5090, 62: 5104, 63: 5115, 64: 5126, 65: 5144,
-    66: 5157, 67: 5169, 68: 5200, 69: 5252, 70: 5304, 71: 5348, 72: 5376,
-    73: 5404, 74: 5424, 75: 5480, 76: 5520, 77: 5551, 78: 5601, 79: 5641,
-    80: 5687, 81: 5729, 82: 5758, 83: 5777, 84: 5813, 85: 5838, 86: 5861,
-    87: 5878, 88: 5897, 89: 5923, 90: 5953, 91: 5973, 92: 5988, 93: 6009,
-    94: 6020, 95: 6028, 96: 6036, 97: 6055, 98: 6060, 99: 6068, 100: 6076,
-    101: 6087, 102: 6098, 103: 6106, 104: 6109, 105: 6118, 106: 6123,
-    107: 6127, 108: 6134, 109: 6137, 110: 6143, 111: 6146, 112: 6151,
-    113: 6155, 114: 6161,
-  };
-  
-  const start = surahStarts[surah];
-  if (start) return start + ayah - 1;
-  
-  // Fallback: use the API to find it
-  return ayah; // This is approximate
-}
 
 export default EmotionService;

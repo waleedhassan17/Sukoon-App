@@ -1,8 +1,9 @@
 import { Tabs } from 'expo-router';
-import { View, StyleSheet, Platform, Animated } from 'react-native';
+import { View, StyleSheet, Platform } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 
 const TAB_ITEMS = [
   { name: 'index', title: 'Home', icon: 'home' },
@@ -12,10 +13,15 @@ const TAB_ITEMS = [
   { name: 'settings', title: 'Settings', icon: 'settings' },
 ] as const;
 
+type IconName = typeof TAB_ITEMS[number]['icon'];
+
 export default function TabLayout() {
   const { theme, mode } = useTheme();
-
   const isDark = mode === 'dark';
+  const insets = useSafeAreaInsets();
+
+  // Safe area bottom — tab bar extends through it, content padded above
+  const safeBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 0);
 
   return (
     <Tabs
@@ -28,43 +34,44 @@ export default function TabLayout() {
           bottom: 0,
           left: 0,
           right: 0,
-          height: Platform.OS === 'ios' ? 100 : 90,
-          borderRadius: 0,
+          height: 64 + safeBottom,
           backgroundColor: theme.tabBarBg,
-          borderTopWidth: isDark ? 0 : 1,
-          borderTopColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
-          borderBottomWidth: 0,
-          paddingBottom: Platform.OS === 'ios' ? 32 : 12,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: isDark
+            ? 'rgba(255,255,255,0.06)'
+            : 'rgba(0,0,0,0.06)',
+          borderRadius: 0,
+          paddingBottom: safeBottom,
           paddingTop: 8,
-          paddingHorizontal: 12,
+          paddingHorizontal: 4,
           ...Platform.select({
             ios: {
-              shadowColor: isDark ? '#000000' : theme.shadowColor,
-              shadowOffset: { width: 0, height: -8 },
-              shadowOpacity: isDark ? 0.5 : 0.12,
-              shadowRadius: isDark ? 24 : 28,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: -6 },
+              shadowOpacity: 0.25,
+              shadowRadius: 12,
             },
-            android: { 
-              elevation: isDark ? 16 : 12,
+            android: {
+              elevation: 12,
             },
           }),
         },
         tabBarItemStyle: {
-          paddingVertical: 8,
+          paddingTop: 4,
+          paddingBottom: 4,
           height: 50,
           flex: 1,
         },
         tabBarLabelStyle: {
-          fontSize: 9.5,
-          fontWeight: '700',
+          fontSize: 10,
+          fontWeight: '600',
           letterSpacing: 0.4,
-          marginTop: 4,
+          marginTop: 2,
           marginBottom: 0,
-          textTransform: 'capitalize',
         },
         tabBarIconStyle: {
           marginTop: 0,
-          marginBottom: 4,
+          marginBottom: 0,
         },
       }}
     >
@@ -75,15 +82,23 @@ export default function TabLayout() {
           options={{
             title,
             tabBarIcon: ({ color, focused }) => (
-              <View style={[
-                styles.iconContainer, 
-                focused && [
-                  styles.iconContainerActive,
-                  { backgroundColor: isDark ? 'rgba(82,183,136,0.18)' : 'rgba(27,67,50,0.1)' }
-                ]
-              ]}>
+              <View
+                style={[
+                  styles.iconContainer,
+                  focused && [
+                    styles.iconContainerActive,
+                    {
+                      backgroundColor: isDark
+                        ? 'rgba(82,183,136,0.15)'
+                        : 'rgba(27,67,50,0.08)',
+                    },
+                  ],
+                ]}
+              >
                 <Ionicons
-                  name={focused ? (icon as any) : (`${icon}-outline` as any)}
+                  name={
+                    (focused ? icon : `${icon}-outline`) as IconName
+                  }
                   size={22}
                   color={color}
                 />
@@ -100,11 +115,13 @@ const styles = StyleSheet.create({
   iconContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    width: 50,
-    height: 48,
-    borderRadius: 14,
+    width: 44,
+    height: 34,
+    borderRadius: 12,
   },
   iconContainerActive: {
-    transform: [{ scale: 1.05 }],
+    width: 52,
+    height: 34,
+    borderRadius: 14,
   },
 });

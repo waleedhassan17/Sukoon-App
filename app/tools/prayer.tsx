@@ -65,7 +65,7 @@ export default function PrayerTimesScreen() {
       );
       const data = await response.json();
       
-      console.log('BigDataCloud response:', JSON.stringify(data)); // Debug
+      if (__DEV__) console.log('BigDataCloud response:', JSON.stringify(data)); // Debug
       
       if (data) {
         // BigDataCloud provides clean city name in 'city' or 'locality'
@@ -142,7 +142,7 @@ export default function PrayerTimesScreen() {
           
           // Store coordinates for display
           setCoordinates({ lat, lng });
-          console.log('GPS Coordinates:', lat, lng); // Debug log
+          if (__DEV__) console.log('GPS Coordinates:', lat, lng); // Debug log
           
           // Try BigDataCloud first (most accurate for city names)
           let cityName = await reverseGeocodeCity(lat, lng);

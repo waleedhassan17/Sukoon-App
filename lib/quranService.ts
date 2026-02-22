@@ -26,7 +26,7 @@ const CACHE_KEYS = {
 };
 
 // Current cache version - increment to invalidate old caches
-const CACHE_VERSION = '1.0';
+const CACHE_VERSION = '1.1';
 
 // Cache TTL (24 hours - but we use stale-while-revalidate)
 const CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -57,6 +57,73 @@ export interface TafseerEntry {
   ayah: number;
   text: string;
   source: string;
+}
+
+/**
+ * Bismillah Prefix Handling
+ * 
+ * The alquran.cloud and quran.com APIs often prepend the Bismillah text
+ * ("In the name of Allah, the Most Gracious, the Most Merciful") to the
+ * first ayah's text for surahs 2–114 (except At-Tawbah / 9).
+ * 
+ * Since the app renders a dedicated BismillahCard above the verses,
+ * we strip this prefix from ayah 1 to avoid duplication.
+ * 
+ * Al-Fatiha (1): Bismillah IS verse 1 — never stripped.
+ * At-Tawbah (9): No Bismillah at all — nothing to strip.
+ */
+const BISMILLAH_ARABIC_PATTERNS: string[] = [
+  // alquran.cloud (ar.alafasy, ar.uthmani, etc.)
+  'بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ',
+  // quran.com text_uthmani
+  'بِسۡمِ ٱللَّهِ ٱلرَّحۡمَـٰنِ ٱلرَّحِيمِ',
+  // Simplified / imla'i forms
+  'بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ',
+  'بِسْمِ اللَّهِ الرَّحْمَنِ الرَّحِيمِ',
+  'بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِيۡمِ',
+  'بِسۡمِ ٱللَّهِ ٱلرَّحۡمَٰنِ ٱلرَّحِيمِ',
+  // Alafasy with small high dotless head of khah
+  'بِسۡمِ ٱللَّهِ ٱلرَّحۡمَـٰنِ ٱلرَّحِيۡمِ',
+];
+
+/**
+ * Strip Bismillah prefix from Arabic text.
+ * Returns original text unchanged if no known pattern is found.
+ */
+function stripBismillahFromArabic(text: string): string {
+  const trimmed = text.trim();
+  for (const pattern of BISMILLAH_ARABIC_PATTERNS) {
+    if (trimmed.startsWith(pattern)) {
+      const stripped = trimmed.slice(pattern.length).trim();
+      // Safety: never return empty string (would indicate Bismillah WAS the entire text)
+      return stripped || trimmed;
+    }
+  }
+  return trimmed;
+}
+
+/**
+ * Process first ayah of a surah: strip Bismillah prefix from text & translations
+ * for surahs where Bismillah is NOT an actual verse (surahs 2–114, except 9).
+ */
+function cleanFirstAyahBismillah(ayahs: Ayah[], surahNumber: number): Ayah[] {
+  // Al-Fatiha: Bismillah IS verse 1 — keep it
+  // At-Tawbah: No Bismillah — nothing to strip
+  if (surahNumber === 1 || surahNumber === 9 || ayahs.length === 0) {
+    return ayahs;
+  }
+
+  const first = ayahs[0];
+  const cleanedArabic = stripBismillahFromArabic(first.text);
+
+  // Only modify if we actually stripped something
+  if (cleanedArabic !== first.text.trim()) {
+    const cleaned = [...ayahs];
+    cleaned[0] = { ...first, text: cleanedArabic };
+    return cleaned;
+  }
+
+  return ayahs;
 }
 
 interface CacheEntry<T> {
@@ -469,7 +536,10 @@ export const QuranService = {
       hizbQuarter: a.hizbQuarter,
     }));
 
-    return { meta, ayahs };
+    // Strip Bismillah prefix from first ayah (shown separately via BismillahCard)
+    const cleanedAyahs = cleanFirstAyahBismillah(ayahs, surahNumber);
+
+    return { meta, ayahs: cleanedAyahs };
   },
 
   /**
@@ -513,7 +583,10 @@ export const QuranService = {
       hizbQuarter: v.hizb_number || 1,
     }));
 
-    return { meta, ayahs };
+    // Strip Bismillah prefix from first ayah (shown separately via BismillahCard)
+    const cleanedAyahs = cleanFirstAyahBismillah(ayahs, surahNumber);
+
+    return { meta, ayahs: cleanedAyahs };
   },
 
   /**

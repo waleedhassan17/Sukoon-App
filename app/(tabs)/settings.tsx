@@ -24,6 +24,7 @@ import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { QuranService } from '@/lib/quranService';
+import { DataSyncService } from '@/lib/dataSyncService';
 import FontSizeSlider from '@/components/FontSizeSlider';
 
 /* ─── Staggered entry hook ─── */
@@ -60,6 +61,9 @@ export default function SettingsScreen() {
   const { fontScale, setFontScale, reset: resetFontScale, sizes } = useFontSize();
   const [notifications, setNotifications] = useState(true);
   const [dailyAyah, setDailyAyah] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  const cloudAvailable = DataSyncService.isCloudSyncAvailable();
 
   const headerFade = useRef(new Animated.Value(0)).current;
   const headerSlide = useRef(new Animated.Value(24)).current;
@@ -98,6 +102,65 @@ export default function SettingsScreen() {
       },
     ]);
   };
+
+  const handleBackup = async () => {
+    if (!cloudAvailable) {
+      Alert.alert('Firebase Not Configured', 'Cloud backup requires Firebase setup. See lib/firebaseConfig.ts for instructions.');
+      return;
+    }
+    setSyncing(true);
+    try {
+      const result = await DataSyncService.backupToCloud();
+      if (result.success) {
+        const now = new Date().toLocaleString();
+        setLastSync(now);
+        Alert.alert('Backup Complete', `${result.synced} items synced to cloud.`);
+      } else {
+        Alert.alert('Backup Failed', 'Please check your internet connection and try again.');
+      }
+    } catch {
+      Alert.alert('Error', 'Something went wrong during backup.');
+    }
+    setSyncing(false);
+  };
+
+  const handleRestore = () => {
+    if (!cloudAvailable) {
+      Alert.alert('Firebase Not Configured', 'Cloud restore requires Firebase setup. See lib/firebaseConfig.ts for instructions.');
+      return;
+    }
+    Alert.alert(
+      'Restore from Cloud',
+      'This will replace your local data with cloud data. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Restore',
+          onPress: async () => {
+            setSyncing(true);
+            try {
+              const result = await DataSyncService.restoreFromCloud();
+              if (result.success) {
+                Alert.alert('Restore Complete', `${result.restored} items restored. Restart the app to see changes.`);
+              } else {
+                Alert.alert('Restore Failed', 'No cloud data found or connection error.');
+              }
+            } catch {
+              Alert.alert('Error', 'Something went wrong during restore.');
+            }
+            setSyncing(false);
+          },
+        },
+      ]
+    );
+  };
+
+  // Load last sync time
+  useEffect(() => {
+    DataSyncService.getLastSyncTime().then((ts) => {
+      if (ts) setLastSync(new Date(ts).toLocaleString());
+    }).catch(() => {});
+  }, []);
 
   const switchTrack = { false: theme.border, true: theme.primaryMuted };
 
@@ -326,6 +389,57 @@ export default function SettingsScreen() {
           <Animated.View style={sectionAnims[3]}>
             <Text style={[styles.sectionLabel, { color: theme.textTertiary }]}>DATA</Text>
             <View style={[styles.group, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
+              {/* Backup to Cloud */}
+              <TouchableOpacity
+                style={[styles.row, syncing && styles.rowDisabled]}
+                onPress={handleBackup}
+                activeOpacity={0.7}
+                disabled={syncing}
+              >
+                <View style={styles.rowLeft}>
+                  <View style={[styles.iconWrap, { backgroundColor: theme.primaryMuted + '14' }]}>
+                    <Ionicons name="cloud-upload-outline" size={18} color={theme.primaryMuted} />
+                  </View>
+                  <View style={styles.rowTextWrap}>
+                    <Text style={[styles.rowTitle, { color: theme.text }]}>
+                      {syncing ? 'Syncing...' : 'Backup to Cloud'}
+                    </Text>
+                    <Text style={[styles.rowSub, { color: theme.textSecondary }]}>
+                      {lastSync ? `Last: ${lastSync}` : 'Save your progress to Firebase'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={[styles.rowArrow, { backgroundColor: theme.surfaceMuted }]}>
+                  <Ionicons name="chevron-forward" size={14} color={theme.textTertiary} />
+                </View>
+              </TouchableOpacity>
+
+              <View style={[styles.rowDivider, { backgroundColor: theme.border }]} />
+
+              {/* Restore from Cloud */}
+              <TouchableOpacity
+                style={[styles.row, syncing && styles.rowDisabled]}
+                onPress={handleRestore}
+                activeOpacity={0.7}
+                disabled={syncing}
+              >
+                <View style={styles.rowLeft}>
+                  <View style={[styles.iconWrap, { backgroundColor: '#6366F1' + '14' }]}>
+                    <Ionicons name="cloud-download-outline" size={18} color="#6366F1" />
+                  </View>
+                  <View style={styles.rowTextWrap}>
+                    <Text style={[styles.rowTitle, { color: theme.text }]}>Restore from Cloud</Text>
+                    <Text style={[styles.rowSub, { color: theme.textSecondary }]}>Recover data on new device</Text>
+                  </View>
+                </View>
+                <View style={[styles.rowArrow, { backgroundColor: theme.surfaceMuted }]}>
+                  <Ionicons name="chevron-forward" size={14} color={theme.textTertiary} />
+                </View>
+              </TouchableOpacity>
+
+              <View style={[styles.rowDivider, { backgroundColor: theme.border }]} />
+
+              {/* Clear Cache */}
               <TouchableOpacity
                 style={styles.row}
                 onPress={handleClearCache}
