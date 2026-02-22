@@ -67,8 +67,8 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 const LAYOUT_ANIM = {
-  duration: 280,
-  update: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.scaleY },
+  duration: 250,
+  update: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
   create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
   delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
 };
@@ -483,6 +483,8 @@ export default function SalahTrackerScreen() {
             </View>
           </View>
 
+          {/* Calendar body: fixed minHeight prevents layout jump on toggle */}
+          <View style={{ minHeight: weekly ? 90 : undefined }}>
           {/* Weekday headers */}
           <View style={st.dowRow}>
             {WEEKDAYS.map((d, i) => (
@@ -572,6 +574,7 @@ export default function SalahTrackerScreen() {
               })}
             </View>
           )}
+          </View>
         </View>
 
         {/* ═══ SELECTED DATE ═══ */}

@@ -20,8 +20,9 @@ export default function TabLayout() {
   const isDark = mode === 'dark';
   const insets = useSafeAreaInsets();
 
-  // Safe area bottom — tab bar extends through it, content padded above
-  const safeBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 0);
+  // Bottom inset: on Android with transparent nav bar, insets.bottom includes the nav bar height
+  // The tab bar must extend through this area so no gap is visible
+  const safeBottom = insets.bottom;
 
   return (
     <Tabs
@@ -34,25 +35,26 @@ export default function TabLayout() {
           bottom: 0,
           left: 0,
           right: 0,
-          height: 64 + safeBottom,
+          height: 60 + safeBottom,
           backgroundColor: theme.tabBarBg,
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: isDark
             ? 'rgba(255,255,255,0.06)'
             : 'rgba(0,0,0,0.06)',
+          borderBottomWidth: 0,
           borderRadius: 0,
           paddingBottom: safeBottom,
-          paddingTop: 8,
+          paddingTop: 6,
           paddingHorizontal: 4,
           ...Platform.select({
             ios: {
               shadowColor: '#000',
               shadowOffset: { width: 0, height: -6 },
-              shadowOpacity: 0.25,
+              shadowOpacity: 0.15,
               shadowRadius: 12,
             },
             android: {
-              elevation: 12,
+              elevation: 0,
             },
           }),
         },

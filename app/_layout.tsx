@@ -44,14 +44,13 @@ function RootLayoutInner() {
   const receivedListener = useRef<any>(null);
   const appStateRef = useRef<AppStateStatus>('active');
 
-  // Keep Android system navigation bar matching tab bar per theme
+  // Keep Android system navigation bar button style matching theme
+  // Note: bg color & position are handled natively in MainActivity.kt (edge-to-edge)
   useEffect(() => {
     if (Platform.OS === 'android') {
       try {
         const NavigationBar = require('expo-navigation-bar');
-        const navColor = mode === 'dark' ? '#1A1A1A' : '#FFFFFF';
         const btnStyle = mode === 'dark' ? 'light' : 'dark';
-        NavigationBar.setBackgroundColorAsync(navColor);
         NavigationBar.setButtonStyleAsync(btnStyle);
       } catch {}
     }
@@ -60,13 +59,11 @@ function RootLayoutInner() {
   useEffect(() => {
     async function prepare() {
       try {
-        // Set Android system navigation bar (corrected per theme in useEffect)
+        // Set Android nav bar button style on init (bg/position handled natively)
         if (Platform.OS === 'android') {
           try {
             const NavigationBar = require('expo-navigation-bar');
-            const navColor = mode === 'dark' ? '#1A1A1A' : '#FFFFFF';
             const btnStyle = mode === 'dark' ? 'light' : 'dark';
-            NavigationBar.setBackgroundColorAsync(navColor);
             NavigationBar.setButtonStyleAsync(btnStyle);
           } catch {}
         }

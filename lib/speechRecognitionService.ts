@@ -75,9 +75,32 @@ class SpeechRecognitionService {
         return false;
       }
 
+      // First try the combined permission request
       const result = await SpeechModule.requestPermissionsAsync();
-      return result.granted === true || result.status === 'granted';
-    } catch (e) {
+      if (result.granted === true || result.status === 'granted') {
+        return true;
+      }
+
+      // If combined fails, try requesting microphone separately
+      // (On some Android devices this is needed)
+      try {
+        const micResult = await SpeechModule.requestMicrophonePermissionsAsync();
+        if (micResult.granted === true || micResult.status === 'granted') {
+          return true;
+        }
+      } catch {}
+
+      // If permission was permanently denied (canAskAgain === false),
+      // the user needs to enable it in Settings
+      if (result.canAskAgain === false) {
+        throw new Error('PERMISSION_DENIED_PERMANENTLY');
+      }
+
+      return false;
+    } catch (e: any) {
+      if (e?.message === 'PERMISSION_DENIED_PERMANENTLY') {
+        throw e; // Re-throw so caller can handle
+      }
       if (__DEV__) console.warn('[Speech] requestPermission error:', e);
       return false;
     }

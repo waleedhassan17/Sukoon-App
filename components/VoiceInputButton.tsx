@@ -16,6 +16,8 @@ import {
   Animated,
   ActivityIndicator,
   Platform,
+  Alert,
+  Linking,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
@@ -88,9 +90,9 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
   // Apply theme color if not overridden
   const finalIconColor = iconColor || theme.textTertiary;
 
-  // Check permission on mount, cleanup on unmount
+  // Check permission on mount, request if not granted
   useEffect(() => {
-    checkPermission();
+    initPermission();
 
     return () => {
       // Cleanup on unmount
@@ -132,14 +134,38 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
     ).start();
   };
 
-  const checkPermission = async () => {
+  const initPermission = async () => {
     try {
+      // First check if already granted
       const granted = await speechRecognitionService.checkPermission();
-      setPermissionGranted(granted);
+      if (granted) {
+        setPermissionGranted(true);
+        return;
+      }
+      // If not, proactively request on mount so the dialog appears early
+      try {
+        const requested = await speechRecognitionService.requestPermission();
+        setPermissionGranted(requested);
+      } catch (e: any) {
+        if (e?.message === 'PERMISSION_DENIED_PERMANENTLY') {
+          setPermissionGranted(false);
+        }
+      }
     } catch (error) {
-      console.error('Permission check error:', error);
+      console.error('Permission init error:', error);
       setPermissionGranted(false);
     }
+  };
+
+  const openAppSettings = () => {
+    Alert.alert(
+      'Microphone Permission Required',
+      'Microphone access was denied. Please enable it in your device settings to use voice input.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open Settings', onPress: () => Linking.openSettings() },
+      ]
+    );
   };
 
   const handleSpeechResult = (result: SpeechRecognitionResult) => {
@@ -192,13 +218,24 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
       if (status === 'idle') {
         // Start listening
         try {
-          const hasPermission = permissionGranted
-            ? true
-            : await speechRecognitionService.requestPermission();
+          let hasPermission = permissionGranted;
+
+          if (!hasPermission) {
+            try {
+              hasPermission = await speechRecognitionService.requestPermission();
+            } catch (permErr: any) {
+              if (permErr?.message === 'PERMISSION_DENIED_PERMANENTLY') {
+                // Permission permanently denied — direct user to Settings
+                openAppSettings();
+                return;
+              }
+              hasPermission = false;
+            }
+          }
 
           if (!hasPermission) {
             setStatus('idle');
-            onError?.('Microphone permission denied');
+            onError?.('Microphone permission is required for voice input. Please grant access and try again.');
             Haptics.notificationAsync(
               Haptics.NotificationFeedbackType.Error
             ).catch(() => {});

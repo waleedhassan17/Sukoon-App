@@ -64,6 +64,12 @@ const MAGNETOMETER_UPDATE_INTERVAL = 50;
 // Alignment threshold in degrees
 const ALIGNMENT_THRESHOLD = 10;
 
+// Timeout (ms) to wait for sensor data before declaring it dead
+const SENSOR_DATA_TIMEOUT = 3000;
+
+// GPS heading update interval
+const GPS_HEADING_INTERVAL = 500;
+
 /**
  * Detect if running on emulator/simulator
  * Emulators typically don't have magnetometer sensors
@@ -97,7 +103,7 @@ export default function QiblahScreen() {
   const [loadingMessage, setLoadingMessage] = useState('Finding your location...');
   const [error, setError] = useState<QiblahError | null>(null);
   const [sensorAvailable, setSensorAvailable] = useState(true);
-  const [sensorType, setSensorType] = useState<'magnetometer' | 'devicemotion' | 'none'>('none');
+  const [sensorType, setSensorType] = useState<'magnetometer' | 'devicemotion' | 'gps' | 'none'>('none');
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [isRunningOnEmulator, setIsRunningOnEmulator] = useState(false);
@@ -106,20 +112,23 @@ export default function QiblahScreen() {
   // Refs for cleanup and animation
   const magnetometerSubscription = useRef<any>(null);
   const deviceMotionSubscription = useRef<any>(null);
+  const locationSubscription = useRef<any>(null);
+  const sensorWatchdogTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const compassRotation = useRef(new Animated.Value(0)).current;
   const qiblahNeedleRotation = useRef(new Animated.Value(0)).current;
   const lastHeading = useRef(0);
   const compassCenterRef = useRef({ x: 0, y: 0 });
   const headingHistory = useRef<number[]>([]); // For smoothing
+  const sensorAvailableRef = useRef(true); // Stable ref for PanResponder
   
   /**
    * Pan responder for manual compass rotation in static mode
-   * Allows users to drag the compass to simulate heading changes
+   * Uses sensorAvailableRef (not state) to avoid stale closure
    */
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => !sensorAvailable,
-      onMoveShouldSetPanResponder: () => !sensorAvailable,
+      onStartShouldSetPanResponder: () => !sensorAvailableRef.current,
+      onMoveShouldSetPanResponder: () => !sensorAvailableRef.current,
       onPanResponderGrant: () => {
         // Haptic feedback on touch
         if (Platform.OS !== 'web') {
@@ -127,7 +136,7 @@ export default function QiblahScreen() {
         }
       },
       onPanResponderMove: (evt, gestureState) => {
-        if (sensorAvailable) return;
+        if (sensorAvailableRef.current) return;
         
         // Calculate angle based on touch position relative to compass center
         const { moveX, moveY } = gestureState;
@@ -165,117 +174,6 @@ export default function QiblahScreen() {
   }, []);
 
   /**
-   * Start compass sensor for heading
-   * Tries Magnetometer first, then DeviceMotion, then falls back to static mode
-   */
-  const startMagnetometer = useCallback(async () => {
-    try {
-      // Check if running on emulator first
-      const onEmulator = isEmulator();
-      setIsRunningOnEmulator(onEmulator);
-      
-      if (onEmulator) {
-        if (__DEV__) console.log('Running on emulator - compass not available');
-        setSensorAvailable(false);
-        setSensorType('none');
-        return false; // No error, just use static mode
-      }
-      
-      // Reset heading history for smoothing
-      headingHistory.current = [];
-      
-      // Try DeviceMotion first on iOS (provides fused compass heading)
-      if (Platform.OS === 'ios') {
-        const deviceMotionAvailable = await DeviceMotion.isAvailableAsync();
-        if (deviceMotionAvailable) {
-          if (__DEV__) console.log('Using DeviceMotion for compass (iOS)');
-          DeviceMotion.setUpdateInterval(MAGNETOMETER_UPDATE_INTERVAL);
-          
-          deviceMotionSubscription.current = DeviceMotion.addListener((data) => {
-            if (data.rotation) {
-              // DeviceMotion rotation gives us alpha which is compass heading on iOS
-              // alpha is rotation around Z axis (compass heading)
-              let angle = (data.rotation.alpha * 180 / Math.PI);
-              
-              // Normalize to 0-360
-              angle = ((angle % 360) + 360) % 360;
-              
-              // Apply smoothing
-              applySmoothing(angle);
-            }
-          });
-          
-          setSensorAvailable(true);
-          setSensorType('devicemotion');
-          return true;
-        }
-      }
-      
-      // Try Magnetometer
-      const magnetometerAvailable = await Magnetometer.isAvailableAsync();
-      
-      if (magnetometerAvailable) {
-        if (__DEV__) console.log('Using Magnetometer for compass');
-        Magnetometer.setUpdateInterval(MAGNETOMETER_UPDATE_INTERVAL);
-        
-        magnetometerSubscription.current = Magnetometer.addListener((data) => {
-          // Calculate heading from magnetometer data
-          // Using atan2(x, y) gives angle from Y-axis (North)
-          let angle = Math.atan2(data.x, data.y) * (180 / Math.PI);
-          
-          // Convert to 0-360 range
-          if (angle < 0) {
-            angle += 360;
-          }
-          
-          // Platform-specific adjustments
-          if (Platform.OS === 'android') {
-            angle = (360 - angle) % 360;
-          }
-          
-          // Apply smoothing
-          applySmoothing(angle);
-        });
-        
-        setSensorAvailable(true);
-        setSensorType('magnetometer');
-        return true;
-      }
-      
-      // Try DeviceMotion as last resort on Android
-      const deviceMotionAvailable = await DeviceMotion.isAvailableAsync();
-      if (deviceMotionAvailable) {
-        if (__DEV__) console.log('Using DeviceMotion for compass (Android fallback)');
-        DeviceMotion.setUpdateInterval(MAGNETOMETER_UPDATE_INTERVAL);
-        
-        deviceMotionSubscription.current = DeviceMotion.addListener((data) => {
-          if (data.rotation) {
-            // Use gamma (rotation around Y-axis) for compass on Android
-            let angle = (data.rotation.gamma * 180 / Math.PI);
-            angle = ((angle % 360) + 360) % 360;
-            applySmoothing(angle);
-          }
-        });
-        
-        setSensorAvailable(true);
-        setSensorType('devicemotion');
-        return true;
-      }
-      
-      if (__DEV__) console.log('No compass sensor available');
-      setSensorAvailable(false);
-      setSensorType('none');
-      return false;
-      
-    } catch (e) {
-      console.error('Compass sensor error:', e);
-      setSensorAvailable(false);
-      setSensorType('none');
-      return false;
-    }
-  }, [animateRotation, compassRotation]);
-
-  /**
    * Apply smoothing to compass heading
    */
   const applySmoothing = useCallback((angle: number) => {
@@ -300,7 +198,306 @@ export default function QiblahScreen() {
   }, [animateRotation, compassRotation]);
 
   /**
-   * Stop all compass sensors
+   * Start compass sensor for heading
+   * Tries Magnetometer → DeviceMotion → GPS heading → falls back to static mode
+   * Includes watchdog timeout: if sensor says available but sends no data, auto-fallback
+   */
+  const startMagnetometer = useCallback(async () => {
+    try {
+      // Check if running on emulator first
+      const onEmulator = isEmulator();
+      setIsRunningOnEmulator(onEmulator);
+      
+      if (onEmulator) {
+        if (__DEV__) console.log('Running on emulator - compass not available');
+        setSensorAvailable(false);
+        sensorAvailableRef.current = false;
+        setSensorType('none');
+        return false; // No error, just use static mode
+      }
+      
+      // Reset heading history for smoothing
+      headingHistory.current = [];
+      
+      // Helper: wait for first sensor data or timeout
+      const waitForSensorData = (timeoutMs: number): Promise<boolean> => {
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => resolve(false), timeoutMs);
+          sensorWatchdogTimer.current = timer;
+          // Store resolve so listener can trigger it
+          (waitForSensorData as any)._resolve = (success: boolean) => {
+            clearTimeout(timer);
+            sensorWatchdogTimer.current = null;
+            resolve(success);
+          };
+        });
+      };
+      
+      let dataReceived = false;
+      const markDataReceived = () => {
+        if (!dataReceived) {
+          dataReceived = true;
+          if (sensorWatchdogTimer.current) {
+            clearTimeout(sensorWatchdogTimer.current);
+            sensorWatchdogTimer.current = null;
+          }
+        }
+      };
+      
+      // Try DeviceMotion first on iOS (provides fused compass heading)
+      if (Platform.OS === 'ios') {
+        const deviceMotionAvailable = await DeviceMotion.isAvailableAsync();
+        if (deviceMotionAvailable) {
+          if (__DEV__) console.log('Using DeviceMotion for compass (iOS)');
+          DeviceMotion.setUpdateInterval(MAGNETOMETER_UPDATE_INTERVAL);
+          
+          dataReceived = false;
+          deviceMotionSubscription.current = DeviceMotion.addListener((data) => {
+            markDataReceived();
+            if (data.rotation) {
+              let angle = (data.rotation.alpha * 180 / Math.PI);
+              angle = ((angle % 360) + 360) % 360;
+              applySmoothing(angle);
+            }
+          });
+          
+          // Wait for data with timeout
+          const gotData = await new Promise<boolean>((resolve) => {
+            const timer = setTimeout(() => resolve(!dataReceived ? false : true), SENSOR_DATA_TIMEOUT);
+            const checkInterval = setInterval(() => {
+              if (dataReceived) {
+                clearTimeout(timer);
+                clearInterval(checkInterval);
+                resolve(true);
+              }
+            }, 200);
+            // Also clear interval on timeout
+            setTimeout(() => clearInterval(checkInterval), SENSOR_DATA_TIMEOUT + 100);
+          });
+          
+          if (gotData) {
+            setSensorAvailable(true);
+            sensorAvailableRef.current = true;
+            setSensorType('devicemotion');
+            return true;
+          } else {
+            // Sensor reported available but no data — clean up and try next
+            if (__DEV__) console.log('DeviceMotion (iOS) reported available but no data received');
+            if (deviceMotionSubscription.current) {
+              deviceMotionSubscription.current.remove();
+              deviceMotionSubscription.current = null;
+            }
+          }
+        }
+      }
+      
+      // Try Magnetometer
+      const magnetometerAvailable = await Magnetometer.isAvailableAsync();
+      
+      if (magnetometerAvailable) {
+        if (__DEV__) console.log('Trying Magnetometer for compass...');
+        Magnetometer.setUpdateInterval(MAGNETOMETER_UPDATE_INTERVAL);
+        
+        dataReceived = false;
+        magnetometerSubscription.current = Magnetometer.addListener((data) => {
+          markDataReceived();
+          let angle = Math.atan2(data.x, data.y) * (180 / Math.PI);
+          if (angle < 0) angle += 360;
+          if (Platform.OS === 'android') {
+            angle = (360 - angle) % 360;
+          }
+          applySmoothing(angle);
+        });
+        
+        // Wait for data with timeout
+        const gotData = await new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => resolve(false), SENSOR_DATA_TIMEOUT);
+          const checkInterval = setInterval(() => {
+            if (dataReceived) {
+              clearTimeout(timer);
+              clearInterval(checkInterval);
+              resolve(true);
+            }
+          }, 200);
+          setTimeout(() => clearInterval(checkInterval), SENSOR_DATA_TIMEOUT + 100);
+        });
+        
+        if (gotData) {
+          if (__DEV__) console.log('Magnetometer providing data successfully');
+          setSensorAvailable(true);
+          sensorAvailableRef.current = true;
+          setSensorType('magnetometer');
+          return true;
+        } else {
+          if (__DEV__) console.log('Magnetometer reported available but no data received');
+          if (magnetometerSubscription.current) {
+            magnetometerSubscription.current.remove();
+            magnetometerSubscription.current = null;
+          }
+        }
+      }
+      
+      // Try DeviceMotion as Android fallback
+      const deviceMotionAvailable = await DeviceMotion.isAvailableAsync();
+      if (deviceMotionAvailable) {
+        if (__DEV__) console.log('Trying DeviceMotion for compass (Android fallback)...');
+        DeviceMotion.setUpdateInterval(MAGNETOMETER_UPDATE_INTERVAL);
+        
+        dataReceived = false;
+        deviceMotionSubscription.current = DeviceMotion.addListener((data) => {
+          if (data.rotation) {
+            markDataReceived();
+            let angle = (data.rotation.gamma * 180 / Math.PI);
+            angle = ((angle % 360) + 360) % 360;
+            applySmoothing(angle);
+          }
+        });
+        
+        // Wait for data with timeout
+        const gotData = await new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => resolve(false), SENSOR_DATA_TIMEOUT);
+          const checkInterval = setInterval(() => {
+            if (dataReceived) {
+              clearTimeout(timer);
+              clearInterval(checkInterval);
+              resolve(true);
+            }
+          }, 200);
+          setTimeout(() => clearInterval(checkInterval), SENSOR_DATA_TIMEOUT + 100);
+        });
+        
+        if (gotData) {
+          if (__DEV__) console.log('DeviceMotion providing rotation data successfully');
+          setSensorAvailable(true);
+          sensorAvailableRef.current = true;
+          setSensorType('devicemotion');
+          return true;
+        } else {
+          if (__DEV__) console.log('DeviceMotion reported available but no rotation data');
+          if (deviceMotionSubscription.current) {
+            deviceMotionSubscription.current.remove();
+            deviceMotionSubscription.current = null;
+          }
+        }
+      }
+      
+      // GPS Heading Fallback — works when user is walking/moving
+      if (__DEV__) console.log('No compass sensor available — trying GPS heading fallback...');
+      try {
+        const gpsStarted = await startGPSHeading();
+        if (gpsStarted) {
+          return true;
+        }
+      } catch (e) {
+        if (__DEV__) console.log('GPS heading fallback failed:', e);
+      }
+      
+      if (__DEV__) console.log('All compass methods failed — static mode');
+      setSensorAvailable(false);
+      sensorAvailableRef.current = false;
+      setSensorType('none');
+      return false;
+      
+    } catch (e) {
+      console.error('Compass sensor error:', e);
+      setSensorAvailable(false);
+      sensorAvailableRef.current = false;
+      setSensorType('none');
+      return false;
+    }
+  }, [animateRotation, compassRotation]);
+
+  /**
+   * Start GPS-based heading as a fallback when no compass hardware exists
+   * Uses Location.watchPositionAsync to compute heading from movement
+   * The user needs to walk for this to work
+   */
+  const startGPSHeading = useCallback(async () => {
+    try {
+      // Check if we already have location permission
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        if (__DEV__) console.log('GPS heading: location permission not granted');
+        return false;
+      }
+
+      let lastCoords: { lat: number; lng: number } | null = null;
+      let gpsDataReceived = false;
+
+      locationSubscription.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          distanceInterval: 1, // Update every 1 meter moved
+          timeInterval: GPS_HEADING_INTERVAL,
+        },
+        (location) => {
+          const { latitude, longitude, heading: gpsHeading, speed } = location.coords;
+
+          // Method 1: Use GPS-provided heading if available and device is moving
+          if (gpsHeading != null && gpsHeading >= 0 && speed != null && speed > 0.5) {
+            gpsDataReceived = true;
+            applySmoothing(gpsHeading);
+            return;
+          }
+
+          // Method 2: Compute bearing from consecutive GPS points
+          if (lastCoords) {
+            const dist = getDistanceMeters(lastCoords.lat, lastCoords.lng, latitude, longitude);
+            if (dist > 2) { // Only update if moved at least 2 meters (reduce noise)
+              const bearing = computeBearing(lastCoords.lat, lastCoords.lng, latitude, longitude);
+              gpsDataReceived = true;
+              applySmoothing(bearing);
+              lastCoords = { lat: latitude, lng: longitude };
+            }
+          } else {
+            lastCoords = { lat: latitude, lng: longitude };
+          }
+        }
+      );
+
+      // For GPS heading, set the sensor type immediately since it requires movement
+      // We don't wait for data — instead we show "walk to activate" UI
+      setSensorAvailable(true);
+      sensorAvailableRef.current = true;
+      setSensorType('gps');
+      if (__DEV__) console.log('GPS heading mode activated — walk to get heading');
+      return true;
+    } catch (e) {
+      if (__DEV__) console.log('GPS heading setup failed:', e);
+      return false;
+    }
+  }, [applySmoothing]);
+
+  /**
+   * Compute bearing between two GPS coordinates (degrees from North)
+   */
+  const computeBearing = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const toRad = (d: number) => d * Math.PI / 180;
+    const toDeg = (r: number) => r * 180 / Math.PI;
+    const dLon = toRad(lon2 - lon1);
+    const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+    const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+              Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+    let brng = toDeg(Math.atan2(y, x));
+    return ((brng % 360) + 360) % 360;
+  };
+
+  /**
+   * Haversine distance between two GPS coordinates in meters
+   */
+  const getDistanceMeters = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371000;
+    const toRad = (d: number) => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  };
+
+  /**
+   * Stop all compass sensors and GPS heading
    */
   const stopMagnetometer = useCallback(() => {
     if (magnetometerSubscription.current) {
@@ -310,6 +507,14 @@ export default function QiblahScreen() {
     if (deviceMotionSubscription.current) {
       deviceMotionSubscription.current.remove();
       deviceMotionSubscription.current = null;
+    }
+    if (locationSubscription.current) {
+      locationSubscription.current.remove();
+      locationSubscription.current = null;
+    }
+    if (sensorWatchdogTimer.current) {
+      clearTimeout(sensorWatchdogTimer.current);
+      sensorWatchdogTimer.current = null;
     }
     setSensorType('none');
   }, []);
@@ -639,7 +844,9 @@ export default function QiblahScreen() {
               />
             </TouchableOpacity>
           ) : (
-            <View style={{ width: 38 }} />
+            <TouchableOpacity onPress={handleRetry} style={styles.calibrateBtn}>
+              <Ionicons name="refresh" size={20} color={theme.primary} />
+            </TouchableOpacity>
           )}
         </View>
 
@@ -660,6 +867,21 @@ export default function QiblahScreen() {
           </View>
         )}
 
+        {/* GPS Heading Mode Banner */}
+        {sensorAvailable && sensorType === 'gps' && (
+          <View style={[styles.staticModeBanner, { backgroundColor: `${theme.primary}15` }]}>
+            <Ionicons name="walk-outline" size={20} color={theme.primary} />
+            <View style={styles.staticModeTextContainer}>
+              <Text style={[styles.staticModeTitle, { color: theme.text }]}>
+                GPS Compass Mode
+              </Text>
+              <Text style={[styles.staticModeSubtext, { color: theme.textSecondary }]}>
+                Walk slowly to detect your heading direction.
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Compass Heading Display */}
         <View style={styles.headingDisplay}>
           <Text style={[styles.headingDegree, { color: theme.text }]}>
@@ -671,6 +893,11 @@ export default function QiblahScreen() {
           {!sensorAvailable && (
             <Text style={[styles.headingSubLabel, { color: theme.textTertiary }]}>
               (Manual)
+            </Text>
+          )}
+          {sensorAvailable && sensorType === 'gps' && (
+            <Text style={[styles.headingSubLabel, { color: theme.textTertiary }]}>
+              (GPS — walk for accuracy)
             </Text>
           )}
         </View>
@@ -795,7 +1022,7 @@ export default function QiblahScreen() {
           {/* Status Card */}
           <View style={[styles.statusCard, { backgroundColor: theme.surface }, SHADOWS.md]}>
             <Ionicons 
-              name={!sensorAvailable ? 'location' : (isAligned ? 'checkmark-circle' : 'navigate-outline')} 
+              name={!sensorAvailable ? 'location' : sensorType === 'gps' ? 'walk-outline' : (isAligned ? 'checkmark-circle' : 'navigate-outline')} 
               size={28}
               color={isAligned && sensorAvailable ? theme.success : theme.primary} 
             />
@@ -806,7 +1033,9 @@ export default function QiblahScreen() {
               ]}>
                 {!sensorAvailable 
                   ? 'Qiblah Direction Found' 
-                  : (isAligned ? 'You are facing the Qiblah!' : 'Rotate towards the Kaaba')}
+                  : sensorType === 'gps'
+                    ? (isAligned ? 'You are facing the Qiblah!' : 'Walk to detect your heading')
+                    : (isAligned ? 'You are facing the Qiblah!' : 'Rotate towards the Kaaba')}
               </Text>
               <Text style={[styles.statusSubtext, { color: theme.textSecondary }]}>
                 {!sensorAvailable
@@ -819,9 +1048,9 @@ export default function QiblahScreen() {
           {/* Direction Details */}
           <View style={styles.detailsRow}>
             <View style={[styles.detailCard, { backgroundColor: theme.surface }]}>
-              <Ionicons name="compass-outline" size={20} color={theme.primary} />
+              <Ionicons name={sensorType === 'gps' ? 'navigate-outline' : 'compass-outline'} size={20} color={theme.primary} />
               <Text style={[styles.detailLabel, { color: theme.textSecondary }]}>
-                {sensorAvailable ? 'Heading' : 'Manual Heading'}
+                {sensorAvailable ? (sensorType === 'gps' ? 'GPS Heading' : 'Heading') : 'Manual Heading'}
               </Text>
               <Text style={[styles.detailValue, { color: theme.text }]}>
                 {Math.round(effectiveHeading)}° {compassHeadingLabel}
@@ -836,7 +1065,7 @@ export default function QiblahScreen() {
             </View>
           </View>
 
-          {/* Recalibrate Button - only show when sensor is available */}
+          {/* Recalibrate Button - show when sensor or GPS is available */}
           {sensorAvailable && (
             <TouchableOpacity 
               style={[styles.recalibrateButton, { borderColor: theme.border }]}
@@ -851,13 +1080,20 @@ export default function QiblahScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Calibration tip - only when sensor available */}
-          {sensorAvailable && (
+          {/* Calibration tip - only when hardware sensor available (not GPS) */}
+          {sensorAvailable && sensorType !== 'gps' && (
             <TouchableOpacity onPress={() => setShowCalibrationTip(true)}>
               <Text style={[styles.tipText, { color: theme.textTertiary }]}>
                 Tip: Move your device in a figure-8 pattern to improve accuracy
               </Text>
             </TouchableOpacity>
+          )}
+
+          {/* GPS mode tip */}
+          {sensorAvailable && sensorType === 'gps' && (
+            <Text style={[styles.tipText, { color: theme.textTertiary }]}>
+              Tip: Walk 5-10 steps in any direction, then turn towards the Qiblah indicator
+            </Text>
           )}
 
           {/* Static mode instruction */}
@@ -866,7 +1102,8 @@ export default function QiblahScreen() {
               <Ionicons name="information-circle" size={20} color={theme.primary} />
               <Text style={[styles.staticInstructionText, { color: theme.text }]}>
                 Qiblah is {Math.round(qiblahAngle)}° from North ({qiblahCompassLabel}). 
-                Drag the compass above to simulate rotation, or use a physical compass.
+                Drag the compass above to simulate rotation, or use a physical compass. 
+                Tap ↻ at the top to retry sensor detection.
               </Text>
             </View>
           )}
