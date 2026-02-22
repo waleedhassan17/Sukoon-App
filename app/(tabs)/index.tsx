@@ -114,7 +114,7 @@ export default function HomeScreen() {
     { label: 'Tasbeeh', icon: 'ellipse-outline' as const, route: '/tools/tasbeeh', gradient: theme.actionGradient1 },
     { label: 'Qiblah', icon: 'navigate-outline' as const, route: '/tools/qiblah', gradient: theme.actionGradient2 },
     { label: 'Prayer', icon: 'time-outline' as const, route: '/tools/prayer', gradient: theme.actionGradient3 },
-    { label: 'Insights', icon: 'bar-chart-outline' as const, route: '/tools/dashboard', gradient: theme.actionGradient4 },
+    { label: 'Insights', icon: 'bar-chart-outline' as const, route: '/insights', gradient: theme.actionGradient4 },
   ], [theme]);
 
   useEffect(() => {
