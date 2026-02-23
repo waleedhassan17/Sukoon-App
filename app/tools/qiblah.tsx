@@ -120,35 +120,81 @@ export default function QiblahScreen() {
   const compassCenterRef = useRef({ x: 0, y: 0 });
   const headingHistory = useRef<number[]>([]); // For smoothing
   const sensorAvailableRef = useRef(true); // Stable ref for PanResponder
+  /** Ref to the compass View for accurate center measurement */
+  const compassViewRef = useRef<View>(null);
+  /** Track the previous touch angle for delta-based rotation */
+  const prevTouchAngle = useRef<number | null>(null);
+  /** Accumulated manual heading (survives across gestures) */
+  const manualHeadingRef = useRef(0);
   
   /**
-   * Pan responder for manual compass rotation in static mode
-   * Uses sensorAvailableRef (not state) to avoid stale closure
+   * Pan responder for manual compass rotation in static mode.
+   *
+   * Design: delta-based rotation (not absolute position).
+   * Each gesture computes the angle change from the previous touch point
+   * relative to the compass center, then applies that delta to the
+   * accumulated heading. This gives smooth, natural rotation without
+   * jumps, jitter, or reversed direction.
+   *
+   * Uses sensorAvailableRef (not state) to avoid stale closures.
    */
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => !sensorAvailableRef.current,
       onMoveShouldSetPanResponder: () => !sensorAvailableRef.current,
-      onPanResponderGrant: () => {
-        // Haptic feedback on touch
+      onPanResponderGrant: (evt) => {
+        if (sensorAvailableRef.current) return;
+
+        // Haptic feedback on touch start
         if (Platform.OS !== 'web') {
           Vibration.vibrate(10);
         }
+
+        // Measure compass center accurately using pageX/pageY from the layout
+        // (compassCenterRef is set in onLayout via measure())
+        const { pageX, pageY } = evt.nativeEvent;
+        const cx = compassCenterRef.current.x;
+        const cy = compassCenterRef.current.y;
+
+        // Record the initial touch angle so we can compute deltas
+        const startAngle = Math.atan2(pageY - cy, pageX - cx) * (180 / Math.PI);
+        prevTouchAngle.current = startAngle;
       },
-      onPanResponderMove: (evt, gestureState) => {
+      onPanResponderMove: (evt) => {
         if (sensorAvailableRef.current) return;
-        
-        // Calculate angle based on touch position relative to compass center
-        const { moveX, moveY } = gestureState;
-        const centerX = compassCenterRef.current.x;
-        const centerY = compassCenterRef.current.y;
-        
-        const angle = Math.atan2(moveY - centerY, moveX - centerX) * (180 / Math.PI);
-        const normalizedAngle = ((angle + 90 + 360) % 360); // Adjust so top is 0°
-        
-        setManualHeading(normalizedAngle);
-        animateRotation(compassRotation, -normalizedAngle, lastHeading.current);
-        lastHeading.current = -normalizedAngle;
+        if (prevTouchAngle.current === null) return;
+
+        const { pageX, pageY } = evt.nativeEvent;
+        const cx = compassCenterRef.current.x;
+        const cy = compassCenterRef.current.y;
+
+        // Current touch angle relative to compass center
+        const currentAngle = Math.atan2(pageY - cy, pageX - cx) * (180 / Math.PI);
+
+        // Delta since last touch point (handles 360°/0° wraparound)
+        let delta = currentAngle - prevTouchAngle.current;
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+
+        // Apply delta to accumulated manual heading
+        // Positive delta = clockwise touch movement = heading increases
+        let newHeading = manualHeadingRef.current + delta;
+        // Normalize to [0, 360)
+        newHeading = ((newHeading % 360) + 360) % 360;
+
+        manualHeadingRef.current = newHeading;
+        prevTouchAngle.current = currentAngle;
+
+        setManualHeading(newHeading);
+        animateRotation(compassRotation, -newHeading, lastHeading.current);
+        lastHeading.current = -newHeading;
+      },
+      onPanResponderRelease: () => {
+        // Clear the previous angle so next gesture starts fresh
+        prevTouchAngle.current = null;
+      },
+      onPanResponderTerminate: () => {
+        prevTouchAngle.current = null;
       },
     })
   ).current;
@@ -936,19 +982,25 @@ export default function QiblahScreen() {
 
           {/* Main Compass */}
           <View 
+            ref={compassViewRef}
             style={[
               styles.compassOuter, 
               { borderColor: isAligned ? theme.gold : 'rgba(128,128,128,0.2)' },
               isAligned && styles.compassAligned,
               !sensorAvailable && styles.compassInteractive
             ]}
-            onLayout={(event) => {
-              const { x, y, width, height } = event.nativeEvent.layout;
-              // Store compass center for manual rotation calculations
-              compassCenterRef.current = {
-                x: x + width / 2,
-                y: y + height / 2 + 200 // Approximate screen offset
-              };
+            onLayout={() => {
+              // Use measure() to get accurate absolute screen coordinates.
+              // This avoids the fragile hard-coded offset that broke on
+              // different devices/screen sizes.
+              if (compassViewRef.current) {
+                compassViewRef.current.measure((_x, _y, w, h, pageX, pageY) => {
+                  compassCenterRef.current = {
+                    x: pageX + w / 2,
+                    y: pageY + h / 2,
+                  };
+                });
+              }
             }}
             {...(!sensorAvailable ? panResponder.panHandlers : {})}
           >

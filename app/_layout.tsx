@@ -122,21 +122,27 @@ function RootLayoutInner() {
   }, [appReady, router]);
 
   // Handle app state changes (foreground/background)
+  // When returning to foreground, play missed azan if one arrived recently
   useEffect(() => {
     if (!appReady) return;
 
     const subscription = AppState.addEventListener('change', async (state) => {
+      const prevState = appStateRef.current;
       appStateRef.current = state;
 
-      // When app comes to foreground, check if we need to reschedule
-      if (state === 'active') {
+      // App just came to foreground — check if we missed an azan
+      if (state === 'active' && prevState !== 'active') {
+        // Give the system a moment to deliver any pending notifications
+        setTimeout(() => {
+          AzanPlayer.handleAppForeground().catch(() => {});
+        }, 500);
+
+        // Check if notifications need rescheduling (new day)
         const prefs = await NotificationService.getPreferences();
         if (prefs.enabled) {
           const lastScheduled = await AsyncStorage.getItem('sukoon_notif_last_scheduled');
           const today = new Date().toDateString();
           if (lastScheduled !== today) {
-            // New day! Notifications need rescheduling
-            // They will be rescheduled when prayer times are next fetched
             if (__DEV__) console.log('[Sukoon] New day detected — notifications will reschedule on next prayer times fetch');
           }
         }

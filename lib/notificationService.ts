@@ -180,13 +180,18 @@ export const NotificationService = {
     }
 
     // Set up notification handler (how to display when app is foreground)
+    // Configure how notifications are displayed when app is in the foreground.
+    // For prayer azan notifications, we DISABLE the system sound because
+    // AzanPlayer (expo-av) handles the full 25-second azan reliably.
+    // This prevents double-sound (channel sound + expo-av playing together).
     Notifications.setNotificationHandler({
       handleNotification: async (notification: any) => {
         const data = notification.request.content.data;
-        // Always show prayer notifications even in foreground
+        const isPrayerAzan = data?.type === 'prayer' && data?.action === 'azan';
         return {
           shouldShowAlert: true,
-          shouldPlaySound: true,
+          // Disable system sound for azan in foreground — expo-av handles it
+          shouldPlaySound: !isPrayerAzan,
           shouldSetBadge: false,
           shouldShowBanner: true,
           shouldShowList: true,
@@ -447,8 +452,19 @@ export const NotificationService = {
     return Notifications.addNotificationResponseReceivedListener((response: any) => {
       const data = response.notification.request.content.data;
 
-      // Stop azan sound when user taps the notification
-      AzanPlayer.stop().catch(() => {});
+      // When user taps an azan notification:
+      // 1. If azan is already playing (foreground), stop it (user acknowledged)
+      // 2. If azan is NOT playing (came from background/killed), play it now
+      if (data?.action === 'azan') {
+        if (AzanPlayer.playing) {
+          AzanPlayer.stop().catch(() => {});
+        } else {
+          AzanPlayer.handleNotificationResponse(response.notification).catch(() => {});
+        }
+      } else {
+        // Stop any playing azan for non-azan notification taps
+        AzanPlayer.stop().catch(() => {});
+      }
 
       if (!data) return;
 

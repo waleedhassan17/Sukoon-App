@@ -94,9 +94,18 @@ export default function EmotionResultScreen() {
     setLoading(true);
     try {
       // ── Static emotion card path: skip API entirely ──
+      // Show the splash/loading screen for a minimum duration so the
+      // transition feels intentional and calming, matching the "Find Guidance"
+      // UX. Without this, the screen flashes briefly since curated data
+      // loads instantly (no network call).
       if (staticEmotion) {
+        const SPLASH_MIN_MS = 1800; // 1.8s — enough to read the calming message
+        const splashTimer = new Promise(r => setTimeout(r, SPLASH_MIN_MS));
+
         const staticData = getStaticEmotionData(staticEmotion);
         if (staticData) {
+          // Wait for the minimum splash duration before revealing results
+          await splashTimer;
           setEmotions(staticData.emotions);
           setVerses(staticData.verses);
           setAnalysisSource('api'); // show as confident

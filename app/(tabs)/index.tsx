@@ -171,14 +171,26 @@ export default function HomeScreen() {
     }
   };
 
+  // Debounce ref to prevent double navigation from rapid taps
+  const isNavigatingRef = useRef(false);
+
   const handleAnalyze = useCallback(() => {
     if (!emotionText.trim()) return;
+    if (isNavigatingRef.current) return; // Prevent double-tap
+    isNavigatingRef.current = true;
     router.push({ pathname: '/emotion-result', params: { text: emotionText.trim() } });
+    // Reset after a short delay so the user can navigate again when returning
+    setTimeout(() => { isNavigatingRef.current = false; }, 1000);
   }, [emotionText]);
 
   const handleEmotionQuick = useCallback((name: string) => {
+    // Guard against rapid double-taps causing duplicate navigation
+    if (isNavigatingRef.current) return;
+    isNavigatingRef.current = true;
     // Static 6 emotions bypass the ML API — use curated verses directly
     router.push({ pathname: '/emotion-result', params: { text: `I'm feeling ${name.toLowerCase()}`, staticEmotion: name } });
+    // Reset after a short delay
+    setTimeout(() => { isNavigatingRef.current = false; }, 1000);
   }, []);
 
   const canAnalyze = emotionText.trim().length > 0;
