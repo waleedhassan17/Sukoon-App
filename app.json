@@ -28,13 +28,12 @@
         "backgroundColor": "#0D3B2E"
       },
       "package": "com.sukoon.app",
+      "versionCode": 1,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "android.permission.HIGH_SAMPLING_RATE_SENSORS",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.RECORD_AUDIO"
       ],
       "useNextNotificationsApi": true
     },
@@ -69,19 +68,7 @@
       "typedRoutes": true,
       "newArchEnabled": false
     },
-    "eas": {
-      "projectId": "sukoon-app",
-      "build": {
-        "development": {
-          "developmentClient": true,
-          "distribution": "internal"
-        },
-        "preview": {
-          "distribution": "internal"
-        },
-        "production": {}
-      }
-    },
+
     "extra": {
       "router": {},
       "eas": {

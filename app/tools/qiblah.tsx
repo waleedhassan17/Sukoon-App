@@ -71,7 +71,11 @@ const toDeg = (rad: number) => (rad * 180) / Math.PI;
  */
 function magnetometerToHeading(x: number, y: number): number {
   let heading = Math.atan2(y, x) * (180 / Math.PI);
-  if (heading < 0) heading += 360;
+  heading = (heading + 360) % 360;
+  // On Android the magnetometer axes are mirrored — invert heading
+  if (Platform.OS === 'android') {
+    heading = (360 - heading) % 360;
+  }
   return heading;
 }
 
@@ -183,6 +187,7 @@ export default function QiblahScreen() {
   const headingSubRef = useRef<{ remove: () => void } | null>(null);
   const mountedRef = useRef(true);
   const wasAligned = useRef(false);
+  const declinationRef = useRef(0);
 
   // ── Animate dial (shortest-path, native driver) ────────────────────────────
   const animateDial = useCallback(
@@ -229,7 +234,10 @@ export default function QiblahScreen() {
       Magnetometer.setUpdateInterval(SENSOR_INTERVAL_MS);
       const sub = Magnetometer.addListener(({ x, y }) => {
         gotData.value = true;
-        applyHeading(magnetometerToHeading(x, y));
+        // Apply magnetic declination to convert magnetic heading → true heading
+        let h = magnetometerToHeading(x, y);
+        h = (h + declinationRef.current + 360) % 360;
+        applyHeading(h);
       });
 
       // Wait up to 3 seconds for the first data tick
@@ -388,6 +396,17 @@ export default function QiblahScreen() {
         setQiblahBearing(bearing);
         setQiblahDirection(direction);
         setLoading(false);
+      }
+
+      // Step 2.5: Get magnetic declination for raw magnetometer correction
+      try {
+        const headingData = await Location.getHeadingAsync();
+        if (headingData.trueHeading >= 0 && headingData.magHeading >= 0) {
+          declinationRef.current = headingData.trueHeading - headingData.magHeading;
+          if (__DEV__) console.log('[Qiblah] Magnetic declination:', declinationRef.current.toFixed(1) + '°');
+        }
+      } catch (e) {
+        if (__DEV__) console.log('[Qiblah] Could not get declination, using 0°');
       }
 
       // Step 3: Start compass sensors

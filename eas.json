@@ -1,13 +1,15 @@
 {
   "cli": {
-    "version": ">= 5.4.0"
+    "version": ">= 5.4.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
       "developmentClient": true,
       "distribution": "internal",
       "android": {
-        "image": "latest"
+        "image": "latest",
+        "buildType": "apk"
       },
       "ios": {
         "image": "latest"
@@ -15,19 +17,36 @@
     },
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
       "android": {
-        "image": "latest"
+        "image": "latest",
+        "buildType": "apk"
       },
       "ios": {
         "image": "latest"
+      },
+      "env": {
+        "APP_VARIANT": "preview"
       }
     },
     "production": {
+      "channel": "production",
+      "autoIncrement": true,
       "android": {
-        "image": "latest"
+        "image": "latest",
+        "buildType": "app-bundle"
       },
       "ios": {
-        "image": "latest"
+        "image": "latest",
+        "autoIncrement": true
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./google-service-account.json",
+        "track": "internal"
       }
     }
   }
