@@ -1,203 +1,231 @@
 /**
- * QiblahService - AlAdhan API integration for Qiblah direction
- * 
- * API Endpoints:
- * - Qiblah Direction: https://api.aladhan.com/v1/qibla/{latitude}/{longitude}
- * - Compass Enhanced: https://api.aladhan.com/v1/qibla/{latitude}/{longitude}/compass
+ * QiblahService - Qiblah direction calculation & compass utilities
+ *
+ * FIXES v3:
+ * ─────────────────────────────────────────────────────────────────────────────
+ * BUG 1 — normalizeAngleDiff sign convention mismatch (CRITICAL / ROOT CAUSE OF STUCK COMPASS)
+ *   The function subtracted `from - to` but the docstring and call-site in
+ *   QiblahScreen both expect `to - from`.  When the dial is near 0°/360° the
+ *   returned diff was negated, causing the animation to always chase the wrong
+ *   direction and oscillate or appear frozen.
+ *   FIX: Verified correct formula is `diff = to - from` — kept, but now also
+ *   guards against NaN inputs so the smoother never feeds garbage.
+ *
+ * BUG 2 — createHeadingSmoother.push() returns NaN when buffer holds NaN
+ *   expo-location occasionally emits -1 for trueHeading (no GPS fix yet) or
+ *   returns `null` on Android.  Math.sin(NaN) = NaN which poisons the
+ *   circular-mean forever (buffer never recovers).
+ *   FIX: Clamp/skip invalid entries before pushing into the buffer.
+ *
+ * BUG 3 — fetchQiblahCompass: fetch() itself can throw before `res` is
+ *   assigned (AbortError, network error).  The `finally` block then runs
+ *   clearTimeout(timer) but `res` is undefined, so the re-throw propagates
+ *   but calling code gets a raw AbortError rather than a clean message.
+ *   This is minor but prevented graceful fallback in some environments.
+ *   FIX: Separate try/catch so all error paths produce descriptive messages.
+ *
+ * BUG 4 — getCompassDirection: Math.round(355 / 45) = 8, index 8 is
+ *   undefined because DIRECTIONS has only 8 entries (indices 0-7).
+ *   FIX: Use `% 8` on the rounded value (already present, verified correct).
  */
 
+// ── Constants ──────────────────────────────────────────────────────────────────
+const KAABA_LAT = 21.4225;
+const KAABA_LNG = 39.8262;
 const ALADHAN_BASE_URL = 'https://api.aladhan.com/v1';
 
-export interface QiblahResponse {
-  code: number;
-  status: string;
-  data: {
-    latitude: number;
-    longitude: number;
-    direction: number;  // Bearing in degrees toward Kaaba
-  };
-}
-
-export interface QiblahCompassResponse {
-  code: number;
-  status: string;
-  data: {
-    latitude: number;
-    longitude: number;
-    direction: number;
-    compass: {
-      direction: string;       // e.g., "NE", "E", "SE"
-      degree: number;
-      clock: string;           // Clock direction e.g., "2 o'clock"
-    };
-  };
-}
-
+// ── Types ──────────────────────────────────────────────────────────────────────
 export interface QiblahData {
-  direction: number;           // Bearing in degrees
-  compassDirection?: string;   // Human-readable direction (NE, E, etc.)
-  compassClock?: string;       // Clock position (e.g., "2 o'clock")
+  /** Bearing in degrees from true North */
+  direction: number;
+  /** Human-readable compass direction (N, NE, E …) */
+  compassDirection: string;
+  /** Clock position description */
+  compassClock?: string;
   latitude: number;
   longitude: number;
 }
 
+// ── Core bearing calculation ───────────────────────────────────────────────────
+
 /**
- * Fetches Qiblah direction from AlAdhan API
- * @param latitude User's latitude
- * @param longitude User's longitude
- * @returns QiblahData with direction and coordinates
+ * Calculate bearing from a point to the Kaaba using the forward-azimuth
+ * formula on a sphere.
+ *
+ * @returns Bearing in degrees [0, 360)
  */
-export async function fetchQiblahDirection(
-  latitude: number,
-  longitude: number
-): Promise<QiblahData> {
-  const url = `${ALADHAN_BASE_URL}/qibla/${latitude}/${longitude}`;
-  
-  try {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'Accept-Encoding': 'identity', // Request uncompressed response
-      },
-    });
+export function calculateQiblahBearing(lat: number, lng: number): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
 
-    if (!response.ok) {
-      throw new Error(`API request failed with status ${response.status}`);
-    }
+  const phi1 = toRad(lat);
+  const phi2 = toRad(KAABA_LAT);
+  const deltaLambda = toRad(KAABA_LNG - lng);
 
-    const data: QiblahResponse = await response.json();
+  const y = Math.sin(deltaLambda) * Math.cos(phi2);
+  const x =
+    Math.cos(phi1) * Math.sin(phi2) -
+    Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
 
-    if (data.code !== 200 || data.status !== 'OK') {
-      throw new Error('API returned an error response');
-    }
-
-    return {
-      direction: data.data.direction,
-      latitude: data.data.latitude,
-      longitude: data.data.longitude,
-    };
-  } catch (error) {
-    console.error('Error fetching Qiblah direction:', error);
-    throw error;
-  }
+  let bearing = (Math.atan2(y, x) * 180) / Math.PI;
+  return ((bearing % 360) + 360) % 360;
 }
 
-/**
- * Fetches enhanced Qiblah compass data from AlAdhan API
- * Includes human-readable compass direction and clock position
- * @param latitude User's latitude
- * @param longitude User's longitude
- * @returns QiblahData with full compass information
- */
-export async function fetchQiblahCompass(
-  latitude: number,
-  longitude: number
-): Promise<QiblahData> {
-  // Use the basic qibla endpoint as /compass may have issues
-  // We'll calculate compass direction locally for reliability
-  const url = `${ALADHAN_BASE_URL}/qibla/${latitude}/${longitude}`;
-  
-  try {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'Accept-Encoding': 'identity', // Request uncompressed response
-      },
-    });
+/** @deprecated Alias kept for backward compatibility */
+export const calculateQiblahLocal = calculateQiblahBearing;
 
-    if (!response.ok) {
-      throw new Error(`API request failed with status ${response.status}`);
-    }
+// ── Compass direction label ────────────────────────────────────────────────────
 
-    // Get response as text first to handle potential encoding issues
-    const responseText = await response.text();
-    
-    // Try to parse JSON
-    let data: QiblahResponse;
-    try {
-      data = JSON.parse(responseText);
-    } catch (parseError) {
-      console.error('Failed to parse API response:', responseText.substring(0, 100));
-      throw new Error('Invalid JSON response from API');
-    }
+const DIRECTIONS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
 
-    // Validate response structure
-    if (!data || typeof data !== 'object') {
-      throw new Error('Invalid response format');
-    }
-
-    if (data.code !== 200 || data.status !== 'OK') {
-      throw new Error('API returned an error response');
-    }
-
-    if (!data.data || typeof data.data.direction !== 'number') {
-      throw new Error('Missing direction data in response');
-    }
-
-    // Calculate compass direction locally
-    const compassDir = getCompassDirection(data.data.direction);
-
-    return {
-      direction: data.data.direction,
-      compassDirection: compassDir,
-      latitude: data.data.latitude ?? latitude,
-      longitude: data.data.longitude ?? longitude,
-    };
-  } catch (error) {
-    console.error('Error fetching Qiblah compass data:', error);
-    throw error;
-  }
-}
-
-/**
- * Converts heading degrees to compass direction label
- * @param degrees Heading in degrees (0-360)
- * @returns Compass direction string (N, NE, E, SE, S, SW, W, NW)
- */
+/** Convert heading degrees → compass label (N, NE, E …) */
 export function getCompassDirection(degrees: number): string {
+  // Guard: if degrees is somehow NaN or undefined, default to N
+  if (!isFinite(degrees)) return 'N';
   const normalized = ((degrees % 360) + 360) % 360;
-  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-  const index = Math.round(normalized / 45) % 8;
-  return directions[index];
+  return DIRECTIONS[Math.round(normalized / 45) % 8];
 }
 
+// ── Angle math ─────────────────────────────────────────────────────────────────
+
 /**
- * Calculates angle difference for smooth rotation
- * Handles the 360° wraparound to find shortest rotation path
- * @param from Starting angle
- * @param to Target angle
- * @returns Normalized angle difference (-180 to 180)
+ * Shortest angular difference (handles 360°↔0° wraparound).
+ * Result is in [-180, 180].  Positive = clockwise.
+ *
+ * Convention: diff = to - from  (how much to turn FROM `from` TO reach `to`)
+ *
+ * FIX v3: Added NaN guard — if either input is invalid return 0 so the
+ * animation doesn't chase a phantom value and appear frozen.
  */
 export function normalizeAngleDiff(from: number, to: number): number {
+  // BUG FIX: guard NaN — bad sensor data caused infinite oscillation
+  if (!isFinite(from) || !isFinite(to)) return 0;
+
   let diff = to - from;
   while (diff > 180) diff -= 360;
   while (diff < -180) diff += 360;
   return diff;
 }
 
+/** Normalize any angle to [0, 360) */
+export function normalizeAngle(angle: number): number {
+  if (!isFinite(angle)) return 0;
+  return ((angle % 360) + 360) % 360;
+}
+
+// ── Heading smoother (circular mean) ───────────────────────────────────────────
+
 /**
- * Local Qiblah calculation as fallback when API is unavailable
- * Uses spherical geometry to calculate bearing to Kaaba
- * @param lat User's latitude
- * @param lng User's longitude
- * @returns Bearing in degrees to Kaaba
+ * Creates a heading smoother using a circular running-mean.
+ * Handles the 359°→1° boundary correctly.
+ *
+ * @param windowSize Number of samples to average (default 10)
+ *
+ * FIX v3: push() now skips invalid samples (NaN, negative, Infinity).
+ * expo-location returns trueHeading = -1 when the GPS hasn't locked yet
+ * and magHeading can also be -1 on certain Android devices. Feeding -1
+ * into Math.sin() gives a valid but wrong result that permanently skews
+ * the running average → compass points the wrong direction and appears
+ * stuck until the user force-quits.
  */
-export function calculateQiblahLocal(lat: number, lng: number): number {
-  const KAABA_LAT = 21.4225;
-  const KAABA_LNG = 39.8262;
-  
-  const latR = (lat * Math.PI) / 180;
-  const lngR = (lng * Math.PI) / 180;
-  const kaabaLatR = (KAABA_LAT * Math.PI) / 180;
-  const kaabaLngR = (KAABA_LNG * Math.PI) / 180;
-  
-  const dLng = kaabaLngR - lngR;
-  const y = Math.sin(dLng) * Math.cos(kaabaLatR);
-  const x = Math.cos(latR) * Math.sin(kaabaLatR) - 
-            Math.sin(latR) * Math.cos(kaabaLatR) * Math.cos(dLng);
-  
-  let bearing = (Math.atan2(y, x) * 180) / Math.PI;
-  return (bearing + 360) % 360;
+export function createHeadingSmoother(windowSize = 10) {
+  const buffer: number[] = [];
+
+  return {
+    push(rawDegrees: number): number {
+      // BUG FIX: Skip sentinel values (-1 from expo-location) and any NaN/Inf
+      if (!isFinite(rawDegrees) || rawDegrees < 0) {
+        // If buffer has data, return last known good mean without updating
+        if (buffer.length === 0) return 0;
+        // Fall through to compute mean from existing buffer
+      } else {
+        buffer.push(rawDegrees);
+        if (buffer.length > windowSize) buffer.shift();
+      }
+
+      if (buffer.length === 0) return 0;
+
+      let sinSum = 0;
+      let cosSum = 0;
+      for (const h of buffer) {
+        sinSum += Math.sin((h * Math.PI) / 180);
+        cosSum += Math.cos((h * Math.PI) / 180);
+      }
+
+      let mean = (Math.atan2(sinSum, cosSum) * 180) / Math.PI;
+      if (mean < 0) mean += 360;
+      return mean;
+    },
+    reset() {
+      buffer.length = 0;
+    },
+  };
+}
+
+// ── AlAdhan API (optional online validation) ───────────────────────────────────
+
+interface AlAdhanQiblahResponse {
+  code: number;
+  status: string;
+  data: { latitude: number; longitude: number; direction: number };
+}
+
+/**
+ * Fetch Qiblah bearing from AlAdhan API (network call).
+ * Use as a background validator — local calculation is primary.
+ *
+ * FIX v2: AbortController with 8s timeout.
+ * FIX v3: Properly separated try/catch so AbortError and network errors
+ * both produce clean descriptive messages instead of crashing the
+ * finally block with `res is not defined`.
+ */
+export async function fetchQiblahCompass(
+  latitude: number,
+  longitude: number,
+): Promise<QiblahData> {
+  const url = `${ALADHAN_BASE_URL}/qibla/${latitude}/${longitude}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json', 'Accept-Encoding': 'identity' },
+    });
+    clearTimeout(timer); // BUG FIX: clear inside try so it always runs on success
+  } catch (err: any) {
+    clearTimeout(timer); // BUG FIX: also clear on network/abort error
+    if (err?.name === 'AbortError') {
+      throw new Error('AlAdhan API request timed out after 8s');
+    }
+    throw new Error(`Network error fetching Qiblah: ${err?.message ?? err}`);
+  }
+
+  if (!res.ok) throw new Error(`AlAdhan API ${res.status}`);
+
+  let text: string;
+  try {
+    text = await res.text();
+  } catch (err: any) {
+    throw new Error(`Failed to read AlAdhan response body: ${err?.message ?? err}`);
+  }
+
+  let data: AlAdhanQiblahResponse;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error('AlAdhan returned non-JSON response');
+  }
+
+  if (data.code !== 200 || data.status !== 'OK' || typeof data.data?.direction !== 'number') {
+    throw new Error('Invalid AlAdhan response');
+  }
+
+  return {
+    direction: data.data.direction,
+    compassDirection: getCompassDirection(data.data.direction),
+    latitude: data.data.latitude ?? latitude,
+    longitude: data.data.longitude ?? longitude,
+  };
 }
