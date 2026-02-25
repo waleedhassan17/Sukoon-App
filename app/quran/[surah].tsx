@@ -14,7 +14,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Pressable, StyleSheet,
-  ActivityIndicator, Dimensions, StatusBar, Share, Platform,
+  ActivityIndicator, Dimensions, Share, Platform,
   Animated, PanResponder, LayoutAnimation, UIManager,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -143,9 +143,6 @@ const SurahHeader = React.memo(function SurahHeader({
       <View style={s.headerBar}>
         <TouchableOpacity style={s.headerBtn} onPress={onBack} activeOpacity={0.7}>
           <Ionicons name="chevron-back" size={20} color="#fff" />
-        </TouchableOpacity>
-        <TouchableOpacity style={s.headerBtn} activeOpacity={0.7}>
-          <Ionicons name="ellipsis-horizontal" size={18} color="rgba(255,255,255,0.85)" />
         </TouchableOpacity>
       </View>
       <View style={s.headerCenter}>
@@ -753,10 +750,35 @@ export default function SurahScreen() {
   const pages = useMemo(() => splitIntoPages(ayahs), [ayahs]);
   const playerBarH = 72 + insets.bottom;
 
-  /* ─── Load ─── */
+  /* ─── Load & Master Cleanup ─── */
   useEffect(() => {
     if (!isNaN(surahNumber) && surahNumber > 0) loadSurah();
-    return () => { audioPlayer.stop().catch(() => {}); audioPlayer.setStatusCallback(null); audioPlayer.setFinishCallback(null); };
+    return () => {
+      // ── Audio cleanup ──
+      audioPlayer.stop().catch(() => {});
+      audioPlayer.setStatusCallback(null);
+      audioPlayer.setFinishCallback(null);
+
+      // ── Timer cleanup (prevent post-unmount state updates & memory leaks) ──
+      if (flushTimer.current) { clearTimeout(flushTimer.current); flushTimer.current = null; }
+      if (lastSeenTimer.current) { clearTimeout(lastSeenTimer.current); lastSeenTimer.current = null; }
+      if (scrollFadeTimer.current) { clearTimeout(scrollFadeTimer.current); scrollFadeTimer.current = null; }
+      if (audioClickDebounceRef.current) { clearTimeout(audioClickDebounceRef.current); audioClickDebounceRef.current = null; }
+
+      // ── Flush pending ayah reads so no data is lost on unmount ──
+      if (pendingReads.current.length > 0) {
+        const batch = [...pendingReads.current];
+        pendingReads.current = [];
+        for (const k of batch) {
+          const [s, a] = k.split(':').map(Number);
+          ReadingProgress.markAyahRead(s, a);
+        }
+      }
+
+      // ── Flush any debounced setLastSeen / setLastAudio writes ──
+      ReadingProgress.flushLastSeen();
+      ReadingProgress.flushLastAudio();
+    };
   }, [surahNumber]);
 
   useEffect(() => {
@@ -782,7 +804,7 @@ export default function SurahScreen() {
               }
             }, 50);
             audioPlayer.play(ay.audio).catch((e) => {
-              console.error('[Audio] Auto-play error:', e);
+              if (__DEV__) console.error('[Audio] Auto-play error:', e);
               setCurrentIndex(null);
             });
           }
@@ -927,7 +949,7 @@ export default function SurahScreen() {
       }
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : 'Failed to load Surah. Please check your internet connection.';
-      console.error('[SurahScreen] Load failed:', errorMsg);
+      if (__DEV__) console.error('[SurahScreen] Load failed:', errorMsg);
       setError(errorMsg);
       setMeta(null);
       setAyahs([]);
@@ -977,13 +999,13 @@ export default function SurahScreen() {
     // ─── TRACK: mark as read ───
     trackAyahRead(surahNumber, ay.numberInSurah);
     if (meta?.englishName) {
-      ReadingProgress.setLastAudio(surahNumber, meta.englishName, ay.numberInSurah).catch(() => {});
+      ReadingProgress.setLastAudio(surahNumber, meta.englishName, ay.numberInSurah, audioPlayer.getPositionMs()).catch(() => {});
     }
     
     try {
       await audioPlayer.play(ay.audio);
     } catch (e) { 
-      console.error('[Audio] Play error:', e);
+      if (__DEV__) console.error('[Audio] Play error:', e);
       // Revert optimistic update on failure
       setCurrentIndex(null);
     } finally {
@@ -1023,7 +1045,6 @@ export default function SurahScreen() {
   if (loading) {
     return (
       <View style={[s.loadWrap, { backgroundColor: theme.surface }]}>
-        <StatusBar barStyle="light-content" backgroundColor={theme.primary} />
         {/* Skeleton loading with animated placeholders */}
         <View style={s.skeletonHeader}>
           <LinearGradient colors={theme.headerGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.skeletonHeaderBg} />
@@ -1049,7 +1070,6 @@ export default function SurahScreen() {
   if (error || !meta || ayahs.length === 0) {
     return (
       <View style={[s.container, { backgroundColor: theme.surface }]}>
-        <StatusBar barStyle="light-content" backgroundColor={theme.primary} />
         <View style={[s.loadWrap, { paddingBottom: 0 }]}>
           <TouchableOpacity 
             onPress={() => router.back()} 
@@ -1084,8 +1104,6 @@ export default function SurahScreen() {
 
   return (
     <View style={[s.container, { backgroundColor: theme.surface }]}>
-      <StatusBar barStyle="light-content" backgroundColor={theme.primary} />
-
       <SurahHeader
         englishName={meta?.englishName || ''} arabicName={meta?.name || ''}
         ayahCount={meta?.numberOfAyahs} revelationType={meta?.revelationType}

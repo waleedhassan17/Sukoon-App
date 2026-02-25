@@ -14,7 +14,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Dimensions, StatusBar, Platform, Animated, LayoutAnimation, UIManager,
+  Dimensions, Platform, Animated, LayoutAnimation, UIManager,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -81,6 +81,25 @@ const daysIn = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
 const firstDow = (y: number, m: number) => new Date(y, m, 1).getDay();
 const countDone = (d: DayData) =>
   Object.values(d).filter((v) => v === 'prayed' || v === 'jamaah' || v === 'qasr').length;
+
+/** Safe JSON parse — returns null on corrupt data instead of crashing */
+function safeJsonParse<T>(raw: string | null | undefined): T | null {
+  if (!raw) return null;
+  try { return JSON.parse(raw) as T; } catch { return null; }
+}
+
+/** Validate that an object is a valid DayData (all 5 prayer keys present with valid status) */
+const VALID_STATUSES = new Set<string>(['none', 'prayed', 'jamaah', 'qasr', 'missed']);
+function validateDayData(obj: any): DayData {
+  if (!obj || typeof obj !== 'object') return { ...EMPTY_DAY };
+  const result = { ...EMPTY_DAY };
+  for (const key of ['fajr', 'zuhr', 'asr', 'maghrib', 'isha'] as PrayerKey[]) {
+    if (obj[key] && VALID_STATUSES.has(obj[key])) {
+      result[key] = obj[key] as PrayerStatus;
+    }
+  }
+  return result;
+}
 
 /* ═══ Ornament ═══ */
 function Ornament() {
@@ -296,13 +315,60 @@ function StatusSheet({
 /* ═══════════════════════════════════════════════
    MAIN SCREEN
    ═══════════════════════════════════════════════ */
+/* ═══ Error Boundary — catches any render crash in this screen ═══ */
+class SalahErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err: Error) {
+    if (__DEV__) console.error('[SalahTracker] Render crash caught:', err);
+  }
+  render() {
+    return this.state.hasError ? this.props.fallback : this.props.children;
+  }
+}
+
 export default function SalahTrackerScreen() {
+  const { theme } = useTheme();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <SalahErrorBoundary
+      fallback={
+        <View style={[st.root, { backgroundColor: theme.surface, justifyContent: 'center', alignItems: 'center', padding: 32 }]}>
+          <Ionicons name="warning-outline" size={48} color={theme.textTertiary} />
+          <Text style={{ color: theme.text, fontSize: 18, fontWeight: '700', marginTop: 16 }}>Something went wrong</Text>
+          <Text style={{ color: theme.textSecondary, fontSize: 14, textAlign: 'center', marginTop: 8, lineHeight: 20 }}>
+            The Salah Tracker encountered an error. Please go back and try again.
+          </Text>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={{ marginTop: 24, backgroundColor: theme.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 }}
+          >
+            <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      }
+    >
+      <SalahTrackerInner />
+    </SalahErrorBoundary>
+  );
+}
+
+function SalahTrackerInner() {
   const { theme, mode } = useTheme();
   const isDark = mode === 'dark';
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const isMounted = useRef(true);
 
-  const now = new Date();
+  // Use a ref for "now" so it's fresh on re-renders but stable within a render
+  const nowRef = useRef(new Date());
+  const now = nowRef.current;
+
   const [vYear, setVYear] = useState(now.getFullYear());
   const [vMonth, setVMonth] = useState(now.getMonth());
   const [selDay, setSelDay] = useState(now.getDate());
@@ -311,10 +377,17 @@ export default function SalahTrackerScreen() {
   const [cache, setCache] = useState<Record<string, DayData>>({});
   const [pickerPrayer, setPickerPrayer] = useState<typeof PRAYERS[0] | null>(null);
   const [streak, setStreak] = useState(0);
+  const [ready, setReady] = useState(false);
 
   const selKey = dk(vYear, vMonth, selDay);
   const isToday = vYear === now.getFullYear() && vMonth === now.getMonth() && selDay === now.getDate();
   const completed = countDone(dayData);
+
+  // Cleanup: mark unmounted to prevent stale setState calls
+  useEffect(() => {
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, []);
 
   /* ─── Data ─── */
   useEffect(() => { loadMonth(); }, [vYear, vMonth]);
@@ -322,68 +395,108 @@ export default function SalahTrackerScreen() {
   useEffect(() => { calcStreak(); }, [cache]);
 
   const loadMonth = async () => {
-    const days = daysIn(vYear, vMonth);
-    const keys = Array.from({ length: days }, (_, i) => sk(dk(vYear, vMonth, i + 1)));
     try {
+      const days = daysIn(vYear, vMonth);
+      const keys = Array.from({ length: days }, (_, i) => sk(dk(vYear, vMonth, i + 1)));
       const res = await AsyncStorage.multiGet(keys);
+      if (!isMounted.current) return;
+
       const c: Record<string, DayData> = {};
-      res.forEach(([k, v]) => { if (v) c[k.replace('sukoon_salah_', '')] = JSON.parse(v); });
+      for (const [k, v] of res) {
+        if (!v) continue;
+        const parsed = safeJsonParse<DayData>(v);
+        if (parsed) {
+          const dateKey = k.replace('sukoon_salah_', '');
+          c[dateKey] = validateDayData(parsed);
+        }
+      }
       setCache(c);
-    } catch {}
+    } catch (e) {
+      if (__DEV__) console.warn('[SalahTracker] loadMonth error:', e);
+    } finally {
+      if (isMounted.current && !ready) setReady(true);
+    }
   };
 
   const loadDay = async () => {
     try {
       const v = await AsyncStorage.getItem(sk(selKey));
-      setDayData(v ? JSON.parse(v) : { ...EMPTY_DAY });
-    } catch { setDayData({ ...EMPTY_DAY }); }
+      if (!isMounted.current) return;
+      const parsed = safeJsonParse<DayData>(v);
+      setDayData(parsed ? validateDayData(parsed) : { ...EMPTY_DAY });
+    } catch (e) {
+      if (__DEV__) console.warn('[SalahTracker] loadDay error:', e);
+      if (isMounted.current) setDayData({ ...EMPTY_DAY });
+    }
   };
 
-  const save = async (data: DayData) => {
+  // save uses functional setState to always operate on latest dayData (prevents stale closure race)
+  const save = useCallback(async (data: DayData) => {
     setDayData(data);
-    setCache((p) => ({ ...p, [selKey]: data }));
-    try { await AsyncStorage.setItem(sk(selKey), JSON.stringify(data)); } catch {}
-    // Background cloud sync
+    setCache((prev) => ({ ...prev, [selKey]: data }));
+    try {
+      await AsyncStorage.setItem(sk(selKey), JSON.stringify(data));
+    } catch (e) {
+      if (__DEV__) console.warn('[SalahTracker] save error:', e);
+    }
     DataSyncService.saveSalahData(selKey, data).catch(() => {});
-  };
+  }, [selKey]);
 
-  const calcStreak = () => {
+  const calcStreak = useCallback(() => {
     let cnt = 0;
-    const d = new Date(now);
+    // Use fresh Date() for streak calc — not the stale `now` from initial render
+    const today = new Date();
+    const d = new Date(today);
     for (let i = 0; i < 365; i++) {
       const k = dk(d.getFullYear(), d.getMonth(), d.getDate());
       const data = cache[k];
-      if (data && countDone(data) === 5) { cnt++; d.setDate(d.getDate() - 1); }
-      else if (i === 0) { d.setDate(d.getDate() - 1); }
-      else break;
+      if (data && countDone(data) === 5) {
+        cnt++;
+        d.setDate(d.getDate() - 1);
+      } else if (i === 0) {
+        // Today might not be complete yet — skip to yesterday
+        d.setDate(d.getDate() - 1);
+      } else {
+        break;
+      }
     }
-    setStreak(cnt);
-  };
+    if (isMounted.current) setStreak(cnt);
+  }, [cache]);
 
+  // cycle uses functional update to guarantee latest dayData
   const cycle = useCallback((key: PrayerKey) => {
-    const cur = dayData[key];
-    const idx = STATUS_CYCLE.indexOf(cur);
-    save({ ...dayData, [key]: STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length] });
+    setDayData((prev) => {
+      const cur = prev[key];
+      const idx = STATUS_CYCLE.indexOf(cur);
+      const next = { ...prev, [key]: STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length] };
+      save(next);
+      return next;
+    });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-  }, [dayData, selKey]);
+  }, [save]);
 
   const setStatus = useCallback((key: PrayerKey, s: PrayerStatus) => {
-    save({ ...dayData, [key]: s });
+    setDayData((prev) => {
+      const next = { ...prev, [key]: s };
+      save(next);
+      return next;
+    });
     setPickerPrayer(null);
-  }, [dayData, selKey]);
+  }, [save]);
 
-  const changeMonth = (d: number) => {
+  const changeMonth = useCallback((d: number) => {
     let m = vMonth + d, y = vYear;
     if (m < 0) { m = 11; y--; } else if (m > 11) { m = 0; y++; }
     LayoutAnimation.configureNext(LAYOUT_ANIM);
     setVYear(y); setVMonth(m); setSelDay(1);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-  };
+  }, [vMonth, vYear]);
 
-  const goToday = () => {
-    setVYear(now.getFullYear()); setVMonth(now.getMonth()); setSelDay(now.getDate());
+  const goToday = useCallback(() => {
+    const t = new Date();
+    setVYear(t.getFullYear()); setVMonth(t.getMonth()); setSelDay(t.getDate());
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-  };
+  }, []);
 
   /* Calendar */
   const gridDays: (number | null)[] = useMemo(() => {
@@ -402,13 +515,23 @@ export default function SalahTrackerScreen() {
     return Array.from({ length: 7 }, (_, i) => { const w = new Date(start); w.setDate(w.getDate() + i); return w; });
   }, [vYear, vMonth, selDay]);
 
-  const isFuture = (day: number) => new Date(vYear, vMonth, day) > now;
-  const monthPrayed = Object.values(cache).reduce((s, d) => s + countDone(d), 0);
+  const isFuture = useCallback((day: number) => {
+    const today = new Date();
+    return new Date(vYear, vMonth, day) > today;
+  }, [vYear, vMonth]);
+  const monthPrayed = useMemo(() => Object.values(cache).reduce((s, d) => s + countDone(d), 0), [cache]);
+
+  // Show loading state on first mount while AsyncStorage loads
+  if (!ready) {
+    return (
+      <View style={[st.root, { backgroundColor: theme.surface, justifyContent: 'center', alignItems: 'center' }]}>
+        <View style={{ width: 28, height: 28, borderRadius: 14, borderWidth: 3, borderColor: theme.primary, borderTopColor: 'transparent' }} />
+      </View>
+    );
+  }
 
   return (
     <View style={[st.root, { backgroundColor: theme.surface }]}>
-      <StatusBar barStyle="light-content" backgroundColor={theme.primary} />
-
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 28 }}>
         {/* ═══ HEADER ═══ */}
         <LinearGradient
@@ -500,8 +623,9 @@ export default function SalahTrackerScreen() {
                 const data = cache[key];
                 const prayed = data ? countDone(data) : 0;
                 const sel = wd.getDate() === selDay && wd.getMonth() === vMonth && wd.getFullYear() === vYear;
-                const isT = wd.toDateString() === now.toDateString();
-                const fut = wd > now;
+                const todayDate = new Date();
+                const isT = wd.toDateString() === todayDate.toDateString();
+                const fut = wd > todayDate;
 
                 return (
                   <TouchableOpacity
@@ -538,7 +662,8 @@ export default function SalahTrackerScreen() {
                 const data = cache[key];
                 const prayed = data ? countDone(data) : 0;
                 const sel = day === selDay;
-                const isT = vYear === now.getFullYear() && vMonth === now.getMonth() && day === now.getDate();
+                const td = new Date();
+                const isT = vYear === td.getFullYear() && vMonth === td.getMonth() && day === td.getDate();
                 const fut = isFuture(day);
 
                 return (

@@ -16,6 +16,7 @@ import SukoonSplash from '@/components/SukoonSplash';
 import { QuranService } from '@/lib/quranService';
 import { NotificationService } from '@/lib/notificationService';
 import { NotificationHistory } from '@/app/notifications';
+import { NotificationStorage } from '@/lib/notificationStorage';
 import { AzanPlayer } from '@/lib/azanPlayer';
 import { DataSyncService } from '@/lib/dataSyncService';
 import { FCMService } from '@/lib/fcmService';
@@ -44,27 +45,26 @@ function RootLayoutInner() {
   const receivedListener = useRef<any>(null);
   const appStateRef = useRef<AppStateStatus>('active');
 
-  // Keep Android system navigation bar button style matching theme
-  // Note: bg color & position are handled natively in MainActivity.kt (edge-to-edge)
+  // Keep Android system navigation bar matching theme (bg color + button style)
   useEffect(() => {
     if (Platform.OS === 'android') {
       try {
         const NavigationBar = require('expo-navigation-bar');
-        const btnStyle = mode === 'dark' ? 'light' : 'dark';
-        NavigationBar.setButtonStyleAsync(btnStyle);
+        NavigationBar.setBackgroundColorAsync(mode === 'dark' ? theme.background : '#FFFFFF');
+        NavigationBar.setButtonStyleAsync(mode === 'dark' ? 'light' : 'dark');
       } catch {}
     }
-  }, [mode]);
+  }, [mode, theme.background]);
 
   useEffect(() => {
     async function prepare() {
       try {
-        // Set Android nav bar button style on init (bg/position handled natively)
+        // Set Android nav bar color + button style on init
         if (Platform.OS === 'android') {
           try {
             const NavigationBar = require('expo-navigation-bar');
-            const btnStyle = mode === 'dark' ? 'light' : 'dark';
-            NavigationBar.setButtonStyleAsync(btnStyle);
+            NavigationBar.setBackgroundColorAsync(mode === 'dark' ? '#0B0B0C' : '#FFFFFF');
+            NavigationBar.setButtonStyleAsync(mode === 'dark' ? 'light' : 'dark');
           } catch {}
         }
 
@@ -107,8 +107,11 @@ function RootLayoutInner() {
     // Handle incoming notifications: store in history + play azan sound
     if (ExpoNotifications) {
       receivedListener.current = ExpoNotifications.addNotificationReceivedListener((notification: any) => {
-        // Save to notification history
+        // Save to legacy notification history (backward compat)
         NotificationHistory.add(notification).catch(() => {});
+
+        // Save to new persistent notification storage (@notifications key)
+        NotificationStorage.addFromNotification(notification).catch(() => {});
 
         // Play azan sound if this is a prayer notification (foreground only)
         AzanPlayer.handleNotification(notification).catch(() => {});
@@ -172,7 +175,7 @@ function RootLayoutInner() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
       <StatusBar style="light" />
 
       {/* Main app navigation */}

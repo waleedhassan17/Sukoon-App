@@ -30,6 +30,7 @@ export default function TabLayout() {
         headerShown: false,
         tabBarActiveTintColor: theme.tabBarActive,
         tabBarInactiveTintColor: theme.tabBarInactive,
+        sceneStyle: { backgroundColor: theme.surface },
         tabBarStyle: {
           position: 'absolute',
           bottom: 0,
@@ -39,7 +40,7 @@ export default function TabLayout() {
           backgroundColor: theme.tabBarBg,
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: isDark
-            ? 'rgba(255,255,255,0.06)'
+            ? 'rgba(255,255,255,0.08)'
             : 'rgba(0,0,0,0.06)',
           borderBottomWidth: 0,
           borderRadius: 0,
@@ -91,7 +92,7 @@ export default function TabLayout() {
                     styles.iconContainerActive,
                     {
                       backgroundColor: isDark
-                        ? 'rgba(82,183,136,0.15)'
+                        ? 'rgba(116,198,157,0.15)'
                         : 'rgba(27,67,50,0.08)',
                     },
                   ],

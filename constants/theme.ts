@@ -121,7 +121,7 @@ export const lightTheme = {
 
 export const darkTheme = {
   mode: 'dark' as const,
-  // Core - Classic Islamic Green Palette (Dark mode)
+  // Core - Islamic Emerald on Soft Black
   primary: '#40916C',
   primaryLight: '#52B788',
   primaryMuted: '#2D6A4F',
@@ -129,40 +129,40 @@ export const darkTheme = {
   accent: '#52B788',
   gold: '#E8D44D',
   goldLight: '#F6E27A',
-  // Surfaces
-  background: '#0A0F1A',
-  backgroundAlt: '#111827',
-  surface: '#1A1A1A',
-  surfaceElevated: '#1F2937',
-  surfaceMuted: '#283548',
-  surfaceWarm: '#1F2937',
+  // Surfaces - Soft black / charcoal (zero blue)
+  background: '#0B0B0C',
+  backgroundAlt: '#101012',
+  surface: '#121214',
+  surfaceElevated: '#1A1A1D',
+  surfaceMuted: '#222226',
+  surfaceWarm: '#1A1A1D',
   // Text
-  text: '#F5F6F8',
-  textSecondary: '#9CA3AF',
-  textTertiary: '#6B7280',
-  textOnPrimary: '#0A0F1A',
+  text: '#F5F5F5',
+  textSecondary: '#B8B8C0',
+  textTertiary: '#8A8A92',
+  textOnPrimary: '#0B0B0C',
   textOnGold: '#3D2E00',
-  textOnDark: '#F5F6F8',
+  textOnDark: '#F5F5F5',
   textOnDarkMuted: 'rgba(255,255,255,0.6)',
   // Borders
-  border: 'rgba(255,255,255,0.08)',
-  borderLight: '#283548',
+  border: 'rgba(255,255,255,0.07)',
+  borderLight: '#222226',
   // Status
   success: '#34D399',
   error: '#F87171',
   warning: '#FBBF24',
   info: '#38BDF8',
   // Shadows
-  shadowColor: 'rgba(0,0,0,0.4)',
+  shadowColor: 'rgba(0,0,0,0.5)',
   // Tab bar
-  tabBarBg: '#1A1A1A',
-  tabBarBorder: '#1F2937',
+  tabBarBg: '#121214',
+  tabBarBorder: '#1A1A1D',
   tabBarActive: '#74C69D',
-  tabBarInactive: 'rgba(255,255,255,0.4)',
+  tabBarInactive: '#8A8A92',
   // Quran
   arabicText: '#D1FAE5',
   ayahHighlight: 'rgba(212, 175, 55, 0.12)',
-  verseCard: '#1F2937',
+  verseCard: '#1A1A1D',
   // Emotion colors (slightly brighter for dark mode)
   emotionPeaceful: '#6EAE8E',
   emotionGrateful: '#D19470',
@@ -175,9 +175,9 @@ export const darkTheme = {
   actionGradient2: ['#40916C', '#2D6A4F'] as const,
   actionGradient3: ['#52B788', '#40916C'] as const,
   actionGradient4: ['#74C69D', '#52B788'] as const,
-  // Gradients
-  headerGradient: ['#1B4332', '#2D6A4F', '#1F2937'] as const,
-  cardGradient: ['#1F2937', '#1A2332'] as const,
+  // Gradients (blue-free)
+  headerGradient: ['#1B4332', '#2D6A4F', '#1A1A1D'] as const,
+  cardGradient: ['#1A1A1D', '#151517'] as const,
   goldGradient: ['#E8D44D', '#D4AF37'] as const,
   accentGradient: ['#40916C', '#2D6A4F'] as const,
 };

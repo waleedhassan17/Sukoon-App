@@ -13,7 +13,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Dimensions, StatusBar, Platform, LayoutAnimation, UIManager,
+  Dimensions, Platform, LayoutAnimation, UIManager,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -202,8 +202,6 @@ export default function InsightsScreen() {
 
   return (
     <View style={[st.root, { backgroundColor: theme.surface }]}>
-      <StatusBar barStyle="light-content" backgroundColor={theme.primary} />
-
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 28 }}>
         {/* ═══ HEADER ═══ */}
         <LinearGradient

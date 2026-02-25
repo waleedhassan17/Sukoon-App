@@ -49,6 +49,7 @@ export interface NotificationPreferences {
 }
 
 import { AzanPlayer } from './azanPlayer';
+import { NotificationStorage } from './notificationStorage';
 
 // ══════════════════════════════════════════════
 // STORAGE KEYS
@@ -551,6 +552,58 @@ export const NotificationService = {
         await BackgroundFetch.unregisterTaskAsync(BACKGROUND_TASK_NAME);
       }
     } catch {}
+  },
+
+  // ══════════════════════════════════════════
+  // TEST AZAN NOTIFICATION
+  // Schedules a test azan notification after `delaySec` seconds.
+  // Also saves the notification to persistent storage.
+  // ── TEST ONLY — remove before production release ──
+  // ══════════════════════════════════════════
+  async scheduleTestAzan(delaySec: number = 5): Promise<boolean> {
+    if (!loadModules()) return false;
+
+    const granted = await requestPermissions();
+    if (!granted) return false;
+
+    const triggerDate = new Date(Date.now() + delaySec * 1000);
+    const prayerName = 'dhuhr'; // Use Dhuhr for test
+
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Dhuhr Prayer Time (TEST)',
+          body: this._getPrayerBody('dhuhr'),
+          sound: 'azan.wav',
+          data: {
+            type: 'prayer',
+            prayer: prayerName,
+            action: 'azan',
+            isTest: true, // Flag so we know it's a test
+          },
+          ...(Platform.OS === 'android' && { channelId: 'prayer-azan' }),
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: triggerDate,
+        },
+        identifier: `test-azan-${Date.now()}`,
+      });
+
+      // Save to persistent notification storage immediately
+      await NotificationStorage.addManual({
+        title: 'Dhuhr Prayer Time (TEST)',
+        message: this._getPrayerBody('dhuhr'),
+        type: 'azan',
+        data: { prayer: prayerName, action: 'azan', isTest: true },
+      });
+
+      console.log(`[Sukoon] Test azan scheduled in ${delaySec}s`);
+      return true;
+    } catch (e) {
+      console.error('[Sukoon] scheduleTestAzan error:', e);
+      return false;
+    }
   },
 };
 

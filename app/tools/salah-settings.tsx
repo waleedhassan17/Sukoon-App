@@ -13,7 +13,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Switch, StyleSheet,
-  StatusBar, Platform, Alert, Share, LayoutAnimation, UIManager, Linking,
+  Platform, Alert, Share, LayoutAnimation, UIManager, Linking,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -23,15 +23,6 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { NotificationService, NotificationPreferences, PrayerName } from '@/lib/notificationService';
-
-// Lazy-load expo-notifications — not available in Expo Go (SDK 53+)
-let Notifications: any = null;
-try {
-  const mod = require('expo-notifications');
-  if (mod && typeof mod.scheduleNotificationAsync === 'function') {
-    Notifications = mod;
-  }
-} catch {}
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -328,26 +319,7 @@ export default function SalahTrackerSettingsScreen() {
     await NotificationService.savePreferences(updated);
   }, [notifPrefs]);
 
-  // Test notification
-  const testNotification = async () => {
-    if (!Notifications) {
-      Alert.alert('Not Available', 'Notifications require a development build. They are not supported in Expo Go.');
-      return;
-    }
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: 'Sukoon Test ✅',
-        body: 'If you see this, notifications are working!',
-        sound: 'reminder.wav',
-        data: { type: 'test' },
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-        seconds: 2,
-      },
-    });
-    Alert.alert('Sent!', 'Check in 2 seconds...');
-  };
+
 
   const handleReset = () => {
     Alert.alert(
@@ -383,7 +355,9 @@ export default function SalahTrackerSettingsScreen() {
       pairs.forEach(([k, v]) => {
         if (v) {
           const date = k.replace('sukoon_salah_', '');
-          const d = JSON.parse(v);
+          let d: any;
+          try { d = JSON.parse(v); } catch { return; } // skip corrupt entries
+          if (!d || typeof d !== 'object') return;
           const prayed = ['fajr', 'zuhr', 'asr', 'maghrib', 'isha'].filter(
             (p) => d[p] === 'prayed' || d[p] === 'jamaah' || d[p] === 'qasr',
           ).length;
@@ -397,8 +371,6 @@ export default function SalahTrackerSettingsScreen() {
 
   return (
     <View style={[st.root, { backgroundColor: theme.surface }]}>
-      <StatusBar barStyle="light-content" backgroundColor={theme.primary} />
-
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}>
         {/* ═══ HEADER ═══ */}
         <LinearGradient
@@ -585,16 +557,6 @@ export default function SalahTrackerSettingsScreen() {
               )}
             </Section>
 
-            <Section title="DEBUG">
-              <SettingRow
-                icon="beaker-outline"
-                iconBg="#D97706"
-                label="Test Notification"
-                subtitle="Send a test notification in 2 seconds"
-                onPress={testNotification}
-                last
-              />
-            </Section>
           </>
         )}
 

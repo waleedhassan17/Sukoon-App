@@ -136,34 +136,59 @@ export default function HomeScreen() {
 
   const loadPrayerTimes = async () => {
     try {
+      // ── Cache-first: instant load from today's cached data ──
+      const cached = await PrayerTimesService.getCachedPrayerTimes();
+      if (cached) {
+        setPrayerTimes(cached.data);
+        setNextPrayer(PrayerTimesService.getNextPrayer(cached.data));
+        return; // Done — no GPS or API needed
+      }
+
+      // ── No cache: fetch fresh ──
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({ 
-          accuracy: Location.Accuracy.High,
-          mayShowUserSettingsDialog: true,
+      if (status !== 'granted') return;
+
+      // Use cached location if available (avoids GPS delay)
+      let lat: number;
+      let lng: number;
+      const cachedLoc = await PrayerTimesService.getCachedLocation();
+      if (cachedLoc) {
+        lat = cachedLoc.lat;
+        lng = cachedLoc.lng;
+      } else {
+        const loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
         });
-        const times = await PrayerTimesService.getByCoordinates(loc.coords.latitude, loc.coords.longitude);
-        if (times) {
-          setPrayerTimes(times);
-          setNextPrayer(PrayerTimesService.getNextPrayer(times));
-          
-          // Schedule prayer notifications if enabled
-          try {
-            const prefs = await NotificationService.getPreferences();
-            if (prefs.enabled) {
-              const rawTimes: RawPrayerTimes = {
-                Fajr: times.Fajr?.split(' ')[0] || '05:00',
-                Sunrise: times.Sunrise?.split(' ')[0] || '06:30',
-                Dhuhr: times.Dhuhr?.split(' ')[0] || '12:00',
-                Asr: times.Asr?.split(' ')[0] || '15:30',
-                Maghrib: times.Maghrib?.split(' ')[0] || '18:00',
-                Isha: times.Isha?.split(' ')[0] || '19:30',
-              };
-              await scheduleFromPrayerTimes(rawTimes);
-            }
-          } catch (notifErr) {
-            if (__DEV__) console.warn('Failed to schedule prayer notifications:', notifErr);
+        lat = loc.coords.latitude;
+        lng = loc.coords.longitude;
+        // Cache location for next time
+        await PrayerTimesService.cacheLocation(lat, lng, '');
+      }
+
+      const times = await PrayerTimesService.getByCoordinates(lat, lng);
+      if (times) {
+        setPrayerTimes(times);
+        setNextPrayer(PrayerTimesService.getNextPrayer(times));
+
+        // Cache prayer times for instant load
+        await PrayerTimesService.cachePrayerTimes(times, '');
+
+        // Schedule notifications if enabled
+        try {
+          const prefs = await NotificationService.getPreferences();
+          if (prefs.enabled) {
+            const rawTimes: RawPrayerTimes = {
+              Fajr: times.Fajr?.split(' ')[0] || '05:00',
+              Sunrise: times.Sunrise?.split(' ')[0] || '06:30',
+              Dhuhr: times.Dhuhr?.split(' ')[0] || '12:00',
+              Asr: times.Asr?.split(' ')[0] || '15:30',
+              Maghrib: times.Maghrib?.split(' ')[0] || '18:00',
+              Isha: times.Isha?.split(' ')[0] || '19:30',
+            };
+            await scheduleFromPrayerTimes(rawTimes);
           }
+        } catch (notifErr) {
+          if (__DEV__) console.warn('Failed to schedule prayer notifications:', notifErr);
         }
       }
     } catch (e) {

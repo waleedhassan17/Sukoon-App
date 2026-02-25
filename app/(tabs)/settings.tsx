@@ -25,7 +25,6 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { QuranService } from '@/lib/quranService';
 import { DataSyncService } from '@/lib/dataSyncService';
-import FontSizeSlider from '@/components/FontSizeSlider';
 
 /* ─── Staggered entry hook ─── */
 function useStaggeredEntry(count: number, baseDelay = 70) {
@@ -290,19 +289,12 @@ export default function SettingsScreen() {
 
               <View style={[styles.fullDivider, { backgroundColor: theme.border }]} />
 
-              {/* FontSizeSlider */}
-              <View style={styles.sliderWrap}>
-                <FontSizeSlider value={fontScale} onValueChange={setFontScale} />
-              </View>
-
-              <View style={[styles.fullDivider, { backgroundColor: theme.border }]} />
-
-              {/* Quick Preset Buttons */}
+              {/* Quick Preset Buttons — primary size control */}
               <View style={styles.presetsRow}>
                 {[
-                  { label: 'Small', value: 0.8 },
-                  { label: 'Default', value: 1.0 },
-                  { label: 'Large', value: 1.3 },
+                  { label: 'Small', value: 0.8, icon: 'A', iconSize: 13 as number },
+                  { label: 'Default', value: 1.0, icon: 'A', iconSize: 16 as number },
+                  { label: 'Large', value: 1.3, icon: 'A', iconSize: 20 as number },
                 ].map((preset) => {
                   const active = isPresetActive(preset.value);
                   return (
@@ -311,12 +303,23 @@ export default function SettingsScreen() {
                       style={[
                         styles.presetPill,
                         active
-                          ? { backgroundColor: theme.primaryMuted + '14', borderColor: theme.primaryMuted + '25' }
+                          ? { backgroundColor: theme.primaryMuted + '18', borderColor: theme.primaryMuted + '40' }
                           : { backgroundColor: theme.surfaceMuted, borderColor: 'transparent' },
                       ]}
                       onPress={() => handlePresetSelect(preset.value)}
                       activeOpacity={0.7}
                     >
+                      <Text
+                        style={[
+                          styles.presetIcon,
+                          { fontSize: preset.iconSize },
+                          active
+                            ? { color: theme.primaryMuted, fontWeight: '700' }
+                            : { color: theme.textTertiary, fontWeight: '600' },
+                        ]}
+                      >
+                        {preset.icon}
+                      </Text>
                       <Text
                         style={[
                           styles.presetText,
@@ -732,10 +735,6 @@ const styles = StyleSheet.create({
   fullDivider: {
     height: 1,
   },
-  sliderWrap: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
   presetsRow: {
     flexDirection: 'row',
     paddingHorizontal: 16,
@@ -745,9 +744,13 @@ const styles = StyleSheet.create({
   presetPill: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1,
+    gap: 4,
+  },
+  presetIcon: {
+    letterSpacing: 0,
   },
   presetText: {
     fontSize: 13,

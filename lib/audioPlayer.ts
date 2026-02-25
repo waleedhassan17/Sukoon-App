@@ -74,7 +74,7 @@ class AudioPlayer {
       });
       this.isInitialized = true;
     } catch (e) {
-      console.warn('[AudioPlayer] Init error:', e);
+      if (__DEV__) console.warn('[AudioPlayer] Init error:', e);
     }
   }
 
@@ -215,7 +215,7 @@ class AudioPlayer {
       throw lastErr;
     } catch (e: any) {
       const errorMsg = e?.message || 'Failed to play audio';
-      console.error('[AudioPlayer] Play error:', errorMsg);
+      if (__DEV__) console.error('[AudioPlayer] Play error:', errorMsg);
       this.updateState({
         isBuffering: false,
         isPlaying: false,
@@ -232,7 +232,7 @@ class AudioPlayer {
         await this.sound.pauseAsync();
       }
     } catch (e) {
-      console.error('[AudioPlayer] Pause error:', e);
+      if (__DEV__) console.error('[AudioPlayer] Pause error:', e);
     }
   }
 
@@ -251,7 +251,7 @@ class AudioPlayer {
         await this.fadeIn();
       }
     } catch (e) {
-      console.error('[AudioPlayer] Resume error:', e);
+      if (__DEV__) console.error('[AudioPlayer] Resume error:', e);
     }
   }
 
@@ -290,7 +290,7 @@ class AudioPlayer {
         await this.sound.setPositionAsync(clamped);
       }
     } catch (e) {
-      console.error('[AudioPlayer] Seek error:', e);
+      if (__DEV__) console.error('[AudioPlayer] Seek error:', e);
     }
   }
 
@@ -307,7 +307,7 @@ class AudioPlayer {
       }
       this.updateState({ speed });
     } catch (e) {
-      console.error('[AudioPlayer] Speed error:', e);
+      if (__DEV__) console.error('[AudioPlayer] Speed error:', e);
     }
   }
 
@@ -400,6 +400,11 @@ class AudioPlayer {
 
   isActive(): boolean {
     return this.sound !== null && this.state.isLoaded;
+  }
+
+  /** Current playback position in milliseconds (for saving resume state) */
+  getPositionMs(): number {
+    return this.state.positionMs;
   }
 
   /* ═══════════════════════════════════════════

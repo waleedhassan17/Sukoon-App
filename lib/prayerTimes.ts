@@ -1,15 +1,26 @@
 /**
  * PrayerTimesService - Using Aladhan API (free, open source)
  * https://aladhan.com/prayer-times-api
- * 
- * Endpoints used:
- * - Prayer Times: /timings/{date}
- * - Prayer Times by City: /timingsByCity/{date}
- * - Gregorian to Hijri: /gToH/{date}
- * - Hijri Calendar: /hToG/{date}
+ *
+ * Features:
+ * - Daily cache: prayer times fetched once per day, stored in AsyncStorage
+ * - Location cache: GPS coords + city name cached for 30 minutes
+ * - Cache-first: getByCoordinates returns cached data instantly if valid
+ * - All consumers (prayer.tsx, index.tsx) share the same cache
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 const ALADHAN_BASE = 'https://api.aladhan.com/v1';
+
+// ── Cache Keys ──
+const CACHE_KEYS = {
+  PRAYER_TIMES: 'sukoon_prayer_cache',       // { date, data, coords, locationName }
+  LOCATION:     'sukoon_location_cache',      // { lat, lng, name, timestamp }
+};
+
+// ── Cache TTL ──
+const LOCATION_TTL_MS = 30 * 60 * 1000; // 30 minutes — GPS doesn't change often
 
 export interface PrayerTimesData {
   Fajr: string;
@@ -47,6 +58,34 @@ export interface IslamicCalendarData {
 }
 
 export const PrayerTimesService = {
+
+  // ════════════════════════════════════════
+  // HELPERS
+  // ════════════════════════════════════════
+
+  /** Today as DD-MM-YYYY (Aladhan format) */
+  _todayDDMMYYYY(): string {
+    const d = new Date();
+    return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+  },
+
+  /** Today as YYYY-MM-DD (cache key) */
+  _todayKey(): string {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  },
+
+  /** Safe JSON parse */
+  _safeParse<T>(raw: string | null): T | null {
+    if (!raw) return null;
+    try { return JSON.parse(raw) as T; } catch { return null; }
+  },
+
+  /** Strip timezone suffix from time string "05:23 (PKT)" → "05:23" */
+  _cleanTime(t: string | undefined): string {
+    return t?.split(' ')[0] || t || '00:00';
+  },
+
   /**
    * Parse Hijri date from API response
    */
@@ -64,111 +103,143 @@ export const PrayerTimesService = {
     };
   },
 
+  // ════════════════════════════════════════
+  // LOCATION CACHE
+  // ════════════════════════════════════════
+
+  /** Get cached location if still fresh (within TTL) */
+  async getCachedLocation(): Promise<{ lat: number; lng: number; name: string } | null> {
+    try {
+      const raw = await AsyncStorage.getItem(CACHE_KEYS.LOCATION);
+      const cached = this._safeParse<{ lat: number; lng: number; name: string; timestamp: number }>(raw);
+      if (!cached) return null;
+      if (Date.now() - cached.timestamp > LOCATION_TTL_MS) return null; // expired
+      return { lat: cached.lat, lng: cached.lng, name: cached.name };
+    } catch { return null; }
+  },
+
+  /** Save location to cache */
+  async cacheLocation(lat: number, lng: number, name: string): Promise<void> {
+    try {
+      await AsyncStorage.setItem(CACHE_KEYS.LOCATION, JSON.stringify({ lat, lng, name, timestamp: Date.now() }));
+    } catch {}
+  },
+
+  // ════════════════════════════════════════
+  // PRAYER TIMES CACHE
+  // ════════════════════════════════════════
+
+  /** Get today's cached prayer times (instant, no network) */
+  async getCachedPrayerTimes(): Promise<{ data: PrayerTimesData; locationName: string } | null> {
+    try {
+      const raw = await AsyncStorage.getItem(CACHE_KEYS.PRAYER_TIMES);
+      const cached = this._safeParse<{ date: string; data: PrayerTimesData; locationName: string }>(raw);
+      if (!cached) return null;
+      if (cached.date !== this._todayKey()) return null; // stale — different day
+      return { data: cached.data, locationName: cached.locationName };
+    } catch { return null; }
+  },
+
+  /** Save prayer times to cache with today's date stamp */
+  async cachePrayerTimes(data: PrayerTimesData, locationName: string): Promise<void> {
+    try {
+      await AsyncStorage.setItem(CACHE_KEYS.PRAYER_TIMES, JSON.stringify({
+        date: this._todayKey(),
+        data,
+        locationName,
+      }));
+    } catch {}
+  },
+
+  // ════════════════════════════════════════
+  // API CALLS (network)
+  // ════════════════════════════════════════
+
   /**
-   * Get prayer times by GPS coordinates
-   * Also returns Islamic/Hijri date
+   * Fetch prayer times from Aladhan API by GPS coordinates.
+   * Does NOT touch cache — caller decides caching.
    */
   async getByCoordinates(lat: number, lng: number, method: number = 2): Promise<PrayerTimesData | null> {
     try {
-      const today = new Date();
-      const dd = String(today.getDate()).padStart(2, '0');
-      const mm = String(today.getMonth() + 1).padStart(2, '0');
-      const yyyy = today.getFullYear();
-      
+      const dateStr = this._todayDDMMYYYY();
       const res = await fetch(
-        `${ALADHAN_BASE}/timings/${dd}-${mm}-${yyyy}?latitude=${lat}&longitude=${lng}&method=${method}`,
-        {
-          headers: { 'Accept': 'application/json' }
-        }
+        `${ALADHAN_BASE}/timings/${dateStr}?latitude=${lat}&longitude=${lng}&method=${method}`,
+        { headers: { 'Accept': 'application/json' } }
       );
       const json = await res.json();
-      
+
       if (json.code === 200) {
         const t = json.data.timings;
         const hijriDate = json.data.date.hijri ? this.parseHijriDate(json.data.date.hijri) : undefined;
-        
+
         return {
-          Fajr: t.Fajr?.split(' ')[0] || t.Fajr,  // Remove timezone suffix if present
-          Sunrise: t.Sunrise?.split(' ')[0] || t.Sunrise,
-          Dhuhr: t.Dhuhr?.split(' ')[0] || t.Dhuhr,
-          Asr: t.Asr?.split(' ')[0] || t.Asr,
-          Maghrib: t.Maghrib?.split(' ')[0] || t.Maghrib,
-          Isha: t.Isha?.split(' ')[0] || t.Isha,
+          Fajr: this._cleanTime(t.Fajr),
+          Sunrise: this._cleanTime(t.Sunrise),
+          Dhuhr: this._cleanTime(t.Dhuhr),
+          Asr: this._cleanTime(t.Asr),
+          Maghrib: this._cleanTime(t.Maghrib),
+          Isha: this._cleanTime(t.Isha),
           date: json.data.date.readable,
           hijriDate,
         };
       }
       return null;
     } catch (e) {
-      console.error('Prayer times error:', e);
+      if (__DEV__) console.error('Prayer times API error:', e);
       return null;
     }
   },
 
   /**
-   * Get prayer times by city name
-   * Also returns Islamic/Hijri date
+   * Fetch prayer times by city name (fallback when no GPS).
    */
   async getByCity(city: string, country: string, method: number = 2): Promise<PrayerTimesData | null> {
     try {
-      const today = new Date();
-      const dd = String(today.getDate()).padStart(2, '0');
-      const mm = String(today.getMonth() + 1).padStart(2, '0');
-      const yyyy = today.getFullYear();
-      
+      const dateStr = this._todayDDMMYYYY();
       const res = await fetch(
-        `${ALADHAN_BASE}/timingsByCity/${dd}-${mm}-${yyyy}?city=${city}&country=${country}&method=${method}`,
-        {
-          headers: { 'Accept': 'application/json' }
-        }
+        `${ALADHAN_BASE}/timingsByCity/${dateStr}?city=${city}&country=${country}&method=${method}`,
+        { headers: { 'Accept': 'application/json' } }
       );
       const json = await res.json();
-      
+
       if (json.code === 200) {
         const t = json.data.timings;
         const hijriDate = json.data.date.hijri ? this.parseHijriDate(json.data.date.hijri) : undefined;
-        
+
         return {
-          Fajr: t.Fajr?.split(' ')[0] || t.Fajr,
-          Sunrise: t.Sunrise?.split(' ')[0] || t.Sunrise,
-          Dhuhr: t.Dhuhr?.split(' ')[0] || t.Dhuhr,
-          Asr: t.Asr?.split(' ')[0] || t.Asr,
-          Maghrib: t.Maghrib?.split(' ')[0] || t.Maghrib,
-          Isha: t.Isha?.split(' ')[0] || t.Isha,
+          Fajr: this._cleanTime(t.Fajr),
+          Sunrise: this._cleanTime(t.Sunrise),
+          Dhuhr: this._cleanTime(t.Dhuhr),
+          Asr: this._cleanTime(t.Asr),
+          Maghrib: this._cleanTime(t.Maghrib),
+          Isha: this._cleanTime(t.Isha),
           date: json.data.date.readable,
           hijriDate,
         };
       }
       return null;
     } catch (e) {
-      console.error('Prayer times error:', e);
+      if (__DEV__) console.error('Prayer times API error:', e);
       return null;
     }
   },
 
   /**
    * Get Islamic/Hijri calendar date for today
-   * Uses Gregorian to Hijri conversion endpoint
    */
   async getIslamicDate(): Promise<IslamicCalendarData | null> {
     try {
-      const today = new Date();
-      const dd = String(today.getDate()).padStart(2, '0');
-      const mm = String(today.getMonth() + 1).padStart(2, '0');
-      const yyyy = today.getFullYear();
-      
+      const dateStr = this._todayDDMMYYYY();
       const res = await fetch(
-        `${ALADHAN_BASE}/gToH/${dd}-${mm}-${yyyy}`,
-        {
-          headers: { 'Accept': 'application/json' }
-        }
+        `${ALADHAN_BASE}/gToH/${dateStr}`,
+        { headers: { 'Accept': 'application/json' } }
       );
       const json = await res.json();
-      
+
       if (json.code === 200) {
         const hijri = json.data.hijri;
         const gregorian = json.data.gregorian;
-        
+
         return {
           hijri: this.parseHijriDate(hijri),
           gregorian: {
@@ -182,10 +253,14 @@ export const PrayerTimesService = {
       }
       return null;
     } catch (e) {
-      console.error('Islamic calendar error:', e);
+      if (__DEV__) console.error('Islamic calendar error:', e);
       return null;
     }
   },
+
+  // ════════════════════════════════════════
+  // UTILITIES
+  // ════════════════════════════════════════
 
   /**
    * Get next prayer based on current time
