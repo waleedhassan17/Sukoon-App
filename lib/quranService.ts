@@ -607,21 +607,20 @@ export const QuranService = {
   },
 
   /**
-   * Get Tafseer for a Surah (using alquran.cloud tafseer edition)
+   * Get Tafseer for a Surah
+   * @deprecated Use TafseerService from '@/lib/tafseerService' instead.
+   * Kept for backward compatibility — delegates to TafseerService.
    */
-  async getTafseer(surahNumber: number, language: 'en' | 'ur' = 'en'): Promise<TafseerEntry[]> {
-    const edition = language === 'en' ? 'en.maududi' : 'ur.maududi';
+  async getTafseer(surahNumber: number, _language: 'en' | 'ur' = 'en'): Promise<TafseerEntry[]> {
     try {
-      const res = await fetch(`${ALQURAN_BASE}/surah/${surahNumber}/${edition}`);
-      const json = await res.json();
-      if (json.code === 200) {
-        return json.data.ayahs.map((a: any) => ({
-          ayah: a.numberInSurah,
-          text: a.text,
-          source: 'Maududi',
-        }));
-      }
-      return [];
+      // Import dynamically to avoid circular deps
+      const TafseerService = (await import('./tafseerService')).default;
+      const tafseerId = await TafseerService.getSelectedTafseerId();
+      // Assume ~300 ayahs max per surah; service handles actual count
+      const map = await TafseerService.getSurahTafseer(tafseerId, surahNumber, 300);
+      const entries: TafseerEntry[] = [];
+      map.forEach((text: string, ayah: number) => entries.push({ ayah, text, source: 'Tafseer' }));
+      return entries;
     } catch {
       return [];
     }

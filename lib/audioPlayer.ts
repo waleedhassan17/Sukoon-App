@@ -229,10 +229,10 @@ class AudioPlayer {
     try {
       if (this.sound && this.state.isPlaying) {
         await this.fadeOut();
-        await this.sound.pauseAsync();
+        if (this.sound) await this.sound.pauseAsync();
       }
     } catch (e) {
-      if (__DEV__) console.error('[AudioPlayer] Pause error:', e);
+      if (__DEV__) console.warn('[AudioPlayer] Pause error:', e);
     }
   }
 
@@ -346,11 +346,12 @@ class AudioPlayer {
       const step = 1.0 / FADE_STEPS;
       const interval = FADE_DURATION_MS / FADE_STEPS;
       for (let i = FADE_STEPS - 1; i >= 0; i--) {
+        if (!this.sound) break;
         await this.sound.setVolumeAsync(i * step);
         await this.delay(interval);
       }
     } catch {
-      // Ignore fade errors
+      // Ignore fade errors — sound may have been unloaded mid-fade
     } finally {
       this.isFading = false;
     }
@@ -363,11 +364,12 @@ class AudioPlayer {
       const step = 1.0 / FADE_STEPS;
       const interval = FADE_DURATION_MS / FADE_STEPS;
       for (let i = 1; i <= FADE_STEPS; i++) {
+        if (!this.sound) break;
         await this.sound.setVolumeAsync(i * step);
         await this.delay(interval);
       }
     } catch {
-      // Ignore fade errors
+      // Ignore fade errors — sound may have been unloaded mid-fade
     } finally {
       this.isFading = false;
     }

@@ -14,7 +14,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Pressable, StyleSheet,
-  ActivityIndicator, Dimensions, Share, Platform,
+  ActivityIndicator, Dimensions, Share, Platform, Modal,
   Animated, PanResponder, LayoutAnimation, UIManager,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -30,6 +30,7 @@ import { useFontSize } from '@/contexts/FontSizeContext';
 import QuranService, { Ayah } from '@/lib/quranService';
 import audioPlayer, { PlayerState, RepeatMode } from '@/lib/audioPlayer';
 import { ReadingProgress } from '@/lib/readingProgress';
+import TafseerService, { TafseerSource } from '@/lib/tafseerService';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -411,18 +412,21 @@ const FloatingPageIndicator = React.memo(function FloatingPageIndicator({ curren
    ═══════════════════════════════════════════════ */
 const VerseCard = React.memo(function VerseCard({
   ayahNumber, arabicText, englishText, urduText, tafseerText,
-  showEnglish, showUrdu, showTafseer,
+  showEnglish, showUrdu, showTafseer, tafseerLoading, tafseerLang,
   isBookmarked, isPlaying, onBookmark, onPlay, onShare,
 }: {
   ayahNumber: number; arabicText: string;
   englishText?: string; urduText?: string; tafseerText?: string;
   showEnglish: boolean; showUrdu: boolean; showTafseer: boolean;
+  tafseerLoading?: boolean; tafseerLang?: string;
   isBookmarked: boolean; isPlaying: boolean;
   onBookmark: () => void; onPlay: () => void; onShare: () => void;
 }) {
   const { theme } = useTheme();
   const { sizes } = useFontSize();
-  const hasTrans = (showEnglish && englishText) || (showUrdu && urduText) || (showTafseer && tafseerText);
+  const hasTrans = (showEnglish && englishText) || (showUrdu && urduText) || (showTafseer && (tafseerText || tafseerLoading));
+  const isRtlTafseer = tafseerLang === 'ur' || tafseerLang === 'ar';
+  const tafseerLabel = tafseerLang === 'ur' ? 'تفسیر' : tafseerLang === 'ar' ? 'تفسير' : 'TAFSEER';
 
   return (
     <View style={[s.vCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
@@ -461,7 +465,8 @@ const VerseCard = React.memo(function VerseCard({
             <View style={[s.vGoldLine, { backgroundColor: `${theme.gold}4D` }]} />
             {showEnglish && englishText && <View style={s.vTransBlock}><Text style={[s.vTransLabel, { color: theme.textTertiary }]}>TRANSLATION</Text><Text style={[s.vEnglish, { color: theme.textSecondary, fontSize: sizes.english, lineHeight: sizes.englishLine }]}>{englishText}</Text></View>}
             {showUrdu && urduText && <View style={s.vTransBlock}><Text style={[s.vUrduLabel, { color: theme.textTertiary }]}>اردو ترجمہ</Text><Text style={[s.vUrdu, { color: theme.textSecondary, fontSize: sizes.urdu, lineHeight: sizes.urduLine }]}>{urduText}</Text></View>}
-            {showTafseer && tafseerText && <View style={s.vTransBlock}><Text style={[s.vTransLabel, { color: theme.textTertiary }]}>TAFSEER</Text><Text style={[s.vEnglish, { color: theme.textSecondary, fontSize: sizes.english, lineHeight: sizes.englishLine }]}>{tafseerText}</Text></View>}
+            {showTafseer && tafseerLoading && !tafseerText && <View style={s.vTransBlock}><Text style={[isRtlTafseer ? s.vUrduLabel : s.vTransLabel, { color: theme.textTertiary }]}>{tafseerLabel}</Text><ActivityIndicator size="small" color={theme.primaryMuted} style={{ marginTop: 8 }} /></View>}
+            {showTafseer && tafseerText && <View style={s.vTransBlock}><Text style={[isRtlTafseer ? s.vUrduLabel : s.vTransLabel, { color: theme.textTertiary }]}>{tafseerLabel}</Text><Text style={[isRtlTafseer ? s.vUrdu : s.vEnglish, { color: theme.textSecondary, fontSize: isRtlTafseer ? sizes.urdu : sizes.english, lineHeight: isRtlTafseer ? sizes.urduLine : sizes.englishLine }]}>{tafseerText}</Text></View>}
           </View>
         )}
       </View>
@@ -725,6 +730,14 @@ export default function SurahScreen() {
   const [autoScrollActive, setAutoScrollActive] = useState(false);
   const [scrollSpeed, setScrollSpeed] = useState(2);
 
+  // ─── Tafseer state ───
+  const [tafseerMap, setTafseerMap] = useState<Map<number, string>>(new Map());
+  const [tafseerLoading, setTafseerLoading] = useState(false);
+  const [selectedTafseerId, setSelectedTafseerId] = useState(159);
+  const [tafseerSources, setTafseerSources] = useState<TafseerSource[]>([]);
+  const [showTafseerPicker, setShowTafseerPicker] = useState(false);
+  const tafseerLoadedRef = useRef<string | null>(null); // "tafseerId:surahNumber"
+
   const scrollRef = useRef<ScrollView>(null);
   const ayahLayouts = useRef<Record<number, { y: number }>>({});
   const pageLayouts = useRef<Record<number, { y: number; h: number }>>({});
@@ -747,6 +760,7 @@ export default function SurahScreen() {
   const lastSeenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isPageMode = !showEnglish && !showUrdu && !showTafseer;
+  const tafseerLang = useMemo(() => tafseerSources.find(t => t.id === selectedTafseerId)?.language || 'ur', [tafseerSources, selectedTafseerId]);
   const pages = useMemo(() => splitIntoPages(ayahs), [ayahs]);
   const playerBarH = 72 + insets.bottom;
 
@@ -780,6 +794,46 @@ export default function SurahScreen() {
       ReadingProgress.flushLastAudio();
     };
   }, [surahNumber]);
+
+  /* ─── Tafseer: restore selected ID + preload source list ─── */
+  useEffect(() => {
+    TafseerService.getSelectedTafseerId().then(setSelectedTafseerId).catch(() => {});
+    TafseerService.getAvailableTafseers().then(setTafseerSources).catch(() => {});
+  }, []);
+
+  /* ─── Tafseer: load data progressively when toggled on ─── */
+  useEffect(() => {
+    if (!showTafseer || ayahs.length === 0) return;
+    const loadKey = `${selectedTafseerId}:${surahNumber}`;
+    if (tafseerLoadedRef.current === loadKey && tafseerMap.size > 0) return;
+
+    let cancelled = false;
+    setTafseerLoading(true);
+    setTafseerMap(new Map());
+
+    // Progressive callback — streams each ayah's tafseer into state as it arrives
+    const onProgress = (ayahNumber: number, text: string) => {
+      if (cancelled) return;
+      setTafseerMap((prev) => {
+        const next = new Map(prev);
+        next.set(ayahNumber, text);
+        return next;
+      });
+    };
+
+    TafseerService.getSurahTafseer(selectedTafseerId, surahNumber, ayahs.length, onProgress)
+      .then((map: Map<number, string>) => {
+        if (cancelled) return;
+        setTafseerMap(map);
+        tafseerLoadedRef.current = loadKey;
+      })
+      .catch((err: any) => {
+        if (__DEV__) console.warn('[SurahScreen] Tafseer load failed:', err);
+      })
+      .finally(() => { if (!cancelled) setTafseerLoading(false); });
+
+    return () => { cancelled = true; };
+  }, [showTafseer, selectedTafseerId, surahNumber, ayahs.length]);
 
   useEffect(() => {
     audioPlayer.setStatusCallback((st) => setPlayerState(st));
@@ -1112,6 +1166,29 @@ export default function SurahScreen() {
 
       <SegmentedControl showEnglish={showEnglish} showUrdu={showUrdu} showTafseer={showTafseer} onToggle={handleToggle} />
 
+      {/* ─── Tafseer Source Selector (visible when tafseer is on) ─── */}
+      {showTafseer && (
+        <TouchableOpacity
+          style={[s.tafseerPickerBar, { backgroundColor: theme.surfaceMuted, borderColor: theme.border }]}
+          onPress={() => setShowTafseerPicker(true)}
+          activeOpacity={0.7}
+        >
+          <LinearGradient colors={theme.headerGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.tpBarIcon}>
+            <Ionicons name="book" size={12} color="#fff" />
+          </LinearGradient>
+          <View style={{ flex: 1 }}>
+            <Text style={[s.tafseerPickerLabel, { color: theme.text }]} numberOfLines={1}>
+              {tafseerSources.find((t) => t.id === selectedTafseerId)?.name || 'Select Tafseer'}
+            </Text>
+            <Text style={[s.tafseerPickerSub, { color: theme.textTertiary }]} numberOfLines={1}>
+              {tafseerSources.find((t) => t.id === selectedTafseerId)?.author || 'Tap to choose'}
+            </Text>
+          </View>
+          {tafseerLoading && <ActivityIndicator size="small" color={theme.primaryMuted} style={{ marginRight: 4 }} />}
+          <Ionicons name="chevron-forward" size={14} color={theme.textTertiary} />
+        </TouchableOpacity>
+      )}
+
       <Animated.View style={{ flex: 1, opacity: contentFade }}>
         {/* SINGLE ScrollView for BOTH modes */}
         <ScrollView
@@ -1168,8 +1245,11 @@ export default function SurahScreen() {
                 <View key={ay.numberInSurah} onLayout={(e) => { ayahLayouts.current[i] = { y: e.nativeEvent.layout.y }; }}>
                   <VerseCard
                     ayahNumber={ay.numberInSurah} arabicText={ay.text}
-                    englishText={ay.translation} urduText={ay.urduTranslation} tafseerText={ay.tafseer}
+                    englishText={ay.translation} urduText={ay.urduTranslation}
+                    tafseerText={tafseerMap.get(ay.numberInSurah) || ay.tafseer}
                     showEnglish={showEnglish} showUrdu={showUrdu} showTafseer={showTafseer}
+                    tafseerLoading={tafseerLoading && !tafseerMap.has(ay.numberInSurah)}
+                    tafseerLang={tafseerLang}
                     isBookmarked={isVerseSaved(surahNumber, ay.numberInSurah)} isPlaying={currentIndex === i}
                     onBookmark={() => toggleBookmark(ay)} onPlay={() => playIndex(i)} onShare={() => shareVerse(ay)}
                   />
@@ -1212,6 +1292,189 @@ export default function SurahScreen() {
         onCycleRepeat={() => audioPlayer.cycleRepeatMode()}
         onClose={async () => { await audioPlayer.stop(); setCurrentIndex(null); }}
       />
+
+      {/* ═══ TAFSEER SOURCE PICKER MODAL ═══ */}
+      <Modal
+        visible={showTafseerPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowTafseerPicker(false)}
+      >
+        <Pressable style={s.tpOverlay} onPress={() => setShowTafseerPicker(false)}>
+          <View />
+        </Pressable>
+        <View style={[s.tpSheet, { backgroundColor: theme.surfaceElevated }]}>
+          <View style={[s.tpHandle, { backgroundColor: theme.border }]} />
+
+          {/* Header */}
+          <View style={s.tpHeader}>
+            <LinearGradient colors={theme.headerGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.tpHeaderIcon}>
+              <Ionicons name="book" size={18} color="#fff" />
+            </LinearGradient>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.tpTitle, { color: theme.text }]}>تفسیر منتخب کریں</Text>
+              <Text style={[s.tpSubtitle, { color: theme.textTertiary }]}>Choose a Tafseer for deeper understanding</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setShowTafseerPicker(false)}
+              style={[s.tpCloseBtn, { backgroundColor: theme.surfaceMuted }]}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="close" size={18} color={theme.textTertiary} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={s.tpList} showsVerticalScrollIndicator={false} bounces={false}>
+            {/* ── Urdu Tafseers ── */}
+            {tafseerSources.filter((t) => t.language === 'ur').length > 0 && (
+              <View style={s.tpSectionWrap}>
+                <View style={s.tpSectionRow}>
+                  <View style={[s.tpSectionDot, { backgroundColor: theme.primary }]} />
+                  <Text style={[s.tpSectionLabel, { color: theme.text }]}>اردو</Text>
+                  <View style={[s.tpSectionLine, { backgroundColor: theme.border }]} />
+                  <Text style={[s.tpSectionCount, { color: theme.textTertiary }]}>
+                    {tafseerSources.filter((t) => t.language === 'ur').length}
+                  </Text>
+                </View>
+              </View>
+            )}
+            {tafseerSources.filter((t) => t.language === 'ur').map((src) => {
+              const isActive = selectedTafseerId === src.id;
+              return (
+                <TouchableOpacity
+                  key={src.id}
+                  style={[
+                    s.tpItem,
+                    { backgroundColor: theme.surfaceMuted, borderColor: 'transparent' },
+                    isActive && { backgroundColor: `${theme.primary}14`, borderColor: theme.primaryMuted },
+                  ]}
+                  onPress={() => {
+                    setSelectedTafseerId(src.id);
+                    TafseerService.setSelectedTafseerId(src.id);
+                    tafseerLoadedRef.current = null;
+                    setTafseerMap(new Map());
+                    setShowTafseerPicker(false);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[s.tpRadio, { borderColor: isActive ? theme.primary : theme.border }]}>
+                    {isActive && <View style={[s.tpRadioInner, { backgroundColor: theme.primary }]} />}
+                  </View>
+                  <View style={s.tpItemContent}>
+                    <Text style={[s.tpItemName, { color: theme.text }, isActive && { color: theme.primaryLight }]} numberOfLines={1}>{src.name}</Text>
+                    <Text style={[s.tpItemAuthor, { color: theme.textTertiary }]} numberOfLines={1}>{src.author}</Text>
+                  </View>
+                  {isActive && (
+                    <LinearGradient colors={[theme.primaryLight, theme.primary]} style={s.tpActiveBadge}>
+                      <Ionicons name="checkmark" size={12} color="#fff" />
+                    </LinearGradient>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+
+            {/* ── English Tafseers ── */}
+            {tafseerSources.filter((t) => t.language === 'en').length > 0 && (
+              <View style={[s.tpSectionWrap, { marginTop: 20 }]}>
+                <View style={s.tpSectionRow}>
+                  <View style={[s.tpSectionDot, { backgroundColor: theme.accent }]} />
+                  <Text style={[s.tpSectionLabel, { color: theme.text }]}>English</Text>
+                  <View style={[s.tpSectionLine, { backgroundColor: theme.border }]} />
+                  <Text style={[s.tpSectionCount, { color: theme.textTertiary }]}>
+                    {tafseerSources.filter((t) => t.language === 'en').length}
+                  </Text>
+                </View>
+              </View>
+            )}
+            {tafseerSources.filter((t) => t.language === 'en').map((src) => {
+              const isActive = selectedTafseerId === src.id;
+              return (
+                <TouchableOpacity
+                  key={src.id}
+                  style={[
+                    s.tpItem,
+                    { backgroundColor: theme.surfaceMuted, borderColor: 'transparent' },
+                    isActive && { backgroundColor: `${theme.primary}14`, borderColor: theme.primaryMuted },
+                  ]}
+                  onPress={() => {
+                    setSelectedTafseerId(src.id);
+                    TafseerService.setSelectedTafseerId(src.id);
+                    tafseerLoadedRef.current = null;
+                    setTafseerMap(new Map());
+                    setShowTafseerPicker(false);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[s.tpRadio, { borderColor: isActive ? theme.primary : theme.border }]}>
+                    {isActive && <View style={[s.tpRadioInner, { backgroundColor: theme.primary }]} />}
+                  </View>
+                  <View style={s.tpItemContent}>
+                    <Text style={[s.tpItemName, { color: theme.text }, isActive && { color: theme.primaryLight }]} numberOfLines={1}>{src.name}</Text>
+                    <Text style={[s.tpItemAuthor, { color: theme.textTertiary }]} numberOfLines={1}>{src.author}</Text>
+                  </View>
+                  {isActive && (
+                    <LinearGradient colors={[theme.primaryLight, theme.primary]} style={s.tpActiveBadge}>
+                      <Ionicons name="checkmark" size={12} color="#fff" />
+                    </LinearGradient>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+
+            {/* ── Arabic Tafseers ── */}
+            {tafseerSources.filter((t) => t.language === 'ar').length > 0 && (
+              <View style={[s.tpSectionWrap, { marginTop: 20 }]}>
+                <View style={s.tpSectionRow}>
+                  <View style={[s.tpSectionDot, { backgroundColor: theme.gold }]} />
+                  <Text style={[s.tpSectionLabel, { color: theme.text }]}>عربي</Text>
+                  <View style={[s.tpSectionLine, { backgroundColor: theme.border }]} />
+                  <Text style={[s.tpSectionCount, { color: theme.textTertiary }]}>
+                    {tafseerSources.filter((t) => t.language === 'ar').length}
+                  </Text>
+                </View>
+              </View>
+            )}
+            {tafseerSources.filter((t) => t.language === 'ar').map((src) => {
+              const isActive = selectedTafseerId === src.id;
+              return (
+                <TouchableOpacity
+                  key={src.id}
+                  style={[
+                    s.tpItem,
+                    { backgroundColor: theme.surfaceMuted, borderColor: 'transparent' },
+                    isActive && { backgroundColor: `${theme.primary}14`, borderColor: theme.primaryMuted },
+                  ]}
+                  onPress={() => {
+                    setSelectedTafseerId(src.id);
+                    TafseerService.setSelectedTafseerId(src.id);
+                    tafseerLoadedRef.current = null;
+                    setTafseerMap(new Map());
+                    setShowTafseerPicker(false);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[s.tpRadio, { borderColor: isActive ? theme.primary : theme.border }]}>
+                    {isActive && <View style={[s.tpRadioInner, { backgroundColor: theme.primary }]} />}
+                  </View>
+                  <View style={s.tpItemContent}>
+                    <Text style={[s.tpItemName, { color: theme.text }, isActive && { color: theme.primaryLight }]} numberOfLines={1}>{src.name}</Text>
+                    <Text style={[s.tpItemAuthor, { color: theme.textTertiary }]} numberOfLines={1}>{src.author}</Text>
+                  </View>
+                  {isActive && (
+                    <LinearGradient colors={[theme.primaryLight, theme.primary]} style={s.tpActiveBadge}>
+                      <Ionicons name="checkmark" size={12} color="#fff" />
+                    </LinearGradient>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+            <View style={{ height: 40 }} />
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1374,4 +1637,34 @@ const s = StyleSheet.create({
   asSide: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   asDis: { opacity: 0.35 },
   asLabel: { fontSize: 10, fontWeight: '700', color: '#fff' },
+
+  /* Tafseer Picker Bar */
+  tafseerPickerBar: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 14, borderWidth: 1, gap: 10 },
+  tpBarIcon: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  tafseerPickerLabel: { fontSize: 13, fontWeight: '600', letterSpacing: -0.2 },
+  tafseerPickerSub: { fontSize: 11, marginTop: 1, letterSpacing: 0.1 },
+
+  /* Tafseer Picker Modal */
+  tpOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
+  tpSheet: { position: 'absolute', bottom: 0, left: 0, right: 0, borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '75%', paddingTop: 12, paddingHorizontal: 20, ...Platform.select({ ios: { shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.15, shadowRadius: 20 }, android: { elevation: 12 } }) },
+  tpHandle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
+  tpHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(128,128,128,0.1)' },
+  tpHeaderIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  tpTitle: { fontSize: 18, fontWeight: '700', letterSpacing: -0.3 },
+  tpSubtitle: { fontSize: 12, marginTop: 2, letterSpacing: 0.2 },
+  tpCloseBtn: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  tpList: { flexGrow: 0 },
+  tpSectionWrap: { marginBottom: 10 },
+  tpSectionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4, paddingHorizontal: 4 },
+  tpSectionDot: { width: 6, height: 6, borderRadius: 3 },
+  tpSectionLabel: { fontSize: 15, fontWeight: '700', letterSpacing: -0.2 },
+  tpSectionLine: { flex: 1, height: 1 },
+  tpSectionCount: { fontSize: 11, fontWeight: '600', letterSpacing: 0.3 },
+  tpItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1.5, marginBottom: 8, gap: 12 },
+  tpRadio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  tpRadioInner: { width: 10, height: 10, borderRadius: 5 },
+  tpItemContent: { flex: 1 },
+  tpItemName: { fontSize: 15, fontWeight: '600', letterSpacing: -0.2 },
+  tpItemAuthor: { fontSize: 12, marginTop: 2, letterSpacing: 0.1 },
+  tpActiveBadge: { width: 24, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
 });
