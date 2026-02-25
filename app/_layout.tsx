@@ -45,25 +45,23 @@ function RootLayoutInner() {
   const receivedListener = useRef<any>(null);
   const appStateRef = useRef<AppStateStatus>('active');
 
-  // Keep Android system navigation bar matching theme (bg color + button style)
+  // Keep Android system navigation bar button style matching theme
   useEffect(() => {
     if (Platform.OS === 'android') {
       try {
         const NavigationBar = require('expo-navigation-bar');
-        NavigationBar.setBackgroundColorAsync(mode === 'dark' ? theme.background : '#FFFFFF');
         NavigationBar.setButtonStyleAsync(mode === 'dark' ? 'light' : 'dark');
       } catch {}
     }
-  }, [mode, theme.background]);
+  }, [mode]);
 
   useEffect(() => {
     async function prepare() {
       try {
-        // Set Android nav bar color + button style on init
+        // Set Android nav bar button style on init (bg is transparent via edge-to-edge)
         if (Platform.OS === 'android') {
           try {
             const NavigationBar = require('expo-navigation-bar');
-            NavigationBar.setBackgroundColorAsync(mode === 'dark' ? '#0B0B0C' : '#FFFFFF');
             NavigationBar.setButtonStyleAsync(mode === 'dark' ? 'light' : 'dark');
           } catch {}
         }
