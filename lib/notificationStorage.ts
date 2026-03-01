@@ -67,10 +67,14 @@ export function resolveNotificationType(data?: Record<string, any>): Notificatio
     type === 'prayer-reminder' ||
     type === 'tracker-reminder' ||
     type === 'quran-reminder' ||
+    type === 'eod-reminder' ||
     action === 'pre-alert'
   ) {
     return 'reminder';
   }
+
+  // Internet warning is a general notification
+  if (type === 'internet-warning') return 'general';
 
   return 'general';
 }

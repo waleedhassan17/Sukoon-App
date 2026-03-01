@@ -773,10 +773,13 @@ export const NotificationService = {
       const granted = await requestPermissions();
       if (!granted) return false;
 
+      const eodTitle = '🕌 Salah Reminder';
+      const eodBody = "You haven't completed tracking today's prayers.";
+
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: '🕌 Salah Reminder',
-          body: "You haven't completed tracking today's prayers.",
+          title: eodTitle,
+          body: eodBody,
           sound: 'reminder.wav',
           data: {
             type: 'eod-reminder',
@@ -787,6 +790,14 @@ export const NotificationService = {
         },
         trigger: null, // Send immediately
         identifier: 'eod-prayer-reminder',
+      });
+
+      // Persist to notification storage so it appears on the Notifications screen
+      await NotificationStorage.addManual({
+        title: eodTitle,
+        message: eodBody,
+        type: 'reminder',
+        data: { type: 'eod-reminder', action: 'open-tracker', untrackedCount },
       });
 
       // Mark as sent for today
@@ -823,10 +834,13 @@ export const NotificationService = {
       const granted = await requestPermissions();
       if (!granted) return false;
 
+      const internetTitle = '⚠️ Internet Required';
+      const internetBody = 'Turn on internet to receive Salah reminders.';
+
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: '⚠️ Internet Required',
-          body: 'Turn on internet to receive Salah reminders.',
+          title: internetTitle,
+          body: internetBody,
           sound: 'reminder.wav',
           data: {
             type: 'internet-warning',
@@ -836,6 +850,14 @@ export const NotificationService = {
         },
         trigger: null, // Send immediately
         identifier: 'internet-off-warning',
+      });
+
+      // Persist to notification storage so it appears on the Notifications screen
+      await NotificationStorage.addManual({
+        title: internetTitle,
+        message: internetBody,
+        type: 'general',
+        data: { type: 'internet-warning', action: 'none' },
       });
 
       // Mark as sent for today

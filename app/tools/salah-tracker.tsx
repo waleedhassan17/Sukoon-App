@@ -440,6 +440,11 @@ function SalahTrackerInner() {
   // NEW: Prayer times for time-based activation logic
   const [prayerTimes, setPrayerTimes] = useState<PrayerTimesData | null>(null);
 
+  // Ref to track locally-saved prayer data — survives cache resets from loadMonth/cloud sync
+  const savedRef = useRef<Record<string, DayData>>({});
+  // Ref to always point to the latest loadMonth function (fixes stale closure in cloud sync)
+  const loadMonthRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
   const selKey = dk(vYear, vMonth, selDay);
   const isToday = vYear === now.getFullYear() && vMonth === now.getMonth() && selDay === now.getDate();
   
@@ -524,26 +529,6 @@ function SalahTrackerInner() {
   }, [prayerTimes, isToday, dayData]);
 
   /* ─── Data ─── */
-  // Initial sync from cloud on mount
-  useEffect(() => {
-    const syncFromCloud = async () => {
-      try {
-        await DataSyncService.init();
-        // Sync current month from Firestore
-        await DataSyncService.syncSalahMonth(vYear, vMonth);
-        // Reload after sync
-        await loadMonth();
-      } catch (e) {
-        if (__DEV__) console.warn('[SalahTracker] Cloud sync error:', e);
-      }
-    };
-    syncFromCloud();
-  }, []); // Only on mount
-  
-  useEffect(() => { loadMonth(); }, [vYear, vMonth]);
-  useEffect(() => { loadDay(); }, [selKey]);
-  useEffect(() => { calcStreak(); }, [cache]);
-
   const loadMonth = async () => {
     try {
       const days = daysIn(vYear, vMonth);
@@ -581,12 +566,26 @@ function SalahTrackerInner() {
           }
           
           if (hasNewData) {
-            setCache((prev) => ({ ...prev, ...merged }));
+            setCache((prev) => {
+              const result = { ...prev, ...merged };
+              // Preserve locally-saved data
+              for (const [key, val] of Object.entries(savedRef.current)) {
+                result[key] = val;
+              }
+              return result;
+            });
           }
         }
       }).catch(() => {});
       
-      setCache(c);
+      setCache(prev => {
+        const merged = { ...prev, ...c };
+        // Preserve any locally-saved data that might not be in AsyncStorage yet
+        for (const [key, val] of Object.entries(savedRef.current)) {
+          merged[key] = val;
+        }
+        return merged;
+      });
     } catch (e) {
       if (__DEV__) console.warn('[SalahTracker] loadMonth error:', e);
     } finally {
@@ -596,8 +595,17 @@ function SalahTrackerInner() {
 
   const loadDay = async () => {
     try {
-      // IMPORTANT: Check in-memory cache first (this has the most recent data)
-      // This fixes the issue where prayer status resets when navigating between days
+      // 1) Check locally-saved ref first (highest priority, survives cache resets)
+      const localSave = savedRef.current[selKey];
+      if (localSave) {
+        if (isMounted.current) {
+          setDayData(localSave);
+          setCache(prev => ({ ...prev, [selKey]: localSave }));
+        }
+        return;
+      }
+
+      // 2) Check in-memory cache next
       if (cache[selKey]) {
         if (isMounted.current) setDayData(cache[selKey]);
         return;
@@ -637,6 +645,8 @@ function SalahTrackerInner() {
   const save = useCallback(async (data: DayData) => {
     setDayData(data);
     setCache((prev) => ({ ...prev, [selKey]: data }));
+    // Persist in ref so data survives any cache resets from loadMonth / cloud sync
+    savedRef.current = { ...savedRef.current, [selKey]: data };
     
     // Add timestamp for cloud sync conflict resolution
     const dataWithTimestamp = { ...data, updatedAt: Date.now() };
@@ -674,6 +684,29 @@ function SalahTrackerInner() {
     }
     if (isMounted.current) setStreak(cnt);
   }, [cache]);
+
+  // Keep loadMonth ref up-to-date so cloud sync always uses latest version
+  loadMonthRef.current = loadMonth;
+
+  // Initial sync from cloud on mount
+  useEffect(() => {
+    const syncFromCloud = async () => {
+      try {
+        await DataSyncService.init();
+        // Sync current month from Firestore
+        await DataSyncService.syncSalahMonth(vYear, vMonth);
+        // Reload after sync — use ref to get the latest loadMonth (avoids stale closure)
+        await loadMonthRef.current();
+      } catch (e) {
+        if (__DEV__) console.warn('[SalahTracker] Cloud sync error:', e);
+      }
+    };
+    syncFromCloud();
+  }, []); // Only on mount
+
+  useEffect(() => { loadMonth(); }, [vYear, vMonth]);
+  useEffect(() => { loadDay(); }, [selKey]);
+  useEffect(() => { calcStreak(); }, [cache]);
 
   // cycle uses functional update to guarantee latest dayData
   const cycle = useCallback((key: PrayerKey) => {

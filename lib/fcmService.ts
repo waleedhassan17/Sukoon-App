@@ -14,6 +14,7 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getMessaging, getFirestore, isFirebaseConfigured } from './firebaseConfig';
+import { NotificationStorage } from './notificationStorage';
 
 // ══════════════════════════════════════════════
 // STORAGE KEYS
@@ -76,9 +77,17 @@ export const FCMService = {
       messaging.onMessage(async (remoteMessage: any) => {
         if (__DEV__) console.log('[FCM] Foreground message:', remoteMessage.notification?.title);
         
-        // The message is also forwarded to expo-notifications if properly configured,
-        // but we can also handle it here for custom logic
-        // (e.g., updating badge count, showing in-app toast, etc.)
+        // Persist to notification storage so it appears on the Notifications screen
+        try {
+          if (remoteMessage.notification) {
+            await NotificationStorage.addManual({
+              title: remoteMessage.notification.title || 'Sukoon',
+              message: remoteMessage.notification.body || '',
+              type: remoteMessage.data?.type === 'prayer' ? 'azan' : 'general',
+              data: remoteMessage.data,
+            });
+          }
+        } catch {}
       });
 
       if (__DEV__) console.log('[FCM] Initialized successfully');
@@ -184,8 +193,18 @@ async function setupBackgroundHandler(): Promise<void> {
     if (messaging) {
       messaging.setBackgroundMessageHandler(async (remoteMessage: any) => {
         if (__DEV__) console.log('[FCM] Background message:', remoteMessage.notification?.title);
-        // Background messages are automatically displayed as system notifications
-        // by Firebase. Custom handling can be added here if needed.
+        // Persist to notification storage so it appears on the Notifications screen
+        try {
+          const { NotificationStorage } = require('./notificationStorage');
+          if (remoteMessage.notification) {
+            await NotificationStorage.addManual({
+              title: remoteMessage.notification.title || 'Sukoon',
+              message: remoteMessage.notification.body || '',
+              type: remoteMessage.data?.type === 'prayer' ? 'azan' : 'general',
+              data: remoteMessage.data,
+            });
+          }
+        } catch {}
       });
     }
   } catch {}
