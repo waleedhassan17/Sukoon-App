@@ -1,7 +1,7 @@
 {
   "name": "sukoon-app",
   "main": "expo-router/entry",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
@@ -54,6 +54,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "~19.1.10",
+    "babel-plugin-transform-remove-console": "^6.9.4",
     "expo-dev-client": "^6.0.20",
     "expo-module-scripts": "^5.0.8",
     "typescript": "^5.3.0"

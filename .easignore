@@ -1,0 +1,64 @@
+# ===== EAS Build Ignore =====
+# Exclude files not needed for cloud builds to speed up uploads
+
+# Dependencies (EAS runs npm install on the server)
+node_modules/
+
+# Expo cache
+.expo/
+
+# Native build outputs (EAS rebuilds from scratch)
+android/app/build/
+android/build/
+android/.gradle/
+ios/build/
+ios/Pods/
+
+# Pre-built AAB/APK artifacts
+*.aab
+*.apk
+
+# Keystore files (EAS uses managed credentials)
+*.jks
+*.keystore
+
+# iOS signing
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Google service account (not needed for build)
+google-service-account.json
+
+# Environment files
+.env
+.env.local
+
+# Git
+.git/
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+*.orig.*
+
+# Build scripts (not needed in cloud)
+build-apk.sh
+build-debug.sh
+build-release.sh
+
+# Documentation (not needed for build)
+*.md
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+
+# Web build
+web-build/

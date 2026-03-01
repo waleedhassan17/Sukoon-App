@@ -24,6 +24,9 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { DataSyncService } from '@/lib/dataSyncService';
+import { PrayerTimesService, PrayerTimesData } from '@/lib/prayerTimes';
+import { NotificationService } from '@/lib/notificationService';
+import { ReadingProgress } from '@/lib/readingProgress';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -81,6 +84,59 @@ const daysIn = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
 const firstDow = (y: number, m: number) => new Date(y, m, 1).getDay();
 const countDone = (d: DayData) =>
   Object.values(d).filter((v) => v === 'prayed' || v === 'jamaah' || v === 'qasr').length;
+
+/**
+ * TIME-BASED PRAYER ACTIVATION LOGIC
+ * Returns which prayers should be enabled based on current time.
+ * Before Fajr → none clickable
+ * At Fajr time → only Fajr clickable
+ * At Dhuhr time → Fajr + Dhuhr clickable
+ * And so on until all prayers are clickable after Isha time
+ */
+const getEnabledPrayers = (prayerTimes: PrayerTimesData | null): Record<PrayerKey, boolean> => {
+  const result: Record<PrayerKey, boolean> = {
+    fajr: false, zuhr: false, asr: false, maghrib: false, isha: false,
+  };
+  
+  if (!prayerTimes) {
+    // If no prayer times available, enable all (fallback)
+    return { fajr: true, zuhr: true, asr: true, maghrib: true, isha: true };
+  }
+  
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  
+  const parseTime = (t: string): number => {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  };
+  
+  const fajrMins = parseTime(prayerTimes.Fajr);
+  const zuhrMins = parseTime(prayerTimes.Dhuhr);
+  const asrMins = parseTime(prayerTimes.Asr);
+  const maghribMins = parseTime(prayerTimes.Maghrib);
+  const ishaMins = parseTime(prayerTimes.Isha);
+  
+  // Enable prayers progressively based on current time
+  if (currentMinutes >= fajrMins) result.fajr = true;
+  if (currentMinutes >= zuhrMins) result.zuhr = true;
+  if (currentMinutes >= asrMins) result.asr = true;
+  if (currentMinutes >= maghribMins) result.maghrib = true;
+  if (currentMinutes >= ishaMins) result.isha = true;
+  
+  return result;
+};
+
+/**
+ * Check if a date is in the future (cannot mark prayers for future dates)
+ */
+const isDateInFuture = (year: number, month: number, day: number): boolean => {
+  const today = new Date();
+  const checkDate = new Date(year, month, day);
+  today.setHours(0, 0, 0, 0);
+  checkDate.setHours(0, 0, 0, 0);
+  return checkDate > today;
+};
 
 /** Safe JSON parse — returns null on corrupt data instead of crashing */
 function safeJsonParse<T>(raw: string | null | undefined): T | null {
@@ -153,10 +209,10 @@ function CompletionRing({ count, total = 5, size = 54 }: { count: number; total?
 
 /* ═══ Prayer Card ═══ */
 function PrayerCard({
-  prayer, status, onTap, onLong,
+  prayer, status, onTap, onLong, disabled = false,
 }: {
   prayer: typeof PRAYERS[0]; status: PrayerStatus;
-  onTap: () => void; onLong: () => void;
+  onTap: () => void; onLong: () => void; disabled?: boolean;
 }) {
   const { theme } = useTheme();
   const info = STATUS_INFO[status];
@@ -165,6 +221,7 @@ function PrayerCard({
   const scale = useRef(new Animated.Value(1)).current;
 
   const press = () => {
+    if (disabled) return; // Prevent interaction when disabled
     Animated.sequence([
       Animated.timing(scale, { toValue: 0.96, duration: 60, useNativeDriver: true }),
       Animated.spring(scale, { toValue: 1, friction: 4, useNativeDriver: true }),
@@ -173,24 +230,26 @@ function PrayerCard({
   };
 
   return (
-    <Animated.View style={{ transform: [{ scale }] }}>
+    <Animated.View style={{ transform: [{ scale }], opacity: disabled ? 0.5 : 1 }}>
       <TouchableOpacity
         onPress={press}
-        onLongPress={onLong}
+        onLongPress={disabled ? undefined : onLong}
         delayLongPress={350}
-        activeOpacity={0.9}
+        activeOpacity={disabled ? 1 : 0.9}
+        disabled={disabled}
         style={[
           st.pCard,
           { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor },
           done && { borderColor: `${info.color}25` },
           missed && { borderColor: `${info.color}20` },
+          disabled && { borderColor: `${theme.textTertiary}20` },
         ]}
       >
         {/* Gradient accent bar */}
         <LinearGradient
           colors={prayer.gradient}
           start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
-          style={[st.pAccentBar, done && { opacity: 1 }, missed && { opacity: 0.4 }]}
+          style={[st.pAccentBar, done && { opacity: 1 }, missed && { opacity: 0.4 }, disabled && { opacity: 0.3 }]}
         />
 
         {/* Icon badge */}
@@ -372,15 +431,34 @@ function SalahTrackerInner() {
   const [vYear, setVYear] = useState(now.getFullYear());
   const [vMonth, setVMonth] = useState(now.getMonth());
   const [selDay, setSelDay] = useState(now.getDate());
-  const [weekly, setWeekly] = useState(false);
   const [dayData, setDayData] = useState<DayData>({ ...EMPTY_DAY });
   const [cache, setCache] = useState<Record<string, DayData>>({});
   const [pickerPrayer, setPickerPrayer] = useState<typeof PRAYERS[0] | null>(null);
   const [streak, setStreak] = useState(0);
   const [ready, setReady] = useState(false);
+  
+  // NEW: Prayer times for time-based activation logic
+  const [prayerTimes, setPrayerTimes] = useState<PrayerTimesData | null>(null);
 
   const selKey = dk(vYear, vMonth, selDay);
   const isToday = vYear === now.getFullYear() && vMonth === now.getMonth() && selDay === now.getDate();
+  
+  // NEW: Check if selected date is in the future (disable prayer marking)
+  const isFutureDate = isDateInFuture(vYear, vMonth, selDay);
+  
+  // NEW: Get which prayers are enabled based on current time (only for today)
+  const enabledPrayers = useMemo(() => {
+    if (isFutureDate) {
+      // Future dates: all prayers disabled
+      return { fajr: false, zuhr: false, asr: false, maghrib: false, isha: false };
+    }
+    if (!isToday) {
+      // Past dates: all prayers enabled
+      return { fajr: true, zuhr: true, asr: true, maghrib: true, isha: true };
+    }
+    // Today: time-based activation
+    return getEnabledPrayers(prayerTimes);
+  }, [isFutureDate, isToday, prayerTimes]);
   const completed = countDone(dayData);
 
   // Cleanup: mark unmounted to prevent stale setState calls
@@ -389,7 +467,79 @@ function SalahTrackerInner() {
     return () => { isMounted.current = false; };
   }, []);
 
+  // NEW: Load prayer times for time-based activation
+  useEffect(() => {
+    const loadPrayerTimes = async () => {
+      try {
+        const cached = await PrayerTimesService.getCachedPrayerTimes();
+        if (cached && isMounted.current) {
+          setPrayerTimes(cached.data);
+        }
+      } catch (e) {
+        if (__DEV__) console.warn('[SalahTracker] loadPrayerTimes error:', e);
+      }
+    };
+    loadPrayerTimes();
+    
+    // Update enabled prayers every minute for real-time activation
+    const interval = setInterval(() => {
+      if (isMounted.current && isToday) {
+        setPrayerTimes((prev) => prev ? { ...prev } : null); // Trigger re-render
+      }
+    }, 60000);
+    
+    return () => clearInterval(interval);
+  }, [isToday]);
+
+  // NEW: End-of-day reminder - check after Isha if any prayers are untracked
+  useEffect(() => {
+    const checkEndOfDayReminder = async () => {
+      if (!prayerTimes || !isToday) return;
+      
+      // Parse Isha time
+      const [ishaH, ishaM] = prayerTimes.Isha.split(':').map(Number);
+      const now = new Date();
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      const ishaMinutes = ishaH * 60 + ishaM;
+      
+      // Only check after Isha time (30 min buffer to allow marking Isha)
+      if (currentMinutes < ishaMinutes + 30) return;
+      
+      // Count untracked prayers for today
+      const untrackedCount = Object.values(dayData).filter(
+        (status) => status === 'none'
+      ).length;
+      
+      // Send reminder if there are untracked prayers
+      if (untrackedCount > 0) {
+        await NotificationService.sendEndOfDayReminder(untrackedCount);
+      }
+    };
+    
+    // Check once when component mounts/updates, and set up periodic check
+    checkEndOfDayReminder();
+    const interval = setInterval(checkEndOfDayReminder, 30 * 60 * 1000); // Every 30 min
+    
+    return () => clearInterval(interval);
+  }, [prayerTimes, isToday, dayData]);
+
   /* ─── Data ─── */
+  // Initial sync from cloud on mount
+  useEffect(() => {
+    const syncFromCloud = async () => {
+      try {
+        await DataSyncService.init();
+        // Sync current month from Firestore
+        await DataSyncService.syncSalahMonth(vYear, vMonth);
+        // Reload after sync
+        await loadMonth();
+      } catch (e) {
+        if (__DEV__) console.warn('[SalahTracker] Cloud sync error:', e);
+      }
+    };
+    syncFromCloud();
+  }, []); // Only on mount
+  
   useEffect(() => { loadMonth(); }, [vYear, vMonth]);
   useEffect(() => { loadDay(); }, [selKey]);
   useEffect(() => { calcStreak(); }, [cache]);
@@ -398,6 +548,8 @@ function SalahTrackerInner() {
     try {
       const days = daysIn(vYear, vMonth);
       const keys = Array.from({ length: days }, (_, i) => sk(dk(vYear, vMonth, i + 1)));
+      
+      // Load from local AsyncStorage first (instant)
       const res = await AsyncStorage.multiGet(keys);
       if (!isMounted.current) return;
 
@@ -410,6 +562,30 @@ function SalahTrackerInner() {
           c[dateKey] = validateDayData(parsed);
         }
       }
+      
+      // Merge with cloud data in background (handles data restored from another device)
+      DataSyncService.loadSalahMonthFromCloud(vYear, vMonth).then((cloudData) => {
+        if (!isMounted.current) return;
+        if (Object.keys(cloudData).length > 0) {
+          const merged = { ...c };
+          let hasNewData = false;
+          
+          for (const [dateKey, dayData] of Object.entries(cloudData)) {
+            if (!merged[dateKey]) {
+              // Cloud has data we don't have locally - add it
+              merged[dateKey] = validateDayData(dayData);
+              hasNewData = true;
+              // Also save to AsyncStorage for offline access
+              AsyncStorage.setItem(sk(dateKey), JSON.stringify(dayData)).catch(() => {});
+            }
+          }
+          
+          if (hasNewData) {
+            setCache((prev) => ({ ...prev, ...merged }));
+          }
+        }
+      }).catch(() => {});
+      
       setCache(c);
     } catch (e) {
       if (__DEV__) console.warn('[SalahTracker] loadMonth error:', e);
@@ -420,10 +596,37 @@ function SalahTrackerInner() {
 
   const loadDay = async () => {
     try {
+      // IMPORTANT: Check in-memory cache first (this has the most recent data)
+      // This fixes the issue where prayer status resets when navigating between days
+      if (cache[selKey]) {
+        if (isMounted.current) setDayData(cache[selKey]);
+        return;
+      }
+      
+      // Try local AsyncStorage next
       const v = await AsyncStorage.getItem(sk(selKey));
       if (!isMounted.current) return;
+      
+      let dayDataResult: DayData;
       const parsed = safeJsonParse<DayData>(v);
-      setDayData(parsed ? validateDayData(parsed) : { ...EMPTY_DAY });
+      
+      if (parsed) {
+        dayDataResult = validateDayData(parsed);
+      } else {
+        // No local data - try cloud
+        const cloudData = await DataSyncService.loadSalahDay(selKey);
+        if (cloudData && isMounted.current) {
+          dayDataResult = validateDayData(cloudData);
+          // Cache locally
+          await AsyncStorage.setItem(sk(selKey), JSON.stringify(dayDataResult));
+        } else {
+          dayDataResult = { ...EMPTY_DAY };
+        }
+      }
+      
+      setDayData(dayDataResult);
+      // Also update cache to keep in sync
+      setCache((prev) => ({ ...prev, [selKey]: dayDataResult }));
     } catch (e) {
       if (__DEV__) console.warn('[SalahTracker] loadDay error:', e);
       if (isMounted.current) setDayData({ ...EMPTY_DAY });
@@ -434,12 +637,21 @@ function SalahTrackerInner() {
   const save = useCallback(async (data: DayData) => {
     setDayData(data);
     setCache((prev) => ({ ...prev, [selKey]: data }));
+    
+    // Add timestamp for cloud sync conflict resolution
+    const dataWithTimestamp = { ...data, updatedAt: Date.now() };
+    
     try {
-      await AsyncStorage.setItem(sk(selKey), JSON.stringify(data));
+      await AsyncStorage.setItem(sk(selKey), JSON.stringify(dataWithTimestamp));
     } catch (e) {
       if (__DEV__) console.warn('[SalahTracker] save error:', e);
     }
-    DataSyncService.saveSalahData(selKey, data).catch(() => {});
+    // Push to Firestore immediately for real-time sync
+    DataSyncService.saveSalahData(selKey, dataWithTimestamp).catch(() => {});
+    
+    // NEW: Record completion for insights/streak tracking
+    const completedCount = countDone(data);
+    ReadingProgress.recordSalahCompletion(selKey, completedCount).catch(() => {});
   }, [selKey]);
 
   const calcStreak = useCallback(() => {
@@ -508,13 +720,7 @@ function SalahTrackerInner() {
     return arr;
   }, [vYear, vMonth]);
 
-  const weekDates = useMemo(() => {
-    const d = new Date(vYear, vMonth, selDay);
-    const dow = d.getDay();
-    const start = new Date(d); start.setDate(start.getDate() - dow);
-    return Array.from({ length: 7 }, (_, i) => { const w = new Date(start); w.setDate(w.getDate() + i); return w; });
-  }, [vYear, vMonth, selDay]);
-
+  /* Calendar - REMOVED weekDates since weekly view was removed */
   const isFuture = useCallback((day: number) => {
     const today = new Date();
     return new Date(vYear, vMonth, day) > today;
@@ -581,7 +787,7 @@ function SalahTrackerInner() {
 
         {/* ═══ CALENDAR CARD ═══ */}
         <View style={[st.calCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
-          {/* Month navigation */}
+          {/* Month navigation - REMOVED weekly toggle button */}
           <View style={st.calNav}>
             <TouchableOpacity onPress={() => changeMonth(-1)} style={st.calNavBtn} activeOpacity={0.7}>
               <Ionicons name="chevron-back" size={18} color={theme.textSecondary} />
@@ -592,22 +798,14 @@ function SalahTrackerInner() {
               </Text>
             </TouchableOpacity>
             <View style={st.calNavRight}>
-              <TouchableOpacity
-                onPress={() => { LayoutAnimation.configureNext(LAYOUT_ANIM); setWeekly(!weekly); Haptics.selectionAsync().catch(() => {}); }}
-                activeOpacity={0.7}
-                style={[st.viewToggle, { backgroundColor: `${theme.primaryMuted}14` }]}
-              >
-                <Ionicons name={weekly ? 'grid-outline' : 'calendar-outline'} size={12} color={theme.primaryMuted} />
-                <Text style={[st.viewToggleT, { color: theme.primaryMuted }]}>{weekly ? 'Month' : 'Week'}</Text>
-              </TouchableOpacity>
               <TouchableOpacity onPress={() => changeMonth(1)} style={st.calNavBtn} activeOpacity={0.7}>
                 <Ionicons name="chevron-forward" size={18} color={theme.textSecondary} />
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* Calendar body: fixed minHeight prevents layout jump on toggle */}
-          <View style={{ minHeight: weekly ? 90 : undefined }}>
+          {/* Calendar body: MONTH GRID ONLY (removed weekly strip) */}
+          <View>
           {/* Weekday headers */}
           <View style={st.dowRow}>
             {WEEKDAYS.map((d, i) => (
@@ -615,90 +813,54 @@ function SalahTrackerInner() {
             ))}
           </View>
 
-          {/* MONTH GRID or WEEK STRIP */}
-          {weekly ? (
-            <View style={st.weekStrip}>
-              {weekDates.map((wd, i) => {
-                const key = dk(wd.getFullYear(), wd.getMonth(), wd.getDate());
-                const data = cache[key];
-                const prayed = data ? countDone(data) : 0;
-                const sel = wd.getDate() === selDay && wd.getMonth() === vMonth && wd.getFullYear() === vYear;
-                const todayDate = new Date();
-                const isT = wd.toDateString() === todayDate.toDateString();
-                const fut = wd > todayDate;
+          {/* MONTH GRID - display-only, only selected day allows prayer interaction */}
+          <View style={st.calGrid}>
+            {gridDays.map((day, i) => {
+              if (day === null) return <View key={`e-${i}`} style={st.calCell} />;
+              const key = dk(vYear, vMonth, day);
+              const data = cache[key];
+              const prayed = data ? countDone(data) : 0;
+              const sel = day === selDay;
+              const td = new Date();
+              const isT = vYear === td.getFullYear() && vMonth === td.getMonth() && day === td.getDate();
+              const fut = isFuture(day);
 
-                return (
-                  <TouchableOpacity
-                    key={i}
-                    onPress={() => {
-                      setVYear(wd.getFullYear()); setVMonth(wd.getMonth()); setSelDay(wd.getDate());
-                      Haptics.selectionAsync().catch(() => {});
-                    }}
-                    activeOpacity={0.7}
-                    style={[st.wDay, sel && { backgroundColor: theme.primary, borderRadius: 16 }]}
-                  >
-                    <Text style={[st.wDayLabel, { color: sel ? 'rgba(255,255,255,0.7)' : theme.textTertiary }]}>{WEEKDAYS[i]}</Text>
-                    <Text style={[st.wDayNum, { color: sel ? '#fff' : fut ? `${theme.textTertiary}50` : theme.text }, isT && !sel && { color: theme.primary }]}>{wd.getDate()}</Text>
-                    {prayed > 0 && !fut && (
-                      <View style={st.wDots}>
-                        {prayed === 5 ? (
-                          <View style={[st.wDotFull, { backgroundColor: sel ? 'rgba(255,255,255,0.8)' : theme.primary }]} />
-                        ) : (
-                          Array.from({ length: prayed }, (_, j) => (
-                            <View key={j} style={[st.wDotSmall, { backgroundColor: sel ? 'rgba(255,255,255,0.6)' : theme.gold }]} />
-                          ))
-                        )}
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          ) : (
-            <View style={st.calGrid}>
-              {gridDays.map((day, i) => {
-                if (day === null) return <View key={`e-${i}`} style={st.calCell} />;
-                const key = dk(vYear, vMonth, day);
-                const data = cache[key];
-                const prayed = data ? countDone(data) : 0;
-                const sel = day === selDay;
-                const td = new Date();
-                const isT = vYear === td.getFullYear() && vMonth === td.getMonth() && day === td.getDate();
-                const fut = isFuture(day);
-
-                return (
-                  <TouchableOpacity
-                    key={day}
-                    onPress={() => { if (!fut) { setSelDay(day); Haptics.selectionAsync().catch(() => {}); } }}
-                    activeOpacity={fut ? 1 : 0.7}
-                    style={[
-                      st.calCell,
-                      sel && [st.calSel, { backgroundColor: theme.primary }],
-                      isT && !sel && [st.calToday, { borderColor: theme.primaryMuted }],
-                    ]}
-                  >
-                    <Text style={[
-                      st.calDayT,
-                      { color: fut ? `${theme.textTertiary}45` : theme.text },
-                      sel && { color: '#fff', fontWeight: '700' },
-                      isT && !sel && { color: theme.primary, fontWeight: '700' },
-                    ]}>{day}</Text>
-                    {prayed > 0 && !fut && (
-                      <View style={st.calDots}>
-                        {prayed === 5 ? (
-                          <View style={[st.calDotFull, { backgroundColor: sel ? 'rgba(255,255,255,0.8)' : theme.primary }]} />
-                        ) : (
-                          Array.from({ length: Math.min(prayed, 5) }, (_, j) => (
-                            <View key={j} style={[st.calDotSm, { backgroundColor: sel ? 'rgba(255,255,255,0.55)' : theme.gold }]} />
-                          ))
-                        )}
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
+              return (
+                <TouchableOpacity
+                  key={day}
+                  onPress={() => { 
+                    // Allow selecting any day to view, but prayers can only be marked for past/today
+                    setSelDay(day); 
+                    Haptics.selectionAsync().catch(() => {}); 
+                  }}
+                  activeOpacity={0.7}
+                  style={[
+                    st.calCell,
+                    sel && [st.calSel, { backgroundColor: theme.primary }],
+                    isT && !sel && [st.calToday, { borderColor: theme.primaryMuted }],
+                  ]}
+                >
+                  <Text style={[
+                    st.calDayT,
+                    { color: fut ? `${theme.textTertiary}45` : theme.text },
+                    sel && { color: '#fff', fontWeight: '700' },
+                    isT && !sel && { color: theme.primary, fontWeight: '700' },
+                  ]}>{day}</Text>
+                  {prayed > 0 && !fut && (
+                    <View style={st.calDots}>
+                      {prayed === 5 ? (
+                        <View style={[st.calDotFull, { backgroundColor: sel ? 'rgba(255,255,255,0.8)' : theme.primary }]} />
+                      ) : (
+                        Array.from({ length: Math.min(prayed, 5) }, (_, j) => (
+                          <View key={j} style={[st.calDotSm, { backgroundColor: sel ? 'rgba(255,255,255,0.55)' : theme.gold }]} />
+                        ))
+                      )}
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
           </View>
         </View>
 
@@ -720,6 +882,15 @@ function SalahTrackerInner() {
 
         {/* ═══ PRAYER CARDS ═══ */}
         <View style={st.pList}>
+          {/* Show message if future date selected */}
+          {isFutureDate && (
+            <View style={[st.futureNotice, { backgroundColor: `${theme.gold}14`, borderColor: `${theme.gold}25` }]}>
+              <Ionicons name="time-outline" size={16} color={theme.gold} />
+              <Text style={[st.futureNoticeText, { color: theme.textSecondary }]}>
+                Cannot mark prayers for future dates
+              </Text>
+            </View>
+          )}
           {PRAYERS.map((p) => (
             <PrayerCard
               key={p.key}
@@ -727,6 +898,7 @@ function SalahTrackerInner() {
               status={dayData[p.key]}
               onTap={() => cycle(p.key)}
               onLong={() => { setPickerPrayer(p); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); }}
+              disabled={!enabledPrayers[p.key]}
             />
           ))}
         </View>
@@ -842,6 +1014,10 @@ const st = StyleSheet.create({
   pStatusText: { fontSize: 10, fontWeight: '600' },
   pDots: { flexDirection: 'column', gap: 4, paddingLeft: 8 },
   pDot: { width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  
+  /* Future date notice */
+  futureNotice: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1, marginBottom: 8 },
+  futureNoticeText: { fontSize: 13, fontWeight: '500' },
 
   /* Legend */
   legend: { marginHorizontal: 16, marginTop: 20, borderRadius: 16, borderWidth: 1, padding: 14 },

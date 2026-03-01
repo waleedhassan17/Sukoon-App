@@ -227,6 +227,115 @@ export const DataSyncService = {
   },
 
   /**
+   * Load all salah data for a month from Firestore (batch read)
+   * Returns a map of dateKey -> DayData
+   */
+  async loadSalahMonthFromCloud(year: number, month: number): Promise<Record<string, any>> {
+    if (!isFirebaseConfigured()) return {};
+    
+    try {
+      const db = await getFirestore();
+      const userId = await getCurrentUserId();
+      if (!db || !userId) return {};
+
+      // Create date range for the month
+      const startKey = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+      const endMonth = month === 11 ? 0 : month + 1;
+      const endYear = month === 11 ? year + 1 : year;
+      const endKey = `${endYear}-${String(endMonth + 1).padStart(2, '0')}-01`;
+
+      const snapshot = await db
+        .collection('users')
+        .doc(userId)
+        .collection(SYNC_DOMAINS.SALAH_TRACKER)
+        .where('__name__', '>=', startKey)
+        .where('__name__', '<', endKey)
+        .get();
+
+      const result: Record<string, any> = {};
+      snapshot.docs.forEach((doc: any) => {
+        const cloudData = doc.data() as CloudDocument;
+        if (cloudData?.data) {
+          result[doc.id] = cloudData.data;
+        }
+      });
+
+      if (__DEV__) console.log(`[DataSync] Loaded ${Object.keys(result).length} salah days from cloud for ${year}-${month + 1}`);
+      return result;
+    } catch (error) {
+      if (__DEV__) console.warn('[DataSync] Cloud salah month load failed:', error);
+      return {};
+    }
+  },
+
+  /**
+   * Load single day's salah data with local-first, cloud-fallback strategy
+   */
+  async loadSalahDay(dateKey: string): Promise<any | null> {
+    const storageKey = `sukoon_salah_${dateKey}`;
+    
+    // Try local first
+    const localData = await this.readLocal<any>(storageKey);
+    if (localData) return localData;
+    
+    // Fallback to cloud
+    const cloudData = await this.pullFromCloud<any>(SYNC_DOMAINS.SALAH_TRACKER, dateKey);
+    if (cloudData) {
+      // Cache locally for offline access
+      await this.saveLocal(storageKey, cloudData);
+      return cloudData;
+    }
+    
+    return null;
+  },
+
+  /**
+   * Sync local salah data with cloud (merge strategy: latest wins)
+   * This merges cloud data into local storage for a given month
+   */
+  async syncSalahMonth(year: number, month: number): Promise<number> {
+    if (!isFirebaseConfigured()) return 0;
+    
+    try {
+      const cloudData = await this.loadSalahMonthFromCloud(year, month);
+      let synced = 0;
+
+      for (const [dateKey, dayData] of Object.entries(cloudData)) {
+        const storageKey = `sukoon_salah_${dateKey}`;
+        const localRaw = await AsyncStorage.getItem(storageKey);
+        
+        if (!localRaw) {
+          // No local data, use cloud data
+          await AsyncStorage.setItem(storageKey, JSON.stringify(dayData));
+          synced++;
+        } else {
+          // Compare timestamps if available, otherwise merge
+          try {
+            const localParsed = JSON.parse(localRaw);
+            const localTime = localParsed.updatedAt || 0;
+            const cloudTime = (dayData as any).updatedAt || 0;
+            
+            if (cloudTime > localTime) {
+              await AsyncStorage.setItem(storageKey, JSON.stringify(dayData));
+              synced++;
+            }
+          } catch {
+            // If parse fails, prefer cloud data
+            await AsyncStorage.setItem(storageKey, JSON.stringify(dayData));
+            synced++;
+          }
+        }
+      }
+
+      if (__DEV__ && synced > 0) console.log(`[DataSync] Synced ${synced} salah days from cloud`);
+      return synced;
+    } catch (error) {
+      if (__DEV__) console.warn('[DataSync] Salah month sync failed:', error);
+      return 0;
+    }
+  },
+
+  /**
    * Save and sync saved ayahs
    */
   async saveSavedAyahs(verses: any[]): Promise<void> {

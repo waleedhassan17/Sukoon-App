@@ -109,11 +109,16 @@ function RootLayoutInner() {
         NotificationHistory.add(notification).catch(() => {});
 
         // Save to new persistent notification storage (@notifications key)
+        // Note: Also saved in setNotificationHandler — dedup logic prevents doubles
         NotificationStorage.addFromNotification(notification).catch(() => {});
 
         // Play azan sound if this is a prayer notification (foreground only)
         AzanPlayer.handleNotification(notification).catch(() => {});
       });
+
+      // On launch, sync any notifications delivered while app was killed/background.
+      // This captures notifications the user hasn't tapped, ensuring history is complete.
+      NotificationService.syncDeliveredNotifications().catch(() => {});
     }
 
     return () => {
@@ -137,6 +142,10 @@ function RootLayoutInner() {
         setTimeout(() => {
           AzanPlayer.handleAppForeground().catch(() => {});
         }, 500);
+
+        // Sync any notifications delivered while app was in background
+        // This ensures the Notifications screen shows all delivered notifications
+        NotificationService.syncDeliveredNotifications().catch(() => {});
 
         // Check if notifications need rescheduling (new day)
         const prefs = await NotificationService.getPreferences();

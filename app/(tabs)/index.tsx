@@ -13,11 +13,14 @@ import {
   Dimensions,
   TextInput,
   Platform,
+  Keyboard,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { VoiceInputButton } from '@/components/VoiceInputButton';
@@ -97,9 +100,76 @@ export default function HomeScreen() {
   const [inputFocused, setInputFocused] = useState(false);
   const [islamicDate, setIslamicDate] = useState<IslamicCalendarData | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState('idle');
+  const [interimText, setInterimText] = useState('');
+
+  // Recording pulse animation
+  const recordPulse = useRef(new Animated.Value(1)).current;
+  const recordOpacity = useRef(new Animated.Value(0.4)).current;
+
+  // Waveform bars animation (3 bars with staggered timing)
+  const waveBar1 = useRef(new Animated.Value(0.3)).current;
+  const waveBar2 = useRef(new Animated.Value(0.5)).current;
+  const waveBar3 = useRef(new Animated.Value(0.3)).current;
 
   // 8 staggered sections
   const sectionAnims = useStaggeredEntry(8, 90);
+
+  // Recording animation lifecycle — pulse dot + waveform bars
+  useEffect(() => {
+    if (isRecording && voiceStatus !== 'processing') {
+      // Breathing pulse on the dot
+      const pulseLoop = Animated.loop(
+        Animated.sequence([
+          Animated.parallel([
+            Animated.timing(recordPulse, { toValue: 1.4, duration: 600, useNativeDriver: true }),
+            Animated.timing(recordOpacity, { toValue: 1, duration: 600, useNativeDriver: true }),
+          ]),
+          Animated.parallel([
+            Animated.timing(recordPulse, { toValue: 1, duration: 600, useNativeDriver: true }),
+            Animated.timing(recordOpacity, { toValue: 0.4, duration: 600, useNativeDriver: true }),
+          ]),
+        ])
+      );
+      // Waveform bars — staggered bounce
+      const waveLoop = Animated.loop(
+        Animated.stagger(120, [
+          Animated.sequence([
+            Animated.timing(waveBar1, { toValue: 1, duration: 300, useNativeDriver: true }),
+            Animated.timing(waveBar1, { toValue: 0.3, duration: 300, useNativeDriver: true }),
+          ]),
+          Animated.sequence([
+            Animated.timing(waveBar2, { toValue: 1, duration: 300, useNativeDriver: true }),
+            Animated.timing(waveBar2, { toValue: 0.3, duration: 300, useNativeDriver: true }),
+          ]),
+          Animated.sequence([
+            Animated.timing(waveBar3, { toValue: 1, duration: 300, useNativeDriver: true }),
+            Animated.timing(waveBar3, { toValue: 0.3, duration: 300, useNativeDriver: true }),
+          ]),
+        ])
+      );
+      pulseLoop.start();
+      waveLoop.start();
+      return () => { pulseLoop.stop(); waveLoop.stop(); };
+    } else if (isRecording && voiceStatus === 'processing') {
+      // Steady state while native recognizer finalizes
+      Animated.parallel([
+        Animated.timing(recordPulse, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.timing(recordOpacity, { toValue: 0.7, duration: 200, useNativeDriver: true }),
+        Animated.timing(waveBar1, { toValue: 0.5, duration: 200, useNativeDriver: true }),
+        Animated.timing(waveBar2, { toValue: 0.5, duration: 200, useNativeDriver: true }),
+        Animated.timing(waveBar3, { toValue: 0.5, duration: 200, useNativeDriver: true }),
+      ]).start();
+    } else {
+      recordPulse.setValue(1);
+      recordOpacity.setValue(0.4);
+      waveBar1.setValue(0.3);
+      waveBar2.setValue(0.3);
+      waveBar3.setValue(0.3);
+    }
+  }, [isRecording, voiceStatus]);
 
   const quickEmotions = useMemo(() => [
     { name: 'Peaceful', icon: 'leaf-outline' as const, color: theme.emotionPeaceful },
@@ -200,30 +270,75 @@ export default function HomeScreen() {
   const isNavigatingRef = useRef(false);
 
   const handleAnalyze = useCallback(() => {
-    if (!emotionText.trim()) return;
-    if (isNavigatingRef.current) return; // Prevent double-tap
-    isNavigatingRef.current = true;
-    router.push({ pathname: '/emotion-result', params: { text: emotionText.trim() } });
-    // Reset after a short delay so the user can navigate again when returning
-    setTimeout(() => { isNavigatingRef.current = false; }, 1000);
-  }, [emotionText]);
-
-  const handleEmotionQuick = useCallback((name: string) => {
-    // Guard against rapid double-taps causing duplicate navigation
+    if (!emotionText.trim() || isRecording || isSubmitting) return;
     if (isNavigatingRef.current) return;
     isNavigatingRef.current = true;
-    // Static 6 emotions bypass the ML API — use curated verses directly
+
+    Keyboard.dismiss();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setIsSubmitting(true);
+
+    router.push({ pathname: '/emotion-result', params: { text: emotionText.trim() } });
+    setTimeout(() => {
+      isNavigatingRef.current = false;
+      setIsSubmitting(false);
+    }, 1000);
+  }, [emotionText, isRecording, isSubmitting]);
+
+  const handleEmotionQuick = useCallback((name: string) => {
+    if (isNavigatingRef.current) return;
+    isNavigatingRef.current = true;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     router.push({ pathname: '/emotion-result', params: { text: `I'm feeling ${name.toLowerCase()}`, staticEmotion: name } });
-    // Reset after a short delay
     setTimeout(() => { isNavigatingRef.current = false; }, 1000);
   }, []);
 
-  const canAnalyze = emotionText.trim().length > 0;
+  const canAnalyze = emotionText.trim().length > 0 && !isRecording && !isSubmitting;
+
+  // Memoized callbacks — no inline functions in JSX
+  const handleTextChange = useCallback((text: string) => {
+    setEmotionText(text);
+    setVoiceError(null);
+  }, []);
+
+  const handleVoiceTextAppended = useCallback((newText: string) => {
+    setEmotionText(newText);
+    setVoiceError(null);
+  }, []);
+
+  const handleVoiceClear = useCallback(() => {
+    setEmotionText('');
+    setVoiceError(null);
+  }, []);
+
+  const handleVoiceError = useCallback((error: string) => {
+    setVoiceError(error);
+  }, []);
+
+  const handleRecordingChange = useCallback((recording: boolean) => {
+    setIsRecording(recording);
+    if (!recording) {
+      setVoiceStatus('idle');
+      setInterimText('');
+    }
+  }, []);
+
+  const handleVoiceStatusChange = useCallback((s: any) => {
+    setVoiceStatus(s);
+  }, []);
+
+  const handleInterimText = useCallback((text: string) => {
+    setInterimText(text);
+  }, []);
+
+  const handleInputFocus = useCallback(() => setInputFocused(true), []);
+  const handleInputBlur = useCallback(() => setInputFocused(false), []);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.surface }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
       >
         {/* ═══════════════ HERO HEADER ═══════════════ */}
@@ -276,34 +391,88 @@ export default function HomeScreen() {
             </View>
 
             {/* ── Guidance Input ── */}
-            <View style={[styles.guidanceCard, { backgroundColor: theme.surfaceElevated }, inputFocused && { shadowColor: theme.gold }]}>
-              <View style={[styles.guidanceInputRow, { backgroundColor: theme.surfaceMuted }]}>
-                <Ionicons name="search-outline" size={18} color={theme.textTertiary} />
-                <TextInput
-                  style={[styles.guidanceInput, { color: theme.text }]}
-                  placeholder="What's on your heart today?"
-                  placeholderTextColor={theme.textTertiary}
-                  value={emotionText}
-                  onChangeText={(text) => {
-                    setEmotionText(text);
-                    setVoiceError(null); // Clear error when user types
-                  }}
-                  onFocus={() => setInputFocused(true)}
-                  onBlur={() => setInputFocused(false)}
-                  onSubmitEditing={handleAnalyze}
-                  returnKeyType="search"
-                  multiline={false}
-                />
+            <View style={[
+              styles.guidanceCard,
+              { backgroundColor: theme.surfaceElevated },
+              inputFocused && { shadowColor: theme.gold },
+              isRecording && { borderWidth: 1.5, borderColor: theme.accent + '30' },
+            ]}>
+              <View style={[
+                styles.guidanceInputRow,
+                { backgroundColor: theme.surfaceMuted },
+                isRecording && { backgroundColor: theme.accent + '06' },
+              ]}>
+                {isRecording ? (
+                  <View style={styles.recordingLeft}>
+                    <Animated.View
+                      style={[
+                        styles.recordingDot,
+                        {
+                          backgroundColor: theme.accent,
+                          transform: [{ scale: recordPulse }],
+                          opacity: recordOpacity,
+                        },
+                      ]}
+                    />
+                    <View style={styles.waveformBars}>
+                      {[waveBar1, waveBar2, waveBar3].map((bar, i) => (
+                        <Animated.View
+                          key={i}
+                          style={[
+                            styles.waveBar,
+                            {
+                              backgroundColor: theme.accent,
+                              transform: [{ scaleY: bar }],
+                            },
+                          ]}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                ) : (
+                  <Ionicons name="search-outline" size={18} color={theme.textTertiary} />
+                )}
+                {isRecording ? (
+                  <View style={styles.recordingContainer}>
+                    {interimText ? (
+                      <Text
+                        style={[styles.interimText, { color: theme.text }]}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {interimText}
+                      </Text>
+                    ) : (
+                      <Text style={[styles.recordingText, { color: theme.accent }]}>
+                        {voiceStatus === 'processing' ? 'Processing...' : 'Listening...'}
+                      </Text>
+                    )}
+                  </View>
+                ) : (
+                  <TextInput
+                    style={[styles.guidanceInput, { color: theme.text }]}
+                    placeholder="What's on your heart today?"
+                    placeholderTextColor={theme.textTertiary}
+                    value={emotionText}
+                    onChangeText={handleTextChange}
+                    onFocus={handleInputFocus}
+                    onBlur={handleInputBlur}
+                    onSubmitEditing={handleAnalyze}
+                    returnKeyType="search"
+                    multiline={false}
+                  />
+                )}
                 <VoiceInputButton
-                  currentText={emotionText}
-                  onTextAppended={(newText) => {
-                    setEmotionText(newText);
-                    setVoiceError(null);
-                  }}
-                  onError={(error) => setVoiceError(error)}
+                  searchText={emotionText}
+                  onTextAppended={handleVoiceTextAppended}
+                  onClear={handleVoiceClear}
+                  onInterimText={handleInterimText}
+                  onRecordingChange={handleRecordingChange}
+                  onStatusChange={handleVoiceStatusChange}
+                  onError={handleVoiceError}
                   iconSize={18}
                   iconColor={theme.textTertiary}
-                  disabled={false}
+                  activeColor={theme.accent}
                 />
               </View>
               {voiceError && (
@@ -323,8 +492,14 @@ export default function HomeScreen() {
                   end={{ x: 1, y: 0 }}
                   style={styles.guidanceBtn}
                 >
-                  <Ionicons name="sparkles" size={16} color="#fff" />
-                  <Text style={styles.guidanceBtnText}>Find Guidance</Text>
+                  {isSubmitting ? (
+                    <ActivityIndicator size={16} color="#fff" />
+                  ) : (
+                    <Ionicons name="sparkles" size={16} color="#fff" />
+                  )}
+                  <Text style={styles.guidanceBtnText}>
+                    {isSubmitting ? 'Finding...' : 'Find Guidance'}
+                  </Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -681,6 +856,46 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginHorizontal: 2,
     marginBottom: 8,
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  recordingLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  waveformBars: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    height: 16,
+  },
+  waveBar: {
+    width: 3,
+    height: 14,
+    borderRadius: 1.5,
+  },
+  recordingContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+    minHeight: 20,
+  },
+  recordingText: {
+    fontSize: 15,
+    fontWeight: '500',
+    letterSpacing: 0.3,
+  },
+  interimText: {
+    fontSize: 15,
+    fontWeight: '400',
+    fontStyle: 'italic',
+    opacity: 0.8,
+    flex: 1,
   },
 
   /* ─── Body ─── */

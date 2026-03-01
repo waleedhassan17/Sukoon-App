@@ -9,6 +9,9 @@ const KEYS = {
   DAILY_PREFIX: 'sukoon_daily_read_',   // + "YYYY-MM-DD"
   TOTAL_READ:   'sukoon_total_ayahs_read',
   DAYS_ACTIVE:  'sukoon_days_active',
+  // NEW: Salah tracker streak and completion data
+  SALAH_STREAK: 'sukoon_salah_streak',
+  SALAH_COMPLETION_PREFIX: 'sukoon_salah_completion_', // + "YYYY-MM-DD" -> "5/5", "4/5", etc.
 };
 
 function todayStr(): string {
@@ -318,6 +321,205 @@ export const ReadingProgress = {
       if (sukoonKeys.length > 0) await AsyncStorage.multiRemove(sukoonKeys);
     } catch (e) {
       if (__DEV__) console.warn('[ReadingProgress] resetAll error:', e);
+    }
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SALAH TRACKER STREAK & COMPLETION TRACKING
+  // NEW: Enhanced streak system that tracks per-day completion counts (5/5, 4/5, etc.)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Record daily salah completion count
+   * Call this when prayers are marked in the tracker
+   * @param date - Date string in YYYY-MM-DD format
+   * @param completedCount - Number of prayers completed (0-5)
+   */
+  async recordSalahCompletion(date: string, completedCount: number): Promise<void> {
+    try {
+      const key = KEYS.SALAH_COMPLETION_PREFIX + date;
+      const completion = `${completedCount}/5`;
+      await AsyncStorage.setItem(key, completion);
+      
+      // Update streak if it's a full day (5/5) or today
+      if (completedCount === 5 || date === todayStr()) {
+        await this._updateSalahStreak(date, completedCount);
+      }
+      
+      // Note: Cloud sync for salah completion is handled by DataSyncService.saveSalahDay
+    } catch (e) {
+      if (__DEV__) console.warn('[ReadingProgress] recordSalahCompletion error:', e);
+    }
+  },
+
+  /**
+   * Get salah completion for a specific date
+   */
+  async getSalahCompletion(date: string): Promise<{ completed: number; total: number } | null> {
+    try {
+      const raw = await AsyncStorage.getItem(KEYS.SALAH_COMPLETION_PREFIX + date);
+      if (!raw) return null;
+      const [completed, total] = raw.split('/').map(Number);
+      return { completed, total: total || 5 };
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Get salah completions for last N days (for charts/stats)
+   */
+  async getSalahCompletionHistory(numDays: number = 30): Promise<{ date: string; completed: number }[]> {
+    try {
+      const results: { date: string; completed: number }[] = [];
+      const keys: string[] = [];
+      const dates: string[] = [];
+      const d = new Date();
+
+      for (let i = 0; i < numDays; i++) {
+        const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        dates.unshift(ds);
+        keys.unshift(KEYS.SALAH_COMPLETION_PREFIX + ds);
+        d.setDate(d.getDate() - 1);
+      }
+
+      const pairs = await AsyncStorage.multiGet(keys);
+      for (let i = 0; i < pairs.length; i++) {
+        const raw = pairs[i][1];
+        if (raw) {
+          const [completed] = raw.split('/').map(Number);
+          results.push({ date: dates[i], completed: completed || 0 });
+        } else {
+          results.push({ date: dates[i], completed: 0 });
+        }
+      }
+      return results;
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Internal: Update Salah streak
+   */
+  async _updateSalahStreak(date: string, completedCount: number): Promise<void> {
+    try {
+      const raw = await AsyncStorage.getItem(KEYS.SALAH_STREAK);
+      const streak = safeJsonParse<{ 
+        currentStreak: number; 
+        longestStreak: number;
+        lastDate: string;
+        lastCount: number;
+      }>(raw) || { currentStreak: 0, longestStreak: 0, lastDate: '', lastCount: 0 };
+
+      // Only count full days (5/5) for streak
+      if (completedCount === 5) {
+        const yesterday = yesterdayStr();
+        
+        if (streak.lastDate === date) {
+          // Already recorded for this date
+          return;
+        }
+        
+        if (streak.lastDate === yesterday) {
+          // Consecutive day - extend streak
+          streak.currentStreak += 1;
+        } else if (!streak.lastDate || date > streak.lastDate) {
+          // New streak starts
+          streak.currentStreak = 1;
+        }
+        
+        streak.lastDate = date;
+        streak.lastCount = completedCount;
+        
+        // Update longest streak if current is higher
+        if (streak.currentStreak > streak.longestStreak) {
+          streak.longestStreak = streak.currentStreak;
+        }
+      }
+
+      await AsyncStorage.setItem(KEYS.SALAH_STREAK, JSON.stringify(streak));
+    } catch (e) {
+      if (__DEV__) console.warn('[ReadingProgress] _updateSalahStreak error:', e);
+    }
+  },
+
+  /**
+   * Get current Salah streak (consecutive 5/5 days)
+   */
+  async getSalahStreak(): Promise<{ currentStreak: number; longestStreak: number }> {
+    try {
+      const raw = await AsyncStorage.getItem(KEYS.SALAH_STREAK);
+      if (!raw) return { currentStreak: 0, longestStreak: 0 };
+      
+      const streak = safeJsonParse<{ 
+        currentStreak: number; 
+        longestStreak: number;
+        lastDate: string;
+      }>(raw);
+      
+      if (!streak) return { currentStreak: 0, longestStreak: 0 };
+      
+      const today = todayStr();
+      const yesterday = yesterdayStr();
+      
+      // Check if streak is still valid
+      if (streak.lastDate === today || streak.lastDate === yesterday) {
+        return { currentStreak: streak.currentStreak, longestStreak: streak.longestStreak };
+      }
+      
+      // Streak broken - return 0 current but keep longest
+      return { currentStreak: 0, longestStreak: streak.longestStreak };
+    } catch {
+      return { currentStreak: 0, longestStreak: 0 };
+    }
+  },
+
+  /**
+   * Get salah statistics summary for insights screen
+   */
+  async getSalahStats(): Promise<{
+    totalDaysTracked: number;
+    perfectDays: number;
+    averageCompletion: number;
+    currentStreak: number;
+    longestStreak: number;
+  }> {
+    try {
+      // Get completion history for all time
+      const allKeys = await AsyncStorage.getAllKeys();
+      const completionKeys = allKeys.filter(k => k.startsWith(KEYS.SALAH_COMPLETION_PREFIX));
+      
+      if (completionKeys.length === 0) {
+        return { totalDaysTracked: 0, perfectDays: 0, averageCompletion: 0, currentStreak: 0, longestStreak: 0 };
+      }
+      
+      const pairs = await AsyncStorage.multiGet(completionKeys);
+      let totalCompleted = 0;
+      let perfectDays = 0;
+      
+      for (const [, value] of pairs) {
+        if (value) {
+          const [completed] = value.split('/').map(Number);
+          totalCompleted += completed || 0;
+          if (completed === 5) perfectDays++;
+        }
+      }
+      
+      const totalDaysTracked = completionKeys.length;
+      const averageCompletion = totalDaysTracked > 0 ? totalCompleted / totalDaysTracked : 0;
+      
+      const streakData = await this.getSalahStreak();
+      
+      return {
+        totalDaysTracked,
+        perfectDays,
+        averageCompletion: Math.round(averageCompletion * 10) / 10,
+        currentStreak: streakData.currentStreak,
+        longestStreak: streakData.longestStreak,
+      };
+    } catch {
+      return { totalDaysTracked: 0, perfectDays: 0, averageCompletion: 0, currentStreak: 0, longestStreak: 0 };
     }
   },
 };

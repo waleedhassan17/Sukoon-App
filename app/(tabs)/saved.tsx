@@ -47,9 +47,25 @@ export default function SavedScreen() {
 
   const handleShare = async (verse: any) => {
     try {
-      await Share.share({
-        message: `📖 ${verse.surahName || 'Quran'} (${verse.surah}:${verse.ayah})\n\n${verse.arabic}\n\n"${verse.english}"\n\n— Sukoon App`,
-      });
+      // Build beautifully formatted share card
+      let shareMessage = `┌─────────────────────────┐\n`;
+      shareMessage += `│  📖 ${verse.surahName || 'Quran'}  │\n`;
+      shareMessage += `└─────────────────────────┘\n\n`;
+      
+      // Arabic text with proper alignment indicator
+      shareMessage += `﴿ ${verse.arabic} ﴾\n\n`;
+      
+      // English translation
+      if (verse.english) {
+        shareMessage += `"${verse.english}"\n\n`;
+      }
+      
+      // Reference footer
+      shareMessage += `━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+      shareMessage += `📍 Surah ${verse.surahName || verse.surah} • Ayah ${verse.ayah}\n`;
+      shareMessage += `\n🌙 Shared via Sukoon App`;
+      
+      await Share.share({ message: shareMessage });
     } catch {}
   };
 

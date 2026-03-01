@@ -59,6 +59,10 @@ const KEYS = {
   PREFS: 'sukoon_notif_prefs',
   LAST_SCHEDULED: 'sukoon_notif_last_scheduled', // date string
   PUSH_TOKEN: 'sukoon_push_token',
+  // NEW: Track end-of-day reminder sent today
+  EOD_REMINDER_SENT: 'sukoon_eod_reminder_sent',
+  // NEW: Track internet off notification sent today
+  INTERNET_NOTIF_SENT: 'sukoon_internet_notif_sent',
 };
 
 const BACKGROUND_TASK_NAME = 'SUKOON_PRAYER_RESCHEDULE';
@@ -185,10 +189,22 @@ export const NotificationService = {
     // For prayer azan notifications, we DISABLE the system sound because
     // AzanPlayer (expo-av) handles the full 25-second azan reliably.
     // This prevents double-sound (channel sound + expo-av playing together).
+    //
+    // IMPORTANT: This handler also persists notifications to storage.
+    // In release mode, addNotificationReceivedListener alone is unreliable
+    // because it only fires in the foreground. Saving here ensures
+    // notifications are captured before they're displayed.
     Notifications.setNotificationHandler({
       handleNotification: async (notification: any) => {
         const data = notification.request.content.data;
         const isPrayerAzan = data?.type === 'prayer' && data?.action === 'azan';
+
+        // Persist notification to storage (fire-and-forget, non-blocking)
+        // This is the PRIMARY save point for foreground notifications.
+        try {
+          await NotificationStorage.addFromNotification(notification);
+        } catch {}
+
         return {
           shouldShowAlert: true,
           // Disable system sound for azan in foreground — expo-av handles it
@@ -349,17 +365,19 @@ export const NotificationService = {
       }
     }
 
-    // ── Salah Tracker Reminder ──
+    // ── Salah Tracker Reminder (Fixed at 10:00 PM with smart messages) ──
     if (prefs.salahTrackerReminder) {
-      const [h, m] = prefs.salahTrackerTime.split(':').map(Number);
       const trackerTime = new Date();
-      trackerTime.setHours(h, m, 0, 0);
+      trackerTime.setHours(22, 0, 0, 0); // Fixed at 10:00 PM
 
       if (trackerTime > now) {
+        // Get smart notification content based on today's prayer data
+        const { title, body } = await this._getSmartTrackerNotification();
+        
         await Notifications.scheduleNotificationAsync({
           content: {
-            title: 'Log Your Prayers 🕌',
-            body: 'Have you tracked all your prayers today?',
+            title,
+            body,
             sound: 'reminder.wav',
             data: { type: 'tracker-reminder', action: 'open-tracker' },
             ...(Platform.OS === 'android' && { channelId: 'daily-reminder' }),
@@ -419,6 +437,103 @@ export const NotificationService = {
     return messages[prayer] || `It's time for ${prayer} prayer`;
   },
 
+  /**
+   * ═══════════════════════════════════════════════════════════════════════════
+   * SMART SALAH TRACKER NOTIFICATION
+   * Evaluates today's prayer tracking data and returns appropriate message:
+   * - All 5 prayers completed → Congratulatory message
+   * - Some prayers completed → Motivational reminder
+   * - No prayers tracked → Gentle reminder to start
+   * ═══════════════════════════════════════════════════════════════════════════
+   */
+  async _getSmartTrackerNotification(): Promise<{ title: string; body: string }> {
+    try {
+      // Get today's date key (YYYY-MM-DD format)
+      const today = new Date();
+      const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const storageKey = `sukoon_salah_${dateKey}`;
+      
+      // Fetch today's prayer data
+      const stored = await AsyncStorage.getItem(storageKey);
+      const dayData = stored ? JSON.parse(stored) : null;
+      
+      // Count completed prayers (prayed, jamaah, or qasr count as completed)
+      let completedCount = 0;
+      if (dayData) {
+        const prayers = ['fajr', 'zuhr', 'asr', 'maghrib', 'isha'];
+        for (const prayer of prayers) {
+          const status = dayData[prayer];
+          if (status === 'prayed' || status === 'jamaah' || status === 'qasr') {
+            completedCount++;
+          }
+        }
+      }
+      
+      // ═══ Case 1: All 5 prayers completed ═══
+      if (completedCount === 5) {
+        const congratsMessages = [
+          {
+            title: '🌟 MashaAllah! All Prayers Complete',
+            body: 'You completed all your Salah today.\n"Whoever guards the five prayers, they will be a light for him on the Day of Judgment."',
+          },
+          {
+            title: '🤍 Beautiful Consistency!',
+            body: '"Indeed, the prayer has been decreed upon the believers at fixed times." (Quran 4:103)',
+          },
+          {
+            title: '✨ All Five Prayers Done!',
+            body: 'May Allah accept and elevate your rank. Keep up this beautiful devotion.',
+          },
+        ];
+        return congratsMessages[Math.floor(Math.random() * congratsMessages.length)];
+      }
+      
+      // ═══ Case 2: Some prayers completed (1-4) ═══
+      if (completedCount > 0) {
+        const motivationalMessages = [
+          {
+            title: '🌿 Keep Going!',
+            body: `You prayed ${completedCount}/5 today. Keep striving!\n"Indeed, prayer restrains from immorality and wrongdoing." (Quran 29:45)`,
+          },
+          {
+            title: '🤲 Every Prayer Matters',
+            body: `${completedCount} prayer${completedCount > 1 ? 's' : ''} tracked. Don't miss the rest.\n"The first matter that the slave will be brought to account for is the prayer."`,
+          },
+          {
+            title: '🌙 Almost There!',
+            body: `${completedCount}/5 prayers completed. Allah loves consistency, even if small. Complete the rest 🤍`,
+          },
+        ];
+        return motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
+      }
+      
+      // ═══ Case 3: No prayers tracked today ═══
+      const reminderMessages = [
+        {
+          title: "🌙 Don't Forget Your Salah",
+          body: '"Establish prayer for My remembrance." (Quran 20:14)\nTrack your prayers now.',
+        },
+        {
+          title: '🤍 Connect with Allah',
+          body: 'Salah is your daily connection with Allah. Start now — even one prayer matters.',
+        },
+        {
+          title: "🌿 It's Never Too Late",
+          body: "It's never too late to return to prayer. Open the tracker and log your Salah today.",
+        },
+      ];
+      return reminderMessages[Math.floor(Math.random() * reminderMessages.length)];
+      
+    } catch (error) {
+      // Fallback message if something goes wrong
+      console.warn('[Sukoon] Error getting smart notification:', error);
+      return {
+        title: 'Log Your Prayers 🕌',
+        body: 'Have you tracked all your prayers today?',
+      };
+    }
+  },
+
   // ── Cancel helpers ──
   async cancelPrayerNotifications(): Promise<void> {
     if (!Notifications) return;
@@ -445,6 +560,7 @@ export const NotificationService = {
   // ══════════════════════════════════════════
   // NOTIFICATION RESPONSE HANDLER
   // Handles what happens when user taps a notification
+  // Also persists the notification to storage (covers background/killed state).
   // ══════════════════════════════════════════
   setupResponseHandler(
     router: { push: (path: string, params?: any) => void }
@@ -452,6 +568,11 @@ export const NotificationService = {
     if (!Notifications) return { remove: () => {} };
     return Notifications.addNotificationResponseReceivedListener((response: any) => {
       const data = response.notification.request.content.data;
+
+      // Persist notification to storage when user taps it.
+      // This is critical for background/killed state where the
+      // foreground listener never fires.
+      NotificationStorage.addFromNotification(response.notification).catch(() => {});
 
       // When user taps an azan notification:
       // 1. If azan is already playing (foreground), stop it (user acknowledged)
@@ -486,6 +607,31 @@ export const NotificationService = {
           break;
       }
     });
+  },
+
+  // ══════════════════════════════════════════
+  // SYNC DELIVERED NOTIFICATIONS
+  // Called on app resume (foreground). Captures notifications that
+  // were delivered while the app was in background/killed state.
+  // These won't have been caught by addNotificationReceivedListener.
+  // ══════════════════════════════════════════
+  async syncDeliveredNotifications(): Promise<void> {
+    if (!Notifications) return;
+    try {
+      // Get notifications currently visible in the notification shade
+      const presented = await Notifications.getPresentedNotificationsAsync();
+      for (const notif of presented) {
+        // Wrap in the same shape as addNotificationReceivedListener provides
+        await NotificationStorage.addFromNotification(notif).catch(() => {});
+      }
+
+      // Also handle the case where the app was launched by tapping a notification
+      // (killed state). getLastNotificationResponseAsync returns the last tap.
+      const lastResponse = await Notifications.getLastNotificationResponseAsync();
+      if (lastResponse?.notification) {
+        await NotificationStorage.addFromNotification(lastResponse.notification).catch(() => {});
+      }
+    } catch {}
   },
 
   // ══════════════════════════════════════════
@@ -604,6 +750,114 @@ export const NotificationService = {
       console.error('[Sukoon] scheduleTestAzan error:', e);
       return false;
     }
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  // END-OF-DAY UNTRACKED PRAYER REMINDER
+  // NEW: Send notification after Isha if any prayer is untracked today.
+  // Only sends once per day.
+  // ══════════════════════════════════════════════════════════════
+  async sendEndOfDayReminder(untrackedCount: number): Promise<boolean> {
+    if (!loadModules()) return false;
+    if (untrackedCount === 0) return false; // All prayers tracked
+
+    try {
+      // Check if already sent today
+      const today = new Date().toDateString();
+      const lastSent = await AsyncStorage.getItem(KEYS.EOD_REMINDER_SENT);
+      if (lastSent === today) {
+        console.log('[Sukoon] End-of-day reminder already sent today');
+        return false;
+      }
+
+      const granted = await requestPermissions();
+      if (!granted) return false;
+
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '🕌 Salah Reminder',
+          body: "You haven't completed tracking today's prayers.",
+          sound: 'reminder.wav',
+          data: {
+            type: 'eod-reminder',
+            action: 'open-tracker',
+            untrackedCount,
+          },
+          ...(Platform.OS === 'android' && { channelId: 'daily-reminder' }),
+        },
+        trigger: null, // Send immediately
+        identifier: 'eod-prayer-reminder',
+      });
+
+      // Mark as sent for today
+      await AsyncStorage.setItem(KEYS.EOD_REMINDER_SENT, today);
+      console.log(`[Sukoon] End-of-day reminder sent (${untrackedCount} untracked)`);
+      return true;
+    } catch (e) {
+      console.error('[Sukoon] sendEndOfDayReminder error:', e);
+      return false;
+    }
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  // INTERNET OFF NOTIFICATION
+  // NEW: Send notification when internet is off and reminders are enabled.
+  // Only sends once per day to avoid spam.
+  // ══════════════════════════════════════════════════════════════
+  async sendInternetOffNotification(): Promise<boolean> {
+    if (!loadModules()) return false;
+
+    try {
+      // Check if reminders are enabled
+      const prefs = await this.getPreferences();
+      if (!prefs.enabled) return false; // Notifications disabled, no need to warn
+
+      // Check if already sent today
+      const today = new Date().toDateString();
+      const lastSent = await AsyncStorage.getItem(KEYS.INTERNET_NOTIF_SENT);
+      if (lastSent === today) {
+        console.log('[Sukoon] Internet off notification already sent today');
+        return false;
+      }
+
+      const granted = await requestPermissions();
+      if (!granted) return false;
+
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '⚠️ Internet Required',
+          body: 'Turn on internet to receive Salah reminders.',
+          sound: 'reminder.wav',
+          data: {
+            type: 'internet-warning',
+            action: 'none',
+          },
+          ...(Platform.OS === 'android' && { channelId: 'daily-reminder' }),
+        },
+        trigger: null, // Send immediately
+        identifier: 'internet-off-warning',
+      });
+
+      // Mark as sent for today
+      await AsyncStorage.setItem(KEYS.INTERNET_NOTIF_SENT, today);
+      console.log('[Sukoon] Internet off notification sent');
+      return true;
+    } catch (e) {
+      console.error('[Sukoon] sendInternetOffNotification error:', e);
+      return false;
+    }
+  },
+
+  // Reset daily notification flags (call at midnight or app start on new day)
+  async resetDailyFlags(): Promise<void> {
+    try {
+      const today = new Date().toDateString();
+      const lastReset = await AsyncStorage.getItem('sukoon_last_flag_reset');
+      if (lastReset !== today) {
+        await AsyncStorage.multiRemove([KEYS.EOD_REMINDER_SENT, KEYS.INTERNET_NOTIF_SENT]);
+        await AsyncStorage.setItem('sukoon_last_flag_reset', today);
+      }
+    } catch {}
   },
 };
 

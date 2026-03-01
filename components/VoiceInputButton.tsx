@@ -1,17 +1,24 @@
 /**
- * VoiceInputButton Component
- * 
- * Seamless voice input enhancement for text fields
- * - Taps to start/stop recording
- * - Shows animated recording feedback
- * - Appends recognized text to existing text without clearing
- * - Handles permissions and errors gracefully
+ * VoiceInputButton — Production-Grade Context-Aware Input Action
+ *
+ * Modes:
+ *   🎤 Mic   (input empty, idle)       → Start voice recording
+ *   ❌ Clear (input has text, idle)     → Clear input instantly
+ *   ⏹ Stop  (listening/processing)     → Stop and finalize
+ *
+ * Features:
+ *   - Live interim transcript forwarding via onInterimText
+ *   - Stale-closure-proof via refs (every callback + state)
+ *   - Smooth animated icon swap (scale-down → spring-up)
+ *   - Haptic feedback on every action
+ *   - Single-tap guarantee — no double-tap issues
+ *   - Recording + processing both keep recording UI alive
+ *   - Debounced press to prevent accidental double-tap
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   TouchableOpacity,
-  View,
   StyleSheet,
   Animated,
   ActivityIndicator,
@@ -28,345 +35,289 @@ import {
   SpeechRecognitionResult,
 } from '@/lib/speechRecognitionService';
 
+// ──────────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────────
+
+type IconMode = 'mic' | 'clear' | 'stop' | 'processing';
+
 export interface VoiceInputButtonProps {
-  /**
-   * Current text in the input field
-   */
-  currentText: string;
-
-  /**
-   * Callback when recognized text is ready to append
-   */
-  onTextAppended: (newText: string) => void;
-
-  /**
-   * Callback for status changes (optional)
-   */
+  /** Current text in the input — determines mic vs clear icon */
+  searchText: string;
+  /** Full appended text when speech is finalized */
+  onTextAppended: (fullText: string) => void;
+  /** Tapped the ✕ clear icon */
+  onClear: () => void;
+  /** Live interim transcript while user is speaking */
+  onInterimText?: (text: string) => void;
+  /** Recording state changed (true for both listening + processing) */
+  onRecordingChange?: (isRecording: boolean) => void;
+  /** Raw status transitions */
   onStatusChange?: (status: SpeechRecognitionStatus) => void;
-
-  /**
-   * Callback for errors (optional)
-   */
+  /** Error messages */
   onError?: (error: string) => void;
-
-  /**
-   * Optional custom button size (default: 18)
-   */
+  /** Icon size (default 18) */
   iconSize?: number;
-
-  /**
-   * Optional custom button styling
-   */
-  buttonStyle?: any;
-
-  /**
-   * Optional text color override
-   */
+  /** Idle icon color */
   iconColor?: string;
-
-  /**
-   * Optional whether button is disabled
-   */
+  /** Active/recording color */
+  activeColor?: string;
+  /** Disabled state */
   disabled?: boolean;
 }
 
+// ──────────────────────────────────────────────
+// Component
+// ──────────────────────────────────────────────
+
 export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
-  currentText,
+  searchText,
   onTextAppended,
+  onClear,
+  onInterimText,
+  onRecordingChange,
   onStatusChange,
   onError,
   iconSize = 18,
-  buttonStyle,
   iconColor,
+  activeColor,
   disabled = false,
 }) => {
   const { theme } = useTheme();
   const [status, setStatus] = useState<SpeechRecognitionStatus>('idle');
-  const [partialText, setPartialText] = useState('');
   const [permissionGranted, setPermissionGranted] = useState(false);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const scaleAnim = useRef(new Animated.Value(1)).current;
 
-  // Apply theme color if not overridden
-  const finalIconColor = iconColor || theme.textTertiary;
+  // Animation
+  const iconScale = useRef(new Animated.Value(1)).current;
+  const iconOpacity = useRef(new Animated.Value(1)).current;
 
-  // Check permission on mount, request if not granted
+  // ── Refs: always-fresh values for async callbacks ──
+  const searchTextRef = useRef(searchText);
+  const onTextAppendedRef = useRef(onTextAppended);
+  const onInterimTextRef = useRef(onInterimText);
+  const onErrorRef = useRef(onError);
+  const statusRef = useRef(status);
+  const pressLockRef = useRef(false); // Debounce rapid taps
+
+  useEffect(() => { searchTextRef.current = searchText; }, [searchText]);
+  useEffect(() => { onTextAppendedRef.current = onTextAppended; }, [onTextAppended]);
+  useEffect(() => { onInterimTextRef.current = onInterimText; }, [onInterimText]);
+  useEffect(() => { onErrorRef.current = onError; }, [onError]);
+  useEffect(() => { statusRef.current = status; }, [status]);
+
+  const resolvedIconColor = iconColor || theme.textTertiary;
+  const resolvedActiveColor = activeColor || theme.accent;
+
+  // ── Icon mode derivation ──
+  const iconMode: IconMode = (() => {
+    if (status === 'processing') return 'processing';
+    if (status === 'listening') return 'stop';
+    if (searchText.length > 0) return 'clear';
+    return 'mic';
+  })();
+
+  // ── Animate icon swap ──
+  const prevModeRef = useRef<IconMode>(iconMode);
   useEffect(() => {
-    initPermission();
+    if (prevModeRef.current !== iconMode) {
+      prevModeRef.current = iconMode;
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(iconScale, { toValue: 0.4, duration: 70, useNativeDriver: true }),
+          Animated.timing(iconOpacity, { toValue: 0, duration: 70, useNativeDriver: true }),
+        ]),
+        Animated.parallel([
+          Animated.spring(iconScale, { toValue: 1, tension: 280, friction: 9, useNativeDriver: true }),
+          Animated.timing(iconOpacity, { toValue: 1, duration: 100, useNativeDriver: true }),
+        ]),
+      ]).start();
+    }
+  }, [iconMode]);
 
+  // ── Permission on mount + cleanup ──
+  useEffect(() => {
+    speechRecognitionService.checkPermission().then(setPermissionGranted).catch(() => {});
     return () => {
-      // Cleanup on unmount
-      if (status === 'listening') {
+      if (statusRef.current === 'listening' || statusRef.current === 'processing') {
         speechRecognitionService.cancelListening().catch(() => {});
       }
     };
   }, []);
 
-  // Manage pulse animation when listening
+  // ── Notify parent: recording = listening OR processing ──
   useEffect(() => {
-    if (status === 'listening') {
-      startPulseAnimation();
-    } else {
-      pulseAnim.setValue(1);
-      scaleAnim.setValue(1);
-    }
-  }, [status]);
+    onRecordingChange?.(status === 'listening' || status === 'processing');
+  }, [status, onRecordingChange]);
 
-  // Update parent component of status changes
+  // ── Notify parent: status ──
   useEffect(() => {
     onStatusChange?.(status);
   }, [status, onStatusChange]);
 
-  const startPulseAnimation = () => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.3,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-  };
+  // ── Speech result handler (stable — uses refs) ──
+  const handleSpeechResult = useCallback((result: SpeechRecognitionResult) => {
+    setStatus(result.status);
 
-  const initPermission = async () => {
-    try {
-      // First check if already granted
-      const granted = await speechRecognitionService.checkPermission();
-      if (granted) {
-        setPermissionGranted(true);
-        return;
-      }
-      // If not, proactively request on mount so the dialog appears early
-      try {
-        const requested = await speechRecognitionService.requestPermission();
-        setPermissionGranted(requested);
-      } catch (e: any) {
-        if (e?.message === 'PERMISSION_DENIED_PERMANENTLY') {
-          setPermissionGranted(false);
-        }
-      }
-    } catch (error) {
-      console.error('Permission init error:', error);
-      setPermissionGranted(false);
+    if (result.status === 'unavailable') {
+      onErrorRef.current?.(result.error || 'Voice input not available.');
+      setTimeout(() => setStatus('idle'), 200);
+      return;
     }
-  };
 
-  const openAppSettings = () => {
+    // Interim text — forward for live preview
+    if (result.status === 'listening' && !result.isFinal && result.text) {
+      onInterimTextRef.current?.(result.text);
+    }
+
+    // Processing — forward interim text if available
+    if (result.status === 'processing' && result.text) {
+      onInterimTextRef.current?.(result.text);
+    }
+
+    // Final success
+    if (result.status === 'success' && result.isFinal) {
+      if (result.text.trim()) {
+        const current = searchTextRef.current.trim();
+        const appended = current ? `${current} ${result.text.trim()}` : result.text.trim();
+        onTextAppendedRef.current(appended);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      }
+      // Brief delay before hiding recording UI so the success feels deliberate
+      setTimeout(() => setStatus('idle'), 250);
+      return;
+    }
+
+    // Error
+    if (result.status === 'error') {
+      onErrorRef.current?.(result.error || 'Speech recognition failed');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      setTimeout(() => setStatus('idle'), 250);
+    }
+  }, []);
+
+  // ── Permission denied dialog ──
+  const openAppSettings = useCallback(() => {
     Alert.alert(
       'Microphone Permission Required',
-      'Microphone access was denied. Please enable it in your device settings to use voice input.',
+      'Please enable microphone access in Settings to use voice input.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Open Settings', onPress: () => Linking.openSettings() },
       ]
     );
-  };
+  }, []);
 
-  const handleSpeechResult = (result: SpeechRecognitionResult) => {
-    setStatus(result.status);
-
-    if (result.status === 'unavailable') {
-      // Voice not available on this platform — show friendly error
-      onError?.(result.error || 'Voice input not available. Please type instead.');
-      setTimeout(() => setStatus('idle'), 300);
-      return;
-    }
-
-    if (result.status === 'listening' || result.status === 'processing') {
-      setPartialText(result.text);
-    } else if (result.status === 'success' && result.isFinal) {
-      // Append recognized text to current text
-      if (result.text.trim()) {
-        const appendedText = currentText.trim()
-          ? `${currentText} ${result.text.trim()}`
-          : result.text.trim();
-
-        onTextAppended(appendedText);
-        
-        // Haptic feedback on success
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-          () => {}
-        );
-      }
-      setPartialText('');
-      // IMPORTANT: Reset status back to idle after success so button is clickable again
-      setTimeout(() => setStatus('idle'), 300);
-    } else if (result.status === 'error') {
-      onError?.(result.error || 'Speech recognition failed');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(
-        () => {}
-      );
-      setPartialText('');
-      // IMPORTANT: Reset status back to idle after error so button is clickable again
-      setTimeout(() => setStatus('idle'), 300);
-    }
-  };
-
-  const handlePress = async () => {
-    if (disabled || status === 'processing') return;
-
+  // ── Start recording ──
+  const startRecording = useCallback(async () => {
     try {
-      // Haptic feedback on press
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-
-      if (status === 'idle') {
-        // Start listening
+      let hasPermission = permissionGranted;
+      if (!hasPermission) {
         try {
-          let hasPermission = permissionGranted;
-
-          if (!hasPermission) {
-            try {
-              hasPermission = await speechRecognitionService.requestPermission();
-            } catch (permErr: any) {
-              if (permErr?.message === 'PERMISSION_DENIED_PERMANENTLY') {
-                // Permission permanently denied — direct user to Settings
-                openAppSettings();
-                return;
-              }
-              hasPermission = false;
-            }
-          }
-
-          if (!hasPermission) {
-            setStatus('idle');
-            onError?.('Microphone permission is required for voice input. Please grant access and try again.');
-            Haptics.notificationAsync(
-              Haptics.NotificationFeedbackType.Error
-            ).catch(() => {});
-            return;
-          }
-
-          setPermissionGranted(true);
-          setStatus('listening');
-          await speechRecognitionService.startListening(handleSpeechResult);
-        } catch (permError) {
-          setStatus('idle');
-          const msg = permError instanceof Error ? permError.message : 'Permission check failed';
-          onError?.(msg);
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-        }
-      } else if (status === 'listening') {
-        // Stop listening
-        try {
-          await speechRecognitionService.stopListening(handleSpeechResult);
-        } catch (stopError) {
-          setStatus('idle');
-          const msg = stopError instanceof Error ? stopError.message : 'Recording error';
-          onError?.(msg);
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+          hasPermission = await speechRecognitionService.requestPermission();
+        } catch (e: unknown) {
+          const err = e as { message?: string };
+          if (err?.message === 'PERMISSION_DENIED_PERMANENTLY') { openAppSettings(); return; }
+          hasPermission = false;
         }
       }
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Voice input error';
-      onError?.(errorMessage);
+      if (!hasPermission) {
+        onErrorRef.current?.('Microphone permission required for voice input.');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+        return;
+      }
+      setPermissionGranted(true);
+      setStatus('listening');
+      await speechRecognitionService.startListening(handleSpeechResult);
+    } catch (err) {
       setStatus('idle');
-      setPartialText('');
+      onErrorRef.current?.(err instanceof Error ? err.message : 'Failed to start recording');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
     }
-  };
+  }, [permissionGranted, handleSpeechResult, openAppSettings]);
 
-  // Determine icon name based on status
-  const getIconName = () => {
-    switch (status) {
-      case 'listening':
-        return 'mic';
-      case 'processing':
-        return 'mic-off';
-      default:
-        return 'mic-outline';
+  // ── Stop recording ──
+  const stopRecording = useCallback(async () => {
+    try {
+      setStatus('processing');
+      await speechRecognitionService.stopListening(handleSpeechResult);
+    } catch (err) {
+      setStatus('idle');
+      onErrorRef.current?.(err instanceof Error ? err.message : 'Recording error');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
     }
-  };
+  }, [handleSpeechResult]);
 
-  // Determine button opacity — always visible, only dim when truly disabled
-  const buttonOpacity = disabled ? 0.4 : 1;
+  // ── Press handler with debounce lock ──
+  const handlePress = useCallback(() => {
+    if (disabled || pressLockRef.current) return;
 
-  // Hide on web — voice recognition is only available on native
-  if (Platform.OS === 'web') {
-    return null;
-  }
+    // Lock for 400ms to prevent accidental double-tap
+    pressLockRef.current = true;
+    setTimeout(() => { pressLockRef.current = false; }, 400);
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+
+    switch (iconMode) {
+      case 'mic':       startRecording(); break;
+      case 'clear':     onClear(); break;
+      case 'stop':      stopRecording(); break;
+      case 'processing': stopRecording(); break; // Allow tapping again during processing to force stop
+    }
+  }, [disabled, iconMode, startRecording, stopRecording, onClear]);
+
+  // ── Icon ──
+  const iconName = (() => {
+    switch (iconMode) {
+      case 'stop':       return 'stop-circle' as const;
+      case 'processing': return 'ellipsis-horizontal' as const;
+      case 'clear':      return 'close-circle' as const;
+      default:           return 'mic-outline' as const;
+    }
+  })();
+
+  const currentIconColor = (iconMode === 'stop' || iconMode === 'processing')
+    ? resolvedActiveColor
+    : resolvedIconColor;
+
+  // ── Accessibility ──
+  const accessibilityLabel = (() => {
+    switch (iconMode) {
+      case 'mic':        return 'Start voice input';
+      case 'clear':      return 'Clear input';
+      case 'stop':       return 'Stop recording';
+      case 'processing': return 'Processing voice, tap to cancel';
+    }
+  })();
+
+  if (Platform.OS === 'web') return null;
 
   return (
-    <View style={styles.container}>
-      {/* Pulse effect background when listening */}
-      {status === 'listening' && (
-        <Animated.View
-          style={[
-            styles.pulseBackground,
-            {
-              transform: [{ scale: pulseAnim }],
-              opacity: pulseAnim.interpolate({
-                inputRange: [1, 1.3],
-                outputRange: [0.3, 0],
-              }),
-            },
-          ]}
-        />
-      )}
-
-      {/* Main button */}
-      <TouchableOpacity
-        onPress={handlePress}
-        disabled={disabled || status === 'processing'}
-        activeOpacity={0.7}
-        style={[
-          styles.button,
-          {
-            opacity: buttonOpacity,
-            backgroundColor: status === 'listening' ? theme.accent + '20' : 'transparent',
-          },
-          buttonStyle,
-        ]}
-      >
-        {status === 'processing' ? (
-          <ActivityIndicator
-            size={iconSize}
-            color={finalIconColor}
-            style={{ transform: [{ scale: 0.8 }] }}
-          />
+    <TouchableOpacity
+      onPress={handlePress}
+      disabled={disabled}
+      activeOpacity={0.5}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      style={[styles.button, { opacity: disabled ? 0.4 : 1 }]}
+    >
+      <Animated.View style={{ transform: [{ scale: iconScale }], opacity: iconOpacity }}>
+        {iconMode === 'processing' ? (
+          <ActivityIndicator size={iconSize - 2} color={resolvedActiveColor} />
         ) : (
-          <Ionicons
-            name={getIconName() as any}
-            size={iconSize}
-            color={status === 'listening' ? theme.accent : finalIconColor}
-          />
+          <Ionicons name={iconName} size={iconSize} color={currentIconColor} />
         )}
-      </TouchableOpacity>
-    </View>
+      </Animated.View>
+    </TouchableOpacity>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
   button: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    ...Platform.select({
-      android: {
-        elevation: 0,
-      },
-    }),
-  },
-  pulseBackground: {
-    position: 'absolute',
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: 'transparent',
-    borderWidth: 2,
-    borderColor: 'transparent', // Will be set via props
   },
 });

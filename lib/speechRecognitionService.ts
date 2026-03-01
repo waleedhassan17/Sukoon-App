@@ -1,18 +1,22 @@
 /**
- * Speech Recognition Service — Native On-Device
+ * Speech Recognition Service — Native On-Device (Production)
  *
- * Uses expo-speech-recognition for:
- *   - Android: Google SpeechRecognizer (built-in, on-device)
- *   - iOS: SFSpeechRecognizer (built-in, on-device)
+ * Bulletproof speech recognition with:
+ *   - Race-condition-proof stop/result delivery via session IDs
+ *   - Interim transcript forwarding for live preview
+ *   - Clean lifecycle: start → listening → (stop) → processing → success/error → idle
+ *   - Single-delivery guarantee (resolved flag prevents duplicate callbacks)
+ *   - Automatic cleanup on session expiry
  *
- * NO cloud API calls — everything happens on the device.
- * The recognized text is then sent to the emotion detection API.
+ * Platform: expo-speech-recognition
+ *   - Android: Google SpeechRecognizer (on-device)
+ *   - iOS: SFSpeechRecognizer (on-device)
  */
 
 import { Platform } from 'react-native';
 
 // ══════════════════════════════════════════════
-// LAZY LOAD — expo-speech-recognition needs native module
+// LAZY LOAD
 // ══════════════════════════════════════════════
 
 let SpeechModule: any = null;
@@ -24,7 +28,7 @@ try {
 }
 
 // ══════════════════════════════════════════════
-// TYPES (exported for components)
+// TYPES
 // ══════════════════════════════════════════════
 
 export type SpeechRecognitionStatus =
@@ -48,25 +52,22 @@ export interface SpeechRecognitionResult {
 
 class SpeechRecognitionService {
   private isListening = false;
-  private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-  private currentCallback: ((result: SpeechRecognitionResult) => void) | null = null;
-
-  // Event listener subscriptions
+  private sessionId = 0;           // Incremented per session; prevents stale callbacks
+  private resolved = false;        // true once a final result/error is delivered — blocks duplicates
+  private lastInterimText = '';    // Latest partial transcript for live preview
+  private safetyTimer: ReturnType<typeof setTimeout> | null = null;
+  private fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private silenceTimer: ReturnType<typeof setTimeout> | null = null;  // Auto-stop after 3s of silence
+  private currentCallback: ((r: SpeechRecognitionResult) => void) | null = null;
   private subs: Array<{ remove: () => void }> = [];
 
-  /**
-   * Check if native speech recognition is available
-   */
-  isAvailable(): boolean {
-    return !!SpeechModule;
-  }
+  isAvailable(): boolean { return !!SpeechModule; }
 
   // ── PERMISSIONS ──
 
   async requestPermission(): Promise<boolean> {
     try {
       if (!SpeechModule) {
-        // Fallback: on web, try mediaDevices permission
         if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.mediaDevices) {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           stream.getTracks().forEach((t: any) => t.stop());
@@ -75,32 +76,18 @@ class SpeechRecognitionService {
         return false;
       }
 
-      // First try the combined permission request
       const result = await SpeechModule.requestPermissionsAsync();
-      if (result.granted === true || result.status === 'granted') {
-        return true;
-      }
+      if (result.granted === true || result.status === 'granted') return true;
 
-      // If combined fails, try requesting microphone separately
-      // (On some Android devices this is needed)
       try {
         const micResult = await SpeechModule.requestMicrophonePermissionsAsync();
-        if (micResult.granted === true || micResult.status === 'granted') {
-          return true;
-        }
+        if (micResult.granted === true || micResult.status === 'granted') return true;
       } catch {}
 
-      // If permission was permanently denied (canAskAgain === false),
-      // the user needs to enable it in Settings
-      if (result.canAskAgain === false) {
-        throw new Error('PERMISSION_DENIED_PERMANENTLY');
-      }
-
+      if (result.canAskAgain === false) throw new Error('PERMISSION_DENIED_PERMANENTLY');
       return false;
     } catch (e: any) {
-      if (e?.message === 'PERMISSION_DENIED_PERMANENTLY') {
-        throw e; // Re-throw so caller can handle
-      }
+      if (e?.message === 'PERMISSION_DENIED_PERMANENTLY') throw e;
       if (__DEV__) console.warn('[Speech] requestPermission error:', e);
       return false;
     }
@@ -115,12 +102,9 @@ class SpeechRecognitionService {
         }
         return false;
       }
-
       const result = await SpeechModule.getPermissionsAsync();
       return result.granted === true || result.status === 'granted';
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   }
 
   // ── START LISTENING ──
@@ -128,127 +112,129 @@ class SpeechRecognitionService {
   async startListening(
     onResult: (result: SpeechRecognitionResult) => void,
   ): Promise<void> {
-    if (this.isListening) return;
+    // Prevent overlapping sessions
+    if (this.isListening) {
+      await this.cancelListening();
+    }
 
-    // Check if native module is available
     if (!SpeechModule) {
       onResult({
-        status: 'unavailable',
-        text: '',
+        status: 'unavailable', text: '',
         error: 'Voice input requires a development build. Please type your message instead.',
         isFinal: true,
       });
       return;
     }
 
+    // ── New session ──
+    this.sessionId++;
+    const sid = this.sessionId;
     this.isListening = true;
+    this.resolved = false;
+    this.lastInterimText = '';
     this.currentCallback = onResult;
 
     onResult({ status: 'listening', text: '', isFinal: false });
 
+    // Helper: deliver a final result exactly once per session
+    const deliverFinal = (result: SpeechRecognitionResult) => {
+      if (this.resolved || sid !== this.sessionId) return; // stale or already resolved
+      this.resolved = true;
+      this.isListening = false;
+      this.clearAllTimers();
+      this.removeListeners();
+      this.currentCallback = null;
+      onResult(result);
+    };
+
     try {
-      // Clean up any previous listeners
       this.removeListeners();
 
-      // Set up event listeners using the module's addListener method
+      // ── RESULT event ──
       this.subs.push(
-        SpeechModule.addListener(
-          'result',
-          (event: any) => {
-            const results = event.results;
-            if (results && results.length > 0) {
-              const transcript = results[0]?.transcript || '';
-              const isFinal = event.isFinal === true;
+        SpeechModule.addListener('result', (event: any) => {
+          if (sid !== this.sessionId) return; // stale session
+          const results = event.results;
+          if (!results || results.length === 0) return;
 
-              if (isFinal) {
-                this.isListening = false;
-                this.clearTimeout();
-                onResult({
-                  status: 'success',
-                  text: transcript.trim(),
-                  isFinal: true,
-                });
-                this.removeListeners();
-              } else {
-                onResult({
-                  status: 'listening',
-                  text: transcript || 'Listening…',
-                  isFinal: false,
-                });
-              }
-            }
-          },
-        ),
-      );
+          const transcript = results[0]?.transcript || '';
+          const isFinal = event.isFinal === true;
 
-      this.subs.push(
-        SpeechModule.addListener(
-          'error',
-          (event: any) => {
-            this.isListening = false;
-            this.clearTimeout();
-
-            const errorMsg = event.error || event.message || 'Speech recognition error';
-
-            // "no-speech" is common — user didn't say anything
-            if (typeof errorMsg === 'string' && (errorMsg.includes('no-speech') || errorMsg.includes('No speech'))) {
+          if (isFinal) {
+            deliverFinal({
+              status: 'success',
+              text: transcript.trim(),
+              isFinal: true,
+            });
+          } else {
+            // Forward interim text for live preview
+            this.lastInterimText = transcript;
+            if (!this.resolved) {
               onResult({
-                status: 'error',
-                text: '',
-                error: 'No speech detected. Please try again.',
-                isFinal: true,
+                status: 'listening',
+                text: transcript,
+                isFinal: false,
               });
-            } else {
-              onResult({
-                status: 'error',
-                text: '',
-                error: typeof errorMsg === 'string' ? errorMsg : 'Speech recognition error',
-                isFinal: true,
-              });
+
+              // ── Silence detection: reset 3s auto-stop on every new interim result ──
+              this.resetSilenceTimer(sid, onResult);
             }
-            this.removeListeners();
-          },
-        ),
+          }
+        }),
       );
 
+      // ── ERROR event ──
       this.subs.push(
-        SpeechModule.addListener(
-          'end',
-          () => {
-            // If we're still listening when 'end' fires, it means no final result came
-            if (this.isListening) {
-              this.isListening = false;
-              this.clearTimeout();
-            }
-          },
-        ),
+        SpeechModule.addListener('error', (event: any) => {
+          if (sid !== this.sessionId) return;
+          const errorMsg = event.error || event.message || 'Speech recognition error';
+          const isNoSpeech = typeof errorMsg === 'string' &&
+            (errorMsg.includes('no-speech') || errorMsg.includes('No speech'));
+
+          deliverFinal({
+            status: 'error',
+            text: '',
+            error: isNoSpeech
+              ? 'No speech detected. Please try again.'
+              : (typeof errorMsg === 'string' ? errorMsg : 'Speech recognition error'),
+            isFinal: true,
+          });
+        }),
       );
 
-      // Start the speech recognizer
+      // ── END event — fires AFTER result/error; acts as cleanup backstop ──
+      this.subs.push(
+        SpeechModule.addListener('end', () => {
+          if (sid !== this.sessionId || this.resolved) return;
+          // END fired without a result → no speech captured
+          deliverFinal({
+            status: 'error',
+            text: '',
+            error: 'No speech detected. Please try again.',
+            isFinal: true,
+          });
+        }),
+      );
+
+      // Start the recognizer
       SpeechModule.start({
         lang: 'en-US',
         interimResults: true,
         maxAlternatives: 1,
         continuous: false,
-        // Use on-device recognition if available (no internet needed)
         requiresOnDeviceRecognition: false,
-        // Android-specific
         addsPunctuation: true,
       });
 
-      // Safety: auto-stop after 15s
-      this.timeoutTimer = setTimeout(() => {
-        if (this.isListening) {
+      // Safety: auto-stop after 15s of continuous listening
+      this.safetyTimer = setTimeout(() => {
+        if (this.isListening && sid === this.sessionId && !this.resolved) {
           this.stopListening(onResult).catch(() => {});
         }
       }, 15000);
+
     } catch (err) {
-      this.isListening = false;
-      this.removeListeners();
-
-      if (__DEV__) console.error('[Speech] Start error:', err);
-
-      onResult({
+      deliverFinal({
         status: 'error',
         text: '',
         error: err instanceof Error ? err.message : 'Failed to start speech recognition',
@@ -257,73 +243,113 @@ class SpeechRecognitionService {
     }
   }
 
-  // ── STOP LISTENING ──
+  // ── STOP LISTENING (user taps stop) ──
 
   async stopListening(
     onResult: (result: SpeechRecognitionResult) => void,
   ): Promise<void> {
-    if (!this.isListening) return;
-    this.clearTimeout();
+    if (!this.isListening || this.resolved) return;
+    this.clearAllTimers();
+
+    const sid = this.sessionId;
+
+    // Show processing state with interim text so UI stays informative
+    onResult({
+      status: 'processing',
+      text: this.lastInterimText,
+      isFinal: false,
+    });
 
     try {
       if (SpeechModule) {
-        // Stop will trigger the 'end' event, and any pending results
+        // .stop() asks native recognizer to finalize — it should fire 'result' with isFinal=true
         SpeechModule.stop();
       }
     } catch {
-      // Ignore — might already be stopped
+      // Already stopped
     }
 
-    // If still listening after stop (no result came), set processing
-    if (this.isListening) {
-      this.isListening = false;
-      onResult({ status: 'processing', text: 'Processing…', isFinal: false });
+    // Fallback: if native doesn't deliver a final within 3s, use interim text or error
+    this.fallbackTimer = setTimeout(() => {
+      if (sid !== this.sessionId || this.resolved) return;
 
-      // Give it a moment for any pending result to arrive
-      setTimeout(() => {
-        if (this.currentCallback === onResult) {
-          // No result came — inform user
-          onResult({
-            status: 'error',
-            text: '',
-            error: 'No speech detected. Please try again.',
-            isFinal: true,
-          });
-        }
-      }, 500);
-    }
+      if (this.lastInterimText.trim()) {
+        // We have partial text — deliver it as success
+        const deliverFinal = (result: SpeechRecognitionResult) => {
+          if (this.resolved || sid !== this.sessionId) return;
+          this.resolved = true;
+          this.isListening = false;
+          this.removeListeners();
+          this.currentCallback = null;
+          onResult(result);
+        };
+        deliverFinal({
+          status: 'success',
+          text: this.lastInterimText.trim(),
+          isFinal: true,
+        });
+      } else {
+        // No text at all
+        const deliverFinal = (result: SpeechRecognitionResult) => {
+          if (this.resolved || sid !== this.sessionId) return;
+          this.resolved = true;
+          this.isListening = false;
+          this.removeListeners();
+          this.currentCallback = null;
+          onResult(result);
+        };
+        deliverFinal({
+          status: 'error',
+          text: '',
+          error: 'No speech detected. Please try again.',
+          isFinal: true,
+        });
+      }
+    }, 3000);
   }
 
-  // ── CANCEL ──
+  // ── CANCEL (unmount / new session) ──
 
   async cancelListening(): Promise<void> {
+    this.resolved = true; // Block any pending callbacks
     this.isListening = false;
-    this.clearTimeout();
+    this.clearAllTimers();
     this.removeListeners();
     this.currentCallback = null;
+    this.lastInterimText = '';
 
     try {
-      if (SpeechModule) {
-        SpeechModule.abort();
-      }
-    } catch {
-      // Ignore
-    }
+      if (SpeechModule) SpeechModule.abort();
+    } catch {}
   }
 
   // ── HELPERS ──
 
-  private clearTimeout(): void {
-    if (this.timeoutTimer) {
-      clearTimeout(this.timeoutTimer);
-      this.timeoutTimer = null;
-    }
+  /**
+   * Silence detection: after the user stops speaking for 3s,
+   * automatically trigger stopListening to finalize the result.
+   * Resets on every interim transcript so it only fires after a true pause.
+   */
+  private resetSilenceTimer(
+    sid: number,
+    onResult: (r: SpeechRecognitionResult) => void,
+  ): void {
+    if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
+    this.silenceTimer = setTimeout(() => {
+      if (this.isListening && sid === this.sessionId && !this.resolved) {
+        this.stopListening(onResult).catch(() => {});
+      }
+    }, 3000);
+  }
+
+  private clearAllTimers(): void {
+    if (this.safetyTimer) { clearTimeout(this.safetyTimer); this.safetyTimer = null; }
+    if (this.fallbackTimer) { clearTimeout(this.fallbackTimer); this.fallbackTimer = null; }
+    if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
   }
 
   private removeListeners(): void {
-    for (const sub of this.subs) {
-      try { sub.remove(); } catch {}
-    }
+    for (const sub of this.subs) { try { sub.remove(); } catch {} }
     this.subs = [];
   }
 }

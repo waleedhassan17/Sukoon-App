@@ -27,7 +27,7 @@ import * as Haptics from 'expo-haptics';
 import { useSavedVerses } from '@/contexts/SavedVersesContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
-import QuranService, { Ayah } from '@/lib/quranService';
+import QuranService, { Ayah, SurahData } from '@/lib/quranService';
 import audioPlayer, { PlayerState, RepeatMode } from '@/lib/audioPlayer';
 import { ReadingProgress } from '@/lib/readingProgress';
 import TafseerService, { TafseerSource } from '@/lib/tafseerService';
@@ -217,11 +217,14 @@ const SegmentedControl = React.memo(function SegmentedControl({
 });
 
 /* ═══════════════════════════════════════════════
-   BISMILLAH
+   SURAH INTRO — Bismillah (from API)
+   Rendered ABOVE the verses card / page frames.
    ═══════════════════════════════════════════════ */
-const BismillahCard = React.memo(function BismillahCard({ isPageMode }: { isPageMode: boolean }) {
+const SurahIntro = React.memo(function SurahIntro({ isPageMode, bismillahText }: { isPageMode: boolean; bismillahText?: string }) {
   const { theme } = useTheme();
   const { sizes } = useFontSize();
+
+  if (!bismillahText) return null;
 
   if (isPageMode) {
     return (
@@ -231,8 +234,8 @@ const BismillahCard = React.memo(function BismillahCard({ isPageMode }: { isPage
           <View style={[s.bisPageDm, { backgroundColor: `${theme.gold}50` }]} />
           <View style={[s.bisPageLine, { backgroundColor: `${theme.gold}35` }]} />
         </View>
-        <Text style={[s.bisPageText, { color: theme.primary, fontSize: sizes.arabicLarge }]}>
-          بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِيۡمِ
+        <Text style={[s.bisPageBismillah, { color: theme.arabicText, fontSize: sizes.arabicLarge + 2 }]}>
+          {bismillahText}
         </Text>
         <View style={s.bisPageOrnRow}>
           <View style={[s.bisPageLine, { backgroundColor: `${theme.gold}35` }]} />
@@ -249,7 +252,9 @@ const BismillahCard = React.memo(function BismillahCard({ isPageMode }: { isPage
         <View style={[s.bisCr, s.bisCrTL]} /><View style={[s.bisCr, s.bisCrTR]} />
         <View style={[s.bisCr, s.bisCrBL]} /><View style={[s.bisCr, s.bisCrBR]} />
         <Ornament variant="diamond" />
-        <Text style={[s.bisArabic, { fontSize: sizes.arabicLarge }]}>بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِيۡمِ</Text>
+        <Text style={[s.bisBismillahText, { fontSize: sizes.arabicLarge + 2 }]}>
+          {bismillahText}
+        </Text>
         <View style={[s.bisDiv, { backgroundColor: `${theme.gold}4D` }]} />
         <Text style={[s.bisTrans, { fontSize: sizes.english, lineHeight: sizes.englishLine }]}>
           In the name of Allah, the Most Gracious, the Most Merciful
@@ -298,8 +303,9 @@ const PageFrame = React.memo(function PageFrame({
               const playing = currentIndex === gIdx;
               const sel = selected === i;
               const saved = isVerseSaved(surahNumber, ay.numberInSurah);
+              // ay.numberInSurah is now guaranteed to be correct (1-based) from QuranService
               return (
-                <Text key={ay.numberInSurah}>
+                <Text key={`page-ayah-${ay.numberInSurah}`}>
                   <Text
                     onPress={() => { setSelected(sel ? null : i); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); }}
                     style={[
@@ -720,6 +726,7 @@ export default function SurahScreen() {
   const [error, setError] = useState<string | null>(null);
   const [meta, setMeta] = useState<any>(null);
   const [ayahs, setAyahs] = useState<Ayah[]>([]);
+  const [bismillahText, setBismillahText] = useState<string | undefined>(undefined);
   const [showEnglish, setShowEnglish] = useState(false);
   const [showUrdu, setShowUrdu] = useState(false);
   const [showTafseer, setShowTafseer] = useState(false);
@@ -770,6 +777,7 @@ export default function SurahScreen() {
     return () => {
       // ── Audio cleanup ──
       audioPlayer.stop().catch(() => {});
+      audioPlayer.clearPreloadCache().catch(() => {}); // Clear preloaded audio
       audioPlayer.setStatusCallback(null);
       audioPlayer.setFinishCallback(null);
 
@@ -857,15 +865,27 @@ export default function SurahScreen() {
                 if (l && scrollRef.current) scrollRef.current.scrollTo({ y: Math.max(0, l.y - 100), animated: true });
               }
             }, 50);
+            
+            // Play using preloaded audio for minimal gap
             audioPlayer.play(ay.audio).catch((e) => {
               if (__DEV__) console.error('[Audio] Auto-play error:', e);
               setCurrentIndex(null);
             });
+            
+            // Preload next 2 ayahs for gapless playback
+            const preloadUris: string[] = [];
+            for (let i = next + 1; i < Math.min(next + 3, ayahs.length); i++) {
+              if (ayahs[i]?.audio) preloadUris.push(ayahs[i].audio!);
+            }
+            if (preloadUris.length > 0) {
+              audioPlayer.preloadBatch(preloadUris).catch(() => {});
+            }
           }
         } else {
           // Reached end of surah
           setCurrentIndex(null);
           audioPlayer.stop().catch(() => {});
+          audioPlayer.clearPreloadCache().catch(() => {});
         }
       }
     });
@@ -983,9 +1003,10 @@ export default function SurahScreen() {
     setLoading(true);
     setError(null);
     try {
-      const { meta: m, ayahs: a } = await QuranService.getSurah(surahNumber);
+      const { meta: m, ayahs: a, bismillahText: bt } = await QuranService.getSurah(surahNumber);
       setMeta(m);
       setAyahs(a);
+      setBismillahText(bt);
       setError(null);
       Animated.timing(contentFade, { toValue: 1, duration: 500, delay: 200, useNativeDriver: true }).start();
       
@@ -1058,6 +1079,15 @@ export default function SurahScreen() {
     
     try {
       await audioPlayer.play(ay.audio);
+      
+      // ─── PRELOAD next 2-3 ayahs for gapless playback ───
+      const preloadUris: string[] = [];
+      for (let i = index + 1; i < Math.min(index + 4, ayahs.length); i++) {
+        if (ayahs[i]?.audio) preloadUris.push(ayahs[i].audio!);
+      }
+      if (preloadUris.length > 0) {
+        audioPlayer.preloadBatch(preloadUris).catch(() => {});
+      }
     } catch (e) { 
       if (__DEV__) console.error('[Audio] Play error:', e);
       // Revert optimistic update on failure
@@ -1081,9 +1111,37 @@ export default function SurahScreen() {
     else saveVerse({ surah: surahNumber, surahName: meta?.englishName, ayah: ay.numberInSurah, arabic: ay.text, english: ay.translation || '', urdu: ay.urduTranslation });
   }, [surahNumber, meta, isVerseSaved, saveVerse, removeVerse]);
 
-  const shareVerse = useCallback(async (ay: Ayah) => {
-    try { await Share.share({ message: `${ay.text}\n\n${ay.translation || ''}\n\n— ${meta?.englishName} ${ay.numberInSurah}` }); } catch {}
-  }, [meta]);
+  // UPDATED: Share verse with improved formatting - clean card-style layout
+  // ay.numberInSurah is now guaranteed to be correct (1-based) from QuranService
+  const shareVerse = useCallback(async (ay: Ayah, displayNumber: number) => {
+    try {
+      // Build beautifully formatted share card
+      let shareMessage = `┌─────────────────────────┐\n`;
+      shareMessage += `│  📖 ${meta?.englishName || 'Quran'}  │\n`;
+      shareMessage += `│  Ayah ${displayNumber}  │\n`;
+      shareMessage += `└─────────────────────────┘\n\n`;
+      
+      // Arabic text - properly aligned
+      shareMessage += `﴿ ${ay.text} ﴾\n\n`;
+      
+      // English translation if available
+      if (ay.translation) {
+        shareMessage += `"${ay.translation}"\n\n`;
+      }
+      
+      // Urdu translation if available
+      if (ay.urduTranslation) {
+        shareMessage += `『 ${ay.urduTranslation} 』\n\n`;
+      }
+      
+      // Reference footer - use displayNumber for consistency
+      shareMessage += `─────────────────────────\n`;
+      shareMessage += `📍 Surah ${meta?.englishName} (${surahNumber}:${displayNumber})\n`;
+      shareMessage += `📲 Shared via Sukoon App\n`;
+      
+      await Share.share({ message: shareMessage });
+    } catch {}
+  }, [meta, surahNumber]);
 
   const handleToggle = useCallback((t: 'english' | 'urdu' | 'tafseer') => {
     if (autoScrollActive) stopAS();
@@ -1205,7 +1263,7 @@ export default function SurahScreen() {
           {/* ═══ MUSHAF PAGE MODE ═══ */}
           {isPageMode && (
             <>
-              {surahNumber !== 9 && <BismillahCard isPageMode />}
+              {surahNumber !== 9 && <SurahIntro isPageMode bismillahText={bismillahText} />}
               {pages.map((pg, pIdx) => (
                 <View
                   key={`page-${pIdx}`}
@@ -1240,9 +1298,10 @@ export default function SurahScreen() {
           {/* ═══ CARD MODE ═══ */}
           {!isPageMode && (
             <>
-              {surahNumber !== 9 && <BismillahCard isPageMode={false} />}
+              {surahNumber !== 9 && <SurahIntro isPageMode={false} bismillahText={bismillahText} />}
               {ayahs.map((ay, i) => (
-                <View key={ay.numberInSurah} onLayout={(e) => { ayahLayouts.current[i] = { y: e.nativeEvent.layout.y }; }}>
+                // ay.numberInSurah is now guaranteed to be correct (1-based) from QuranService
+                <View key={`ayah-${ay.numberInSurah}`} onLayout={(e) => { ayahLayouts.current[i] = { y: e.nativeEvent.layout.y }; }}>
                   <VerseCard
                     ayahNumber={ay.numberInSurah} arabicText={ay.text}
                     englishText={ay.translation} urduText={ay.urduTranslation}
@@ -1251,7 +1310,7 @@ export default function SurahScreen() {
                     tafseerLoading={tafseerLoading && !tafseerMap.has(ay.numberInSurah)}
                     tafseerLang={tafseerLang}
                     isBookmarked={isVerseSaved(surahNumber, ay.numberInSurah)} isPlaying={currentIndex === i}
-                    onBookmark={() => toggleBookmark(ay)} onPlay={() => playIndex(i)} onShare={() => shareVerse(ay)}
+                    onBookmark={() => toggleBookmark(ay)} onPlay={() => playIndex(i)} onShare={() => shareVerse(ay, ay.numberInSurah)}
                   />
                 </View>
               ))}
@@ -1266,15 +1325,6 @@ export default function SurahScreen() {
           )}
         </ScrollView>
 
-        {/* Floating page indicator (page mode only, shows briefly while manual scrolling) */}
-        {isPageMode && (
-          <FloatingPageIndicator 
-            current={currentPage} 
-            total={pages.length} 
-            visible={isScrolling} 
-            isAutoScrolling={autoScrollActive} 
-          />
-        )}
       </Animated.View>
 
       {/* Auto-scroll (both modes) */}
@@ -1548,6 +1598,13 @@ const s = StyleSheet.create({
   bisPageDm: { width: 6, height: 6, borderRadius: 1, transform: [{ rotate: '45deg' }] },
   bisPageDotSmall: { width: 4, height: 4, borderRadius: 2 },
   bisPageText: { fontSize: 28, textAlign: 'center', marginVertical: 12 },
+  bisPageBismillah: { fontSize: 30, textAlign: 'center', marginVertical: 14, fontWeight: '400', letterSpacing: 1.5 },
+
+  /* Bismillah separator & styling */
+  bisSeparator: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 14 },
+  bisSepLine: { flex: 1, height: 1, borderRadius: 1 },
+  bisSepDiamond: { width: 6, height: 6, borderRadius: 1, transform: [{ rotate: '45deg' }] },
+  bisBismillahText: { fontSize: 30, color: 'rgba(255,255,255,0.95)', textAlign: 'center', marginVertical: 8, fontWeight: '400', letterSpacing: 1.5 },
 
   /* Page frame — FULL WIDTH */
   frameWrap: { paddingHorizontal: 12, marginBottom: 16 },

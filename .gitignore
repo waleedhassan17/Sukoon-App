@@ -12,12 +12,17 @@ android/
 
 # Misc
 *.jks
+*.keystore
+!android/app/debug.keystore
 *.p8
 *.p12
 *.key
 *.mobileprovision
 *.orig.*
 web-build/
+
+# Google service account (Play Store upload)
+google-service-account.json
 
 # macOS
 .DS_Store

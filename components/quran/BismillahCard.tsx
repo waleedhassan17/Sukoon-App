@@ -47,7 +47,7 @@ export default function BismillahCard() {
               lineHeight: 52,
               letterSpacing: 2,
             }}>
-              بِسۡمِ اللّٰهِ الرَّحۡمٰنِ الرَّحِيۡمِ
+              أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ
             </Text>
           </View>
         </View>
