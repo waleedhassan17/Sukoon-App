@@ -157,6 +157,19 @@ function validateDayData(obj: any): DayData {
   return result;
 }
 
+/**
+ * Unwrap salah data that may be stored in {data: {...}, updatedAt} wrapper
+ * from DataSyncService.saveLocal. Handles both wrapped and flat formats.
+ */
+function unwrapSalahData(raw: any): any {
+  if (!raw || typeof raw !== 'object') return raw;
+  // DataSyncService.saveLocal wraps as {data: actualPayload, updatedAt: ts}
+  if (raw.data !== undefined && typeof raw.data === 'object' && !('fajr' in raw)) {
+    return raw.data;
+  }
+  return raw;
+}
+
 /* ═══ Ornament ═══ */
 function Ornament() {
   const { theme } = useTheme();
@@ -541,10 +554,10 @@ function SalahTrackerInner() {
       const c: Record<string, DayData> = {};
       for (const [k, v] of res) {
         if (!v) continue;
-        const parsed = safeJsonParse<DayData>(v);
+        const parsed = safeJsonParse<any>(v);
         if (parsed) {
           const dateKey = k.replace('sukoon_salah_', '');
-          c[dateKey] = validateDayData(parsed);
+          c[dateKey] = validateDayData(unwrapSalahData(parsed));
         }
       }
       
@@ -616,10 +629,10 @@ function SalahTrackerInner() {
       if (!isMounted.current) return;
       
       let dayDataResult: DayData;
-      const parsed = safeJsonParse<DayData>(v);
+      const parsed = safeJsonParse<any>(v);
       
       if (parsed) {
-        dayDataResult = validateDayData(parsed);
+        dayDataResult = validateDayData(unwrapSalahData(parsed));
       } else {
         // No local data - try cloud
         const cloudData = await DataSyncService.loadSalahDay(selKey);
@@ -651,15 +664,22 @@ function SalahTrackerInner() {
     // Add timestamp for cloud sync conflict resolution
     const dataWithTimestamp = { ...data, updatedAt: Date.now() };
     
+    // SINGLE SAVE PATH: DataSyncService handles both local + cloud persistence
+    // This avoids the previous double-write bug where saveLocal() wrapped data
+    // in {data: {...}, updatedAt} and overwrote the direct AsyncStorage save.
     try {
-      await AsyncStorage.setItem(sk(selKey), JSON.stringify(dataWithTimestamp));
+      await DataSyncService.saveSalahData(selKey, dataWithTimestamp);
     } catch (e) {
-      if (__DEV__) console.warn('[SalahTracker] save error:', e);
+      if (__DEV__) console.warn('[SalahTracker] primary save failed, using fallback:', e);
+      // Emergency fallback: direct AsyncStorage save if DataSyncService fails
+      try {
+        await AsyncStorage.setItem(sk(selKey), JSON.stringify(dataWithTimestamp));
+      } catch (e2) {
+        if (__DEV__) console.error('[SalahTracker] fallback save also failed:', e2);
+      }
     }
-    // Push to Firestore immediately for real-time sync
-    DataSyncService.saveSalahData(selKey, dataWithTimestamp).catch(() => {});
     
-    // NEW: Record completion for insights/streak tracking
+    // Record completion for insights/streak tracking
     const completedCount = countDone(data);
     ReadingProgress.recordSalahCompletion(selKey, completedCount).catch(() => {});
   }, [selKey]);

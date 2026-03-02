@@ -93,6 +93,9 @@ export const DataSyncService = {
   async init(): Promise<void> {
     await getDeviceId();
     
+    // One-time migration: fix any salah data stored in wrapped {data:{...}} format
+    await this._migrateSalahDataFormat();
+    
     // Try anonymous Firebase auth (enables Firestore access)
     if (isFirebaseConfigured()) {
       try {
@@ -112,6 +115,49 @@ export const DataSyncService = {
       } catch (error) {
         if (__DEV__) console.warn('[DataSync] Auth failed (offline mode):', error);
       }
+    }
+  },
+
+  /**
+   * One-time migration: convert any salah data from wrapped {data:{...}, updatedAt}
+   * format to flat {fajr, zuhr, ..., updatedAt} format.
+   * This fixes data corrupted by the old saveLocal() wrapper bug.
+   */
+  async _migrateSalahDataFormat(): Promise<void> {
+    const MIGRATION_KEY = 'sukoon_salah_migration_v2';
+    try {
+      const done = await AsyncStorage.getItem(MIGRATION_KEY);
+      if (done) return; // Already migrated
+
+      const allKeys = await AsyncStorage.getAllKeys();
+      const salahKeys = allKeys.filter(k => k.startsWith('sukoon_salah_'));
+      let fixed = 0;
+
+      for (const key of salahKeys) {
+        try {
+          const raw = await AsyncStorage.getItem(key);
+          if (!raw) continue;
+          const parsed = JSON.parse(raw);
+          // Detect wrapped format: has .data object but no .fajr at top level
+          if (parsed.data !== undefined && typeof parsed.data === 'object' && !('fajr' in parsed)) {
+            const unwrapped = { ...parsed.data };
+            // Preserve updatedAt from outer wrapper if inner doesn't have it
+            if (!unwrapped.updatedAt && parsed.updatedAt) {
+              unwrapped.updatedAt = parsed.updatedAt;
+            }
+            await AsyncStorage.setItem(key, JSON.stringify(unwrapped));
+            fixed++;
+          }
+        } catch {
+          // Skip corrupted entries
+        }
+      }
+
+      await AsyncStorage.setItem(MIGRATION_KEY, String(Date.now()));
+      if (__DEV__ && fixed > 0) console.log(`[DataSync] Migrated ${fixed} salah records from wrapped to flat format`);
+    } catch (error) {
+      if (__DEV__) console.warn('[DataSync] Salah data migration failed:', error);
+      // Non-fatal — the unwrapSalahData() helper in salah-tracker handles both formats
     }
   },
 
@@ -217,13 +263,39 @@ export const DataSyncService = {
   // ══════════════════════════════════════════════
 
   /**
-   * Save and sync salah tracker data
+   * Save and sync salah tracker data.
+   * IMPORTANT: Saves directly to AsyncStorage (NOT via saveLocal which wraps
+   * in {data, updatedAt}). This keeps the format flat ({fajr, zuhr, ..., updatedAt})
+   * so loadMonth/loadDay can read it without unwrapping.
    */
   async saveSalahData(dateKey: string, dayData: any): Promise<void> {
     const storageKey = `sukoon_salah_${dateKey}`;
-    await this.saveLocal(storageKey, dayData);
-    // Background cloud sync
-    this.pushToCloud(SYNC_DOMAINS.SALAH_TRACKER, dateKey, dayData).catch(() => {});
+    try {
+      await AsyncStorage.setItem(storageKey, JSON.stringify(dayData));
+    } catch (error) {
+      if (__DEV__) console.error('[DataSync] Salah local save failed:', dateKey, error);
+      throw error; // Propagate so caller can use fallback
+    }
+    // Non-blocking cloud sync (fire-and-forget with retry)
+    this._pushSalahToCloudWithRetry(dateKey, dayData);
+  },
+
+  /**
+   * Push salah data to cloud with a single retry on failure
+   */
+  async _pushSalahToCloudWithRetry(dateKey: string, dayData: any): Promise<void> {
+    try {
+      await this.pushToCloud(SYNC_DOMAINS.SALAH_TRACKER, dateKey, dayData);
+    } catch (err1) {
+      // Retry once after a short delay
+      try {
+        await new Promise(r => setTimeout(r, 2000));
+        await this.pushToCloud(SYNC_DOMAINS.SALAH_TRACKER, dateKey, dayData);
+      } catch (err2) {
+        if (__DEV__) console.warn(`[DataSync] Cloud push failed for ${dateKey} after retry:`, err2);
+        // Data is safe in local storage — will sync on next app open
+      }
+    }
   },
 
   /**
@@ -269,20 +341,34 @@ export const DataSyncService = {
   },
 
   /**
-   * Load single day's salah data with local-first, cloud-fallback strategy
+   * Load single day's salah data with local-first, cloud-fallback strategy.
+   * Handles both wrapped {data:{...}, updatedAt} and flat {fajr,..., updatedAt} formats.
    */
   async loadSalahDay(dateKey: string): Promise<any | null> {
     const storageKey = `sukoon_salah_${dateKey}`;
     
-    // Try local first
-    const localData = await this.readLocal<any>(storageKey);
-    if (localData) return localData;
+    // Try local first (read directly, handle both formats)
+    try {
+      const localRaw = await AsyncStorage.getItem(storageKey);
+      if (localRaw) {
+        const parsed = JSON.parse(localRaw);
+        // Unwrap if stored in {data: {...}, updatedAt} wrapper format
+        if (parsed.data !== undefined && typeof parsed.data === 'object' && !('fajr' in parsed)) {
+          return parsed.data;
+        }
+        return parsed;
+      }
+    } catch {
+      // Corrupted local data — fall through to cloud
+    }
     
     // Fallback to cloud
     const cloudData = await this.pullFromCloud<any>(SYNC_DOMAINS.SALAH_TRACKER, dateKey);
     if (cloudData) {
-      // Cache locally for offline access
-      await this.saveLocal(storageKey, cloudData);
+      // Cache locally in flat format (NOT via saveLocal which wraps)
+      try {
+        await AsyncStorage.setItem(storageKey, JSON.stringify(cloudData));
+      } catch {}
       return cloudData;
     }
     
@@ -305,19 +391,28 @@ export const DataSyncService = {
         const localRaw = await AsyncStorage.getItem(storageKey);
         
         if (!localRaw) {
-          // No local data, use cloud data
+          // No local data — save cloud data in flat format
           await AsyncStorage.setItem(storageKey, JSON.stringify(dayData));
           synced++;
         } else {
-          // Compare timestamps if available, otherwise merge
+          // Compare timestamps — handle both wrapped and flat local formats
           try {
             const localParsed = JSON.parse(localRaw);
-            const localTime = localParsed.updatedAt || 0;
+            // Unwrap if in {data: {...}, updatedAt} wrapper format
+            const localUnwrapped = (localParsed.data !== undefined && typeof localParsed.data === 'object' && !('fajr' in localParsed))
+              ? localParsed.data : localParsed;
+            const localTime = localParsed.updatedAt || localUnwrapped?.updatedAt || 0;
             const cloudTime = (dayData as any).updatedAt || 0;
             
             if (cloudTime > localTime) {
+              // Cloud is newer — save in flat format
               await AsyncStorage.setItem(storageKey, JSON.stringify(dayData));
               synced++;
+            } else if (localParsed.data !== undefined && typeof localParsed.data === 'object' && !('fajr' in localParsed)) {
+              // Local data is in wrapped format — migrate to flat format while preserving it
+              const migrated = { ...localUnwrapped };
+              if (!migrated.updatedAt) migrated.updatedAt = localParsed.updatedAt;
+              await AsyncStorage.setItem(storageKey, JSON.stringify(migrated));
             }
           } catch {
             // If parse fails, prefer cloud data
@@ -405,7 +500,12 @@ export const DataSyncService = {
         const val = await AsyncStorage.getItem(key);
         if (val) {
           const dateKey = key.replace('sukoon_salah_', '');
-          await this.pushToCloud(SYNC_DOMAINS.SALAH_TRACKER, dateKey, JSON.parse(val));
+          let parsed = JSON.parse(val);
+          // Unwrap if stored in legacy {data: {...}, updatedAt} format
+          if (parsed.data !== undefined && typeof parsed.data === 'object' && !('fajr' in parsed)) {
+            parsed = parsed.data;
+          }
+          await this.pushToCloud(SYNC_DOMAINS.SALAH_TRACKER, dateKey, parsed);
           synced++;
         }
       }
