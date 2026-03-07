@@ -38,7 +38,7 @@ export interface LastPosition {
 // If the caller fires rapidly (e.g. scroll handler), we coalesce into one write.
 let _lastSeenPending: LastPosition | null = null;
 let _lastSeenTimer: ReturnType<typeof setTimeout> | null = null;
-const LAST_SEEN_DEBOUNCE_MS = 2000;
+const LAST_SEEN_DEBOUNCE_MS = 800;
 
 // ── Write-coalescing for setLastAudio ──
 let _lastAudioPending: LastPosition | null = null;
@@ -317,8 +317,17 @@ export const ReadingProgress = {
   async resetAll(): Promise<void> {
     try {
       const allKeys = await AsyncStorage.getAllKeys();
-      const sukoonKeys = allKeys.filter((k) => k.startsWith('sukoon_'));
-      if (sukoonKeys.length > 0) await AsyncStorage.multiRemove(sukoonKeys);
+      // Clear ALL app data: sukoon_ keys, @quran_ cache, @notifications,
+      // @tafseer_ cache, and any other app-specific storage
+      const appKeys = allKeys.filter((k) =>
+        k.startsWith('sukoon_') ||
+        k.startsWith('@quran_') ||
+        k.startsWith('@notifications') ||
+        k.startsWith('@tafseer_') ||
+        k === 'sukoon_notification_history'
+      );
+      if (appKeys.length > 0) await AsyncStorage.multiRemove(appKeys);
+      if (__DEV__) console.log(`[ReadingProgress] resetAll: cleared ${appKeys.length} keys`);
     } catch (e) {
       if (__DEV__) console.warn('[ReadingProgress] resetAll error:', e);
     }

@@ -582,7 +582,7 @@ export default function HomeScreen() {
                   </View>
                   <View style={styles.resumeTextWrap}>
                     <Text style={[styles.resumeTitle, { color: theme.text }]}>Continue Reading</Text>
-                    <Text style={[styles.resumeSub, { color: theme.textSecondary }]}>Surah {lastSeen.surah} · Ayah {lastSeen.ayah}</Text>
+                    <Text style={[styles.resumeSub, { color: theme.textSecondary }]}>{lastSeen.surahName ? `${lastSeen.surahName}` : `Surah ${lastSeen.surah}`} · Ayah {lastSeen.ayah}</Text>
                   </View>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={theme.textTertiary} />

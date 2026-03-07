@@ -220,11 +220,14 @@ const SegmentedControl = React.memo(function SegmentedControl({
    SURAH INTRO — Bismillah (from API)
    Rendered ABOVE the verses card / page frames.
    ═══════════════════════════════════════════════ */
+const DEFAULT_BISMILLAH_TEXT = '\u0628\u0650\u0633\u0652\u0645\u0650 \u0671\u0644\u0644\u0651\u064E\u0647\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0652\u0645\u064E\u0640\u0670\u0646\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0650\u064A\u0645\u0650';
+
 const SurahIntro = React.memo(function SurahIntro({ isPageMode, bismillahText }: { isPageMode: boolean; bismillahText?: string }) {
   const { theme } = useTheme();
   const { sizes } = useFontSize();
 
-  if (!bismillahText) return null;
+  // Always show Bismillah — use default if API didn't provide it
+  const displayText = bismillahText || DEFAULT_BISMILLAH_TEXT;
 
   if (isPageMode) {
     return (
@@ -235,7 +238,7 @@ const SurahIntro = React.memo(function SurahIntro({ isPageMode, bismillahText }:
           <View style={[s.bisPageLine, { backgroundColor: `${theme.gold}35` }]} />
         </View>
         <Text style={[s.bisPageBismillah, { color: theme.arabicText, fontSize: sizes.arabicLarge + 2 }]}>
-          {bismillahText}
+          {displayText}
         </Text>
         <View style={s.bisPageOrnRow}>
           <View style={[s.bisPageLine, { backgroundColor: `${theme.gold}35` }]} />
@@ -253,7 +256,7 @@ const SurahIntro = React.memo(function SurahIntro({ isPageMode, bismillahText }:
         <View style={[s.bisCr, s.bisCrBL]} /><View style={[s.bisCr, s.bisCrBR]} />
         <Ornament variant="diamond" />
         <Text style={[s.bisBismillahText, { fontSize: sizes.arabicLarge + 2 }]}>
-          {bismillahText}
+          {displayText}
         </Text>
         <View style={[s.bisDiv, { backgroundColor: `${theme.gold}4D` }]} />
         <Text style={[s.bisTrans, { fontSize: sizes.english, lineHeight: sizes.englishLine }]}>
@@ -984,7 +987,7 @@ export default function SurahScreen() {
       });
     }
 
-    // ─── TRACK: last seen (debounced - every 5 seconds) ───
+    // ─── TRACK: last seen (debounced - every 1.5 seconds for reliable resume) ───
     if (lastSeenTimer.current) clearTimeout(lastSeenTimer.current);
     lastSeenTimer.current = setTimeout(() => {
       let closestIdx = 0;
@@ -996,7 +999,7 @@ export default function SurahScreen() {
       if (ayahs[closestIdx] && meta?.englishName) {
         ReadingProgress.setLastSeen(surahNumber, meta.englishName, ayahs[closestIdx].numberInSurah).catch(() => {});
       }
-    }, 5000);
+    }, 1500);
   }, [isPageMode, pages, currentPage, autoScrollActive, surahNumber, ayahs, meta, trackAyahRead]);
 
   const loadSurah = async () => {

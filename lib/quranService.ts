@@ -28,11 +28,40 @@ const CACHE_KEYS = {
 // Current cache version - increment to invalidate old caches
 // v1.4: Fixed Bismillah pre-filtering BEFORE translation alignment to fix off-by-one numbering
 // v1.5: Al-Fatiha Bismillah now excluded from numbered ayahs (Mushaf-accurate)
-// v1.6: SurahData.bismillahText extraction — Bismillah shown in SurahIntro above verses
-const CACHE_VERSION = '1.6';
+// v1.7: Fixed HTML stripping in translations, added fallback translation APIs,
+// guaranteed Bismillah for surahs 2-114 (except 9)
+const CACHE_VERSION = '1.7';
 
 // Cache TTL (24 hours - but we use stale-while-revalidate)
 const CACHE_TTL = 24 * 60 * 60 * 1000;
+
+/**
+ * Strip HTML tags, decode entities, and clean up translation text.
+ * The alquran.cloud API sometimes returns translations with HTML tags like:
+ *   <span class="h">, <sup foot_note="...">1</sup>, etc.
+ * These must be removed before display.
+ */
+function stripHtmlFromTranslation(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/<[^>]+>/g, '')              // Remove all HTML tags
+    .replace(/&nbsp;/g, ' ')              // Non-breaking space
+    .replace(/&amp;/g, '&')               // Ampersand
+    .replace(/&lt;/g, '<')                // Less-than
+    .replace(/&gt;/g, '>')                // Greater-than
+    .replace(/&quot;/g, '"')             // Double quote
+    .replace(/&#39;/g, "'")              // Single quote
+    .replace(/&#x27;/g, "'")             // Single quote (hex)
+    .replace(/&#(\d+);/g, (_, code) =>    // Numeric entities
+      String.fromCharCode(parseInt(code, 10)))
+    .replace(/\s{2,}/g, ' ')              // Collapse multiple spaces
+    .trim();
+}
+
+// Fallback translation API endpoints
+const QURAN_API_V2 = 'https://api.quran.com/api/v4';
+// English: edition 131 (Sahih International), 20 (Pickthall)
+// Urdu: edition 97 (Ahmed Ali), 54 (Fateh Muhammad Jalandhry)
 
 export interface SurahMeta {
   number: number;
@@ -544,17 +573,26 @@ export const QuranService = {
    * Uses stale-while-revalidate pattern for instant loading
    */
   async getSurah(surahNumber: number): Promise<SurahData> {
-    // Helper to ensure proper numbering (handles legacy cached data)
-    const ensureProperNumbering = (data: SurahData): SurahData => {
+    // Default Bismillah text — used when API/cache doesn't include it
+    const DEFAULT_BISMILLAH = '\u0628\u0650\u0633\u0652\u0645\u0650 \u0671\u0644\u0644\u0651\u064E\u0647\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0652\u0645\u064E\u0640\u0670\u0646\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0650\u064A\u0645\u0650';
+
+    // Helper to ensure proper numbering AND Bismillah (handles legacy cached data)
+    const ensureProperData = (data: SurahData): SurahData => {
       const normalizedAyahs = normalizeAyahNumbering(data.ayahs);
-      // Only create new object if normalization changed something
-      return normalizedAyahs === data.ayahs ? data : { ...data, ayahs: normalizedAyahs };
+      // Guarantee Bismillah for surahs 2-114 except 9 (At-Tawbah)
+      let bismillahText = data.bismillahText;
+      if (surahNumber !== 1 && surahNumber !== 9 && !bismillahText) {
+        bismillahText = DEFAULT_BISMILLAH;
+      }
+      // Only create new object if something changed
+      if (normalizedAyahs === data.ayahs && bismillahText === data.bismillahText) return data;
+      return { ...data, ayahs: normalizedAyahs, bismillahText };
     };
     
     // Return from memory cache immediately (with normalization for legacy data)
     const memoryCached = surahDataCache.get(surahNumber);
     if (memoryCached) {
-      return ensureProperNumbering(memoryCached);
+      return ensureProperData(memoryCached);
     }
 
     // Check AsyncStorage cache
@@ -562,8 +600,8 @@ export const QuranService = {
     const cached = await getCached<SurahData>(cacheKey);
     
     if (cached?.data) {
-      // Normalize cached data (handles legacy cache with wrong numbering)
-      const normalizedData = ensureProperNumbering(cached.data);
+      // Normalize cached data (handles legacy cache with wrong numbering / missing Bismillah)
+      const normalizedData = ensureProperData(cached.data);
       
       // Store in memory for instant subsequent access
       surahDataCache.set(surahNumber, normalizedData);
@@ -623,9 +661,12 @@ export const QuranService = {
         if (cached?.data) {
           console.warn('[QuranService] Using stale cache for Surah', surahNumber);
           const normalizedAyahs = normalizeAyahNumbering(cached.data.ayahs);
-          const normalizedData: SurahData = normalizedAyahs === cached.data.ayahs 
-            ? cached.data 
-            : { ...cached.data, ayahs: normalizedAyahs };
+          // Guarantee Bismillah for surahs 2-114 except 9
+          let bismillahText = cached.data.bismillahText;
+          if (surahNumber !== 1 && surahNumber !== 9 && !bismillahText) {
+            bismillahText = '\u0628\u0650\u0633\u0652\u0645\u0650 \u0671\u0644\u0644\u0651\u064E\u0647\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0652\u0645\u064E\u0640\u0670\u0646\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0650\u064A\u0645\u0650';
+          }
+          const normalizedData: SurahData = { ...cached.data, ayahs: normalizedAyahs, bismillahText };
           surahDataCache.set(surahNumber, normalizedData);
           return normalizedData;
         }
@@ -648,7 +689,8 @@ export const QuranService = {
    * off by one and the first real ayah appears to be missing.
    */
   async fetchSurahFromPrimaryAPI(surahNumber: number): Promise<SurahData> {
-    const [arabicJson, englishJson, urduJson] = await Promise.all([
+    // Fetch Arabic + English + Urdu in parallel
+    const [arabicJson, englishJson, urduJson] = await Promise.allSettled([
       safeFetch(
         `${ALQURAN_BASE}/surah/${surahNumber}/ar.alafasy`,
         `Fetch Arabic Surah ${surahNumber}`,
@@ -663,14 +705,79 @@ export const QuranService = {
       ),
     ]);
 
-    // Validate responses
-    if (!arabicJson || arabicJson.code !== 200 || !arabicJson.data) {
+    // Extract resolved values
+    const arabicResult = arabicJson.status === 'fulfilled' ? arabicJson.value : null;
+    const englishResult = englishJson.status === 'fulfilled' ? englishJson.value : null;
+    const urduResult = urduJson.status === 'fulfilled' ? urduJson.value : null;
+
+    // Validate Arabic response (required)
+    if (!arabicResult || arabicResult.code !== 200 || !arabicResult.data) {
       throw new Error('Invalid response from primary API');
     }
 
-    const arabicData = arabicJson.data;
-    const englishData = englishJson?.data;
-    const urduData = urduJson?.data;
+    const arabicData = arabicResult.data;
+    let englishData = (englishResult?.code === 200) ? englishResult.data : null;
+    let urduData = (urduResult?.code === 200) ? urduResult.data : null;
+
+    // ─── FALLBACK: If English translation failed, try alternative editions ───
+    if (!englishData || !englishData.ayahs || englishData.ayahs.length === 0) {
+      try {
+        // Try Pickthall edition as fallback
+        const fallback = await safeFetch(
+          `${ALQURAN_BASE}/surah/${surahNumber}/en.pickthall`,
+          `Fetch English fallback Surah ${surahNumber}`,
+        );
+        if (fallback?.code === 200 && fallback?.data) {
+          englishData = fallback.data;
+        }
+      } catch {
+        // Try quran.com API as second fallback
+        try {
+          const qcRes = await safeFetch(
+            `${QURAN_API_V2}/verses/by_chapter/${surahNumber}?language=en&translations=131&fields=text_uthmani&per_page=300`,
+            `Fetch English from quran.com Surah ${surahNumber}`,
+          );
+          if (qcRes?.verses) {
+            englishData = {
+              ayahs: qcRes.verses.map((v: any) => ({
+                text: v.translations?.[0]?.text || '',
+                numberInSurah: v.verse_number,
+              })),
+            };
+          }
+        } catch {}
+      }
+    }
+
+    // ─── FALLBACK: If Urdu translation failed, try alternative editions ───
+    if (!urduData || !urduData.ayahs || urduData.ayahs.length === 0) {
+      try {
+        // Try Ahmed Raza Khan edition as fallback
+        const fallback = await safeFetch(
+          `${ALQURAN_BASE}/surah/${surahNumber}/ur.ahmedali`,
+          `Fetch Urdu fallback Surah ${surahNumber}`,
+        );
+        if (fallback?.code === 200 && fallback?.data) {
+          urduData = fallback.data;
+        }
+      } catch {
+        // Try quran.com API as second fallback (Urdu: resource 97)
+        try {
+          const qcRes = await safeFetch(
+            `${QURAN_API_V2}/verses/by_chapter/${surahNumber}?language=ur&translations=97&fields=text_uthmani&per_page=300`,
+            `Fetch Urdu from quran.com Surah ${surahNumber}`,
+          );
+          if (qcRes?.verses) {
+            urduData = {
+              ayahs: qcRes.verses.map((v: any) => ({
+                text: v.translations?.[0]?.text || '',
+                numberInSurah: v.verse_number,
+              })),
+            };
+          }
+        } catch {}
+      }
+    }
 
     const meta: SurahMeta = {
       number: arabicData.number,
@@ -745,8 +852,8 @@ export const QuranService = {
       number: a.number,
       numberInSurah: a.numberInSurah,
       text: a.text,
-      translation: filteredEnglishAyahs[i]?.text || '',
-      urduTranslation: filteredUrduAyahs[i]?.text || '',
+      translation: stripHtmlFromTranslation(filteredEnglishAyahs[i]?.text || ''),
+      urduTranslation: stripHtmlFromTranslation(filteredUrduAyahs[i]?.text || ''),
       audio: a.audio || a.audioSecondary?.[0] || null,
       juz: a.juz,
       page: a.page,
@@ -761,6 +868,14 @@ export const QuranService = {
     
     // ─── STEP 4: Normalize numbering to ensure consistent 1-based indexing ───
     const normalizedAyahs = normalizeAyahNumbering(cleanedAyahs);
+
+    // ─── STEP 5: Guarantee Bismillah text for surahs 2-114 (except 9) ───
+    // If the API didn't return Bismillah text, use the standard hardcoded text.
+    // Surah Al-Fatiha (1): Bismillah is handled separately (it's part of the verses).
+    // Surah At-Tawbah (9): No Bismillah.
+    if (surahNumber !== 1 && surahNumber !== 9 && !bismillahText) {
+      bismillahText = '\u0628\u0650\u0633\u0652\u0645\u0650 \u0671\u0644\u0644\u0651\u064E\u0647\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0652\u0645\u064E\u0640\u0670\u0646\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0650\u064A\u0645\u0650';
+    }
 
     return { meta, ayahs: normalizedAyahs, bismillahText };
   },
@@ -829,8 +944,8 @@ export const QuranService = {
       number: v.id,
       numberInSurah: v.verse_number,
       text: v.text_uthmani || v.text_imlaei || v.text || '',
-      translation: v.translations?.[0]?.text || '',
-      urduTranslation: v.translations?.[1]?.text || '',
+      translation: stripHtmlFromTranslation(v.translations?.[0]?.text || ''),
+      urduTranslation: stripHtmlFromTranslation(v.translations?.[1]?.text || ''),
       audio: v.audio?.url || null,
       juz: v.juz_number || 1,
       page: v.page_number || 1,
@@ -842,6 +957,11 @@ export const QuranService = {
     
     // Normalize numbering to ensure consistent 1-based indexing across all surahs
     const normalizedAyahs = normalizeAyahNumbering(cleanedAyahs);
+
+    // Guarantee Bismillah text for surahs 2-114 (except 9)
+    if (surahNumber !== 1 && surahNumber !== 9 && !bismillahText) {
+      bismillahText = '\u0628\u0650\u0633\u0652\u0645\u0650 \u0671\u0644\u0644\u0651\u064E\u0647\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0652\u0645\u064E\u0640\u0670\u0646\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0650\u064A\u0645\u0650';
+    }
 
     return { meta, ayahs: normalizedAyahs, bismillahText };
   },

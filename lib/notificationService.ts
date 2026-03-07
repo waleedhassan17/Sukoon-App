@@ -228,9 +228,11 @@ export const NotificationService = {
       const lastScheduled = await AsyncStorage.getItem(KEYS.LAST_SCHEDULED);
       const today = new Date().toDateString();
       if (lastScheduled !== today) {
-        // Will be called with actual prayer times from the screen
-        // Just flag that rescheduling is needed
-        console.log('[Sukoon] Notifications need rescheduling for today');
+        // Attempt to reschedule from cached prayer times immediately
+        // This ensures notifications are scheduled even before the user
+        // opens the prayer screen (which triggers a fresh API fetch).
+        await this.rescheduleFromCache().catch(() => {});
+        console.log('[Sukoon] Auto-rescheduled notifications from cache on init');
       }
     }
   },
@@ -610,6 +612,34 @@ export const NotificationService = {
   },
 
   // ══════════════════════════════════════════
+  // RESCHEDULE FROM CACHED PRAYER TIMES
+  // Used by background task and on app init when prayer times
+  // haven't been fetched yet (before the user opens prayer screen).
+  // Reads last cached prayer times from AsyncStorage and schedules.
+  // ══════════════════════════════════════════
+  async rescheduleFromCache(): Promise<void> {
+    try {
+      const raw = await AsyncStorage.getItem('sukoon_prayer_cache');
+      if (!raw) return;
+      const cached = JSON.parse(raw);
+      // Validate cache is for today (format: YYYY-MM-DD)
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      if (cached.date !== todayStr) return; // stale cache — skip
+
+      const data = cached.data;
+      if (!data?.Fajr) return; // invalid cache
+
+      // Import bridge inline to avoid circular deps
+      const { convertToNotifFormat } = require('./prayerTimeNotifBridge');
+      const entries = convertToNotifFormat(data);
+      await this.schedulePrayerNotifications(entries);
+    } catch (e) {
+      if (__DEV__) console.warn('[Sukoon] rescheduleFromCache error:', e);
+    }
+  },
+
+  // ══════════════════════════════════════════
   // SYNC DELIVERED NOTIFICATIONS
   // Called on app resume (foreground). Captures notifications that
   // were delivered while the app was in background/killed state.
@@ -668,6 +698,9 @@ export const NotificationService = {
         try {
           const prefs = await NotificationService.getPreferences();
           if (!prefs.enabled) return BackgroundFetch.BackgroundFetchResult.NoData;
+
+          // Actually reschedule from cached prayer times
+          await NotificationService.rescheduleFromCache();
           console.log('[Sukoon] Background: rescheduled notifications');
           return BackgroundFetch.BackgroundFetchResult.NewData;
         } catch {

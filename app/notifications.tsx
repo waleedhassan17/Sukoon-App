@@ -25,7 +25,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
@@ -144,10 +144,36 @@ export default function NotificationsScreen() {
   const [notifEnabled, setNotifEnabled] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  // ── Load on mount ──
+  // ── Load on mount + refresh on focus ──
   useEffect(() => {
     loadNotifications();
     checkNotifStatus();
+  }, []);
+
+  // Reload notifications when screen gains focus (e.g. navigating back)
+  useFocusEffect(
+    useCallback(() => {
+      // Sync delivered notifications from the shade, then reload
+      NotificationService.syncDeliveredNotifications()
+        .catch(() => {})
+        .finally(() => loadNotifications());
+    }, [])
+  );
+
+  // Re-sync delivered notifications and reload periodically while visible
+  useEffect(() => {
+    // Also load notifications from the delivered notification shade
+    // This ensures any missed notifications are captured
+    const syncAndReload = async () => {
+      try {
+        await NotificationService.syncDeliveredNotifications();
+      } catch {}
+      await loadNotifications();
+    };
+
+    // Poll periodically while screen is visible to catch new notifications
+    const interval = setInterval(syncAndReload, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const loadNotifications = async () => {

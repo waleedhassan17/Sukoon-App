@@ -66,17 +66,21 @@ const toDeg = (rad: number) => (rad * 180) / Math.PI;
 
 /**
  * Calculate compass heading from raw magnetometer data.
- *   heading = atan2(y, x) × (180 / π)
- *   Normalize to [0, 360)
+ * 
+ * In the phone's coordinate system:
+ *   +X points right, +Y points up (toward top of phone)
+ *   Heading from North = atan2(x, y) gives angle from device-top
+ *   to magnetic North measured clockwise.
+ * 
+ * We negate because atan2 gives counter-clockwise positive angles,
+ * but compass headings are clockwise.
  */
 function magnetometerToHeading(x: number, y: number): number {
-  let heading = Math.atan2(y, x) * (180 / Math.PI);
-  heading = (heading + 360) % 360;
-  // On Android the magnetometer axes are mirrored — invert heading
-  if (Platform.OS === 'android') {
-    heading = (360 - heading) % 360;
-  }
-  return heading;
+  // atan2(x, y) gives the angle from the Y-axis (device top) to the
+  // projection of the magnetic field vector in the XY plane.
+  // Negate to convert from math-convention (CCW) to compass-convention (CW).
+  let heading = -Math.atan2(x, y) * (180 / Math.PI);
+  return ((heading % 360) + 360) % 360;
 }
 
 /**

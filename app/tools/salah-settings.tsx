@@ -591,7 +591,7 @@ export default function SalahTrackerSettingsScreen() {
   const resetData = () => {
     Alert.alert(
       'Reset All Tracking Data?',
-      'This will permanently delete your entire prayer tracking history. You cannot undo this.',
+      'This will permanently delete your entire prayer tracking history, reading progress, cached data, and notification history. You cannot undo this.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -599,10 +599,19 @@ export default function SalahTrackerSettingsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const keys = (await AsyncStorage.getAllKeys()).filter(k => k.startsWith('sukoon_salah_'));
-              if (keys.length) await AsyncStorage.multiRemove(keys);
+              const allKeys = await AsyncStorage.getAllKeys();
+              // Clear ALL app data: salah, reading progress, quran cache,
+              // notifications, tafseer, saved verses, streaks, etc.
+              const appKeys = allKeys.filter(k =>
+                k.startsWith('sukoon_') ||
+                k.startsWith('@quran_') ||
+                k.startsWith('@notifications') ||
+                k.startsWith('@tafseer_') ||
+                k === 'sukoon_notification_history'
+              );
+              if (appKeys.length) await AsyncStorage.multiRemove(appKeys);
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-              Alert.alert('Done', `Cleared ${keys.length} days of tracking data.`);
+              Alert.alert('Done', `Cleared ${appKeys.length} items. Restart the app to see changes.`);
             } catch {
               Alert.alert('Error', 'Could not clear data. Please try again.');
             }
