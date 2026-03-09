@@ -264,7 +264,7 @@ export const EmotionService = {
       const verses: VerseRecommendation[] = (data.verses || []).map(v => ({
         surah: v.surah_number,
         ayah: v.ayah,
-        arabic: v.arabic,
+        arabic: (v.arabic || '').replace(/[\u06DF\u06E0]/g, ''),
         english: v.english,
         urdu: v.urdu || '',
         surahName: v.surah_name,

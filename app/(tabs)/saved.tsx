@@ -222,7 +222,7 @@ export default function SavedScreen() {
 
                   {/* Arabic Text */}
                   <View style={[styles.arabicWrap, { backgroundColor: theme.primaryMuted + '08' }]}>
-                    <Text style={[styles.arabicText, { color: theme.arabicText, fontSize: sizes.arabic, lineHeight: sizes.arabicLine }]}>{verse.arabic}</Text>
+                    <Text style={[styles.arabicText, { color: theme.arabicText, fontSize: sizes.arabic, lineHeight: sizes.arabicLine }]}>{(verse.arabic || '').replace(/[\u06DF\u06E0]/g, '')}</Text>
                   </View>
 
                   {/* Divider accent */}
@@ -496,7 +496,8 @@ const styles = StyleSheet.create({
     fontSize: 22,
     lineHeight: 40,
     textAlign: 'right',
-    fontWeight: '400',
+    fontWeight: '500',
+    fontFamily: 'UthmanicHafs',
   },
 
   /* ─── Divider ─── */
@@ -558,6 +559,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 40,
     marginBottom: 14,
+    fontWeight: '500',
+    fontFamily: 'UthmanicHafs',
   },
   bottomDividerLine: {
     width: 32,

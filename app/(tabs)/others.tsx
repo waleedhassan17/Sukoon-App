@@ -18,6 +18,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import FontAwesome6 from '@expo/vector-icons/FontAwesome6';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { RADIUS } from '@/constants/theme';
 
@@ -29,7 +31,7 @@ const TOOLS = [
     label: 'Salah Tracker',
     route: '/tools/salah-tracker',
     icon: 'checkmark-circle-outline' as const,
-    gradient: ['#1B4332', '#0B3D2C'],
+    gradient: ['#143D2B', '#2D6A4F'],
     desc: 'Track and log your daily prayers',
   },
   {
@@ -37,31 +39,34 @@ const TOOLS = [
     label: 'Tasbeeh Counter',
     route: '/tools/tasbeeh',
     icon: 'ellipse-outline' as const,
-    gradient: ['#2D6A4F', '#1B4332'],
+    gradient: ['#143D2B', '#2D6A4F'],
     desc: 'Digital dhikr counter with presets',
   },
   {
     key: 'qiblah',
     label: 'Qiblah Finder',
     route: '/tools/qiblah',
-    icon: 'navigate-outline' as const,
-    gradient: ['#40916C', '#2D6A4F'],
+    icon: 'kaaba',
+    family: 'fa6' as const,
+    gradient: ['#143D2B', '#2D6A4F'],
     desc: 'Find the direction of prayer',
   },
   {
     key: 'prayer',
     label: 'Prayer Times',
     route: '/tools/prayer',
-    icon: 'time-outline' as const,
-    gradient: ['#52B788', '#40916C'],
+    icon: 'mosque',
+    family: 'mci' as const,
+    gradient: ['#143D2B', '#2D6A4F'],
     desc: 'Accurate local prayer schedule',
   },
   {
     key: 'insights',
     label: 'Spiritual Progress',
     route: '/insights',
-    icon: 'analytics-outline' as const,
-    gradient: ['#74C69D', '#52B788'],
+    icon: 'bar-chart-outline',
+    family: 'ionicons' as const,
+    gradient: ['#143D2B', '#2D6A4F'],
     desc: 'View your reading stats & achievements',
   },
 ];
@@ -168,7 +173,13 @@ export default function OthersScreen() {
                   colors={tool.gradient as [string, string]}
                   style={styles.cardIconWrap}
                 >
-                  <Ionicons name={tool.icon} size={22} color="#fff" />
+                  {tool.family === 'fa6' ? (
+                    <FontAwesome6 name={tool.icon as any} size={20} color="#fff" />
+                  ) : tool.family === 'mci' ? (
+                    <MaterialCommunityIcons name={tool.icon as any} size={22} color="#fff" />
+                  ) : (
+                    <Ionicons name={tool.icon as any} size={22} color="#fff" />
+                  )}
                 </LinearGradient>
 
                 <View style={styles.cardContent}>

@@ -344,7 +344,7 @@ export default function NotificationsScreen() {
       </Text>
       {!notifEnabled && (
         <TouchableOpacity onPress={handleEnableNotifications} activeOpacity={0.8} style={styles.enableBtn}>
-          <LinearGradient colors={['#2D6A4F', '#1B4332']} style={styles.enableBtnInner}>
+          <LinearGradient colors={['#143D2B', '#2D6A4F']} style={styles.enableBtnInner}>
             <Ionicons name="notifications-outline" size={18} color="#fff" />
             <Text style={styles.enableBtnText}>Enable Notifications</Text>
           </LinearGradient>

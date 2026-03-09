@@ -314,7 +314,7 @@ export default function EmotionResultScreen() {
                     <View style={s.verseTopRow}>
                       <View style={s.verseRefRow}>
                         <LinearGradient
-                          colors={['#2D6A4F', '#1B4332']}
+                          colors={['#143D2B', '#2D6A4F']}
                           style={s.verseRefBadge}
                         >
                           <Text style={s.verseRefBadgeText}>
@@ -347,7 +347,7 @@ export default function EmotionResultScreen() {
 
                     {/* Arabic */}
                     <View style={[s.arabicWrap, { backgroundColor: theme.primaryMuted + '08' }]}>
-                      <Text style={[s.arabicText, { color: theme.arabicText, fontSize: sizes.arabic, lineHeight: sizes.arabicLine }]}>{verse.arabic}</Text>
+                      <Text style={[s.arabicText, { color: theme.arabicText, fontSize: sizes.arabic, lineHeight: sizes.arabicLine }]}>{(verse.arabic || '').replace(/[\u06DF\u06E0]/g, '')}</Text>
                     </View>
 
                     {/* Gold divider */}
@@ -403,7 +403,7 @@ export default function EmotionResultScreen() {
             style={s.newSearchWrap}
           >
             <LinearGradient
-              colors={['#2D6A4F', '#1B4332']}
+              colors={['#143D2B', '#2D6A4F']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={s.newSearchBtn}
@@ -715,6 +715,8 @@ const s = StyleSheet.create({
     fontSize: 22,
     lineHeight: 40,
     textAlign: 'right',
+    fontWeight: '500',
+    fontFamily: 'UthmanicHafs',
   },
 
   /* Gold divider */

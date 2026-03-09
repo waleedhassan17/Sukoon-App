@@ -292,9 +292,9 @@ export default function SettingsScreen() {
               {/* Quick Preset Buttons — primary size control */}
               <View style={styles.presetsRow}>
                 {[
-                  { label: 'Small', value: 0.8, icon: 'A', iconSize: 13 as number },
+                  { label: 'Small', value: 0.85, icon: 'A', iconSize: 13 as number },
                   { label: 'Default', value: 1.0, icon: 'A', iconSize: 16 as number },
-                  { label: 'Large', value: 1.3, icon: 'A', iconSize: 20 as number },
+                  { label: 'Large', value: 1.2, icon: 'A', iconSize: 20 as number },
                 ].map((preset) => {
                   const active = isPresetActive(preset.value);
                   return (

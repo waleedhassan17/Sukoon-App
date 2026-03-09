@@ -59,11 +59,11 @@ export const COLORS = {
 export const lightTheme = {
   mode: 'light' as const,
   // Core - Classic Islamic Green Palette
-  primary: '#1B4332',
+  primary: '#143D2B',
   primaryLight: '#2D6A4F',
   primaryMuted: '#40916C',
   secondary: '#2D6A4F',
-  accent: '#40916C',
+  accent: '#3A7D5C',
   gold: '#D4AF37',
   goldLight: '#F6E27A',
   // Surfaces
@@ -90,14 +90,14 @@ export const lightTheme = {
   warning: '#D97706',
   info: '#0284C7',
   // Shadows
-  shadowColor: 'rgba(27,67,50,0.08)',
+  shadowColor: 'rgba(20,61,43,0.10)',
   // Tab bar
   tabBarBg: '#FFFFFF',
   tabBarBorder: '#E5E7EB',
-  tabBarActive: '#1B4332',
+  tabBarActive: '#143D2B',
   tabBarInactive: '#9B9B9B',
   // Quran
-  arabicText: '#1B4332',
+  arabicText: '#143D2B',
   ayahHighlight: 'rgba(212, 175, 55, 0.08)',
   verseCard: '#FFFFFF',
   // Emotion colors
@@ -107,16 +107,16 @@ export const lightTheme = {
   emotionSad: '#5B8FA8',
   emotionHopeful: '#D4A43E',
   emotionLost: '#8B6AAE',
-  // Quick action gradients
-  actionGradient1: ['#2D6A4F', '#1B4332'] as const,
-  actionGradient2: ['#40916C', '#2D6A4F'] as const,
-  actionGradient3: ['#52B788', '#40916C'] as const,
-  actionGradient4: ['#74C69D', '#52B788'] as const,
+  // Quick action gradients (warm dark → medium green)
+  actionGradient1: ['#143D2B', '#2D6A4F'] as const,
+  actionGradient2: ['#143D2B', '#2D6A4F'] as const,
+  actionGradient3: ['#143D2B', '#2D6A4F'] as const,
+  actionGradient4: ['#143D2B', '#2D6A4F'] as const,
   // Gradients
-  headerGradient: ['#1B4332', '#2D6A4F', '#40916C'] as const,
+  headerGradient: ['#143D2B', '#1B4332', '#2D6A4F'] as const,
   cardGradient: ['#FFFFFF', '#FAFBFC'] as const,
   goldGradient: ['#D4AF37', '#C9A227'] as const,
-  accentGradient: ['#40916C', '#2D6A4F'] as const,
+  accentGradient: ['#143D2B', '#2D6A4F'] as const,
 };
 
 export const darkTheme = {
@@ -170,16 +170,16 @@ export const darkTheme = {
   emotionSad: '#7BA8C0',
   emotionHopeful: '#E4B856',
   emotionLost: '#A888C6',
-  // Quick action gradients
-  actionGradient1: ['#2D6A4F', '#1B4332'] as const,
-  actionGradient2: ['#40916C', '#2D6A4F'] as const,
-  actionGradient3: ['#52B788', '#40916C'] as const,
-  actionGradient4: ['#74C69D', '#52B788'] as const,
+  // Quick action gradients (warm dark → medium green)
+  actionGradient1: ['#143D2B', '#2D6A4F'] as const,
+  actionGradient2: ['#143D2B', '#2D6A4F'] as const,
+  actionGradient3: ['#143D2B', '#2D6A4F'] as const,
+  actionGradient4: ['#143D2B', '#2D6A4F'] as const,
   // Gradients (blue-free)
-  headerGradient: ['#1B4332', '#2D6A4F', '#1A1A1D'] as const,
+  headerGradient: ['#143D2B', '#1B4332', '#1A1A1D'] as const,
   cardGradient: ['#1A1A1D', '#151517'] as const,
   goldGradient: ['#E8D44D', '#D4AF37'] as const,
-  accentGradient: ['#40916C', '#2D6A4F'] as const,
+  accentGradient: ['#143D2B', '#2D6A4F'] as const,
 };
 
 export type AppTheme = typeof lightTheme | typeof darkTheme;

@@ -7,6 +7,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, StyleSheet, AppState, AppStateStatus, Platform } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Font from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
@@ -65,6 +66,11 @@ function RootLayoutInner() {
             NavigationBar.setButtonStyleAsync(mode === 'dark' ? 'light' : 'dark');
           } catch {}
         }
+
+        // Load Uthmanic Hafs font for Quranic Arabic text (KFGQPC — same as quran.com)
+        await Font.loadAsync({
+          'UthmanicHafs': require('@/assets/fonts/UthmanicHafs.ttf'),
+        });
 
         // Initialize Notification Service (channels, handlers, etc.)
         await NotificationService.init();

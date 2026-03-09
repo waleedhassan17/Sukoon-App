@@ -12,13 +12,13 @@ const MAX_SCALE = 1.5;
 const DEFAULT_SCALE = 1.0;
 
 interface FontSizes {
-  arabic: number;       // Base 24
-  arabicLarge: number;  // Base 28 (Bismillah)
-  arabicLine: number;   // Base 48
-  english: number;      // Base 14
-  englishLine: number;  // Base 22
-  urdu: number;         // Base 16
-  urduLine: number;     // Base 28
+  arabic: number;       // Base 28
+  arabicLarge: number;  // Base 32 (Bismillah)
+  arabicLine: number;   // Base 56
+  english: number;      // Base 16
+  englishLine: number;  // Base 26
+  urdu: number;         // Base 18
+  urduLine: number;     // Base 32
 }
 
 interface FontSizeContextType {
@@ -37,13 +37,13 @@ const FontSizeContext = createContext<FontSizeContextType>({
   decrease: () => {},
   reset: () => {},
   sizes: {
-    arabic: 24,
-    arabicLarge: 28,
-    arabicLine: 48,
-    english: 14,
-    englishLine: 22,
-    urdu: 16,
-    urduLine: 28,
+    arabic: 28,
+    arabicLarge: 32,
+    arabicLine: 56,
+    english: 16,
+    englishLine: 26,
+    urdu: 18,
+    urduLine: 32,
   },
 });
 
@@ -91,13 +91,13 @@ export function FontSizeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const sizes = useMemo<FontSizes>(() => ({
-    arabic: Math.round(24 * fontScale),
-    arabicLarge: Math.round(28 * fontScale),
-    arabicLine: Math.round(48 * fontScale),
-    english: Math.round(14 * fontScale),
-    englishLine: Math.round(22 * fontScale),
-    urdu: Math.round(16 * fontScale),
-    urduLine: Math.round(28 * fontScale),
+    arabic: Math.round(28 * fontScale),
+    arabicLarge: Math.round(32 * fontScale),
+    arabicLine: Math.round(56 * fontScale),
+    english: Math.round(16 * fontScale),
+    englishLine: Math.round(26 * fontScale),
+    urdu: Math.round(18 * fontScale),
+    urduLine: Math.round(32 * fontScale),
   }), [fontScale]);
 
   const value = useMemo(() => ({

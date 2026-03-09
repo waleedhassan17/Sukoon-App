@@ -134,10 +134,10 @@ const SurahHeader = React.memo(function SurahHeader({
       style={[s.header, { paddingTop: insets.top + 6 }]}
     >
       <View style={s.headerPat}>
-        {[...Array(5)].map((_, i) => (
+        {[...Array(4)].map((_, i) => (
           <View key={i} style={[s.patCircle, {
-            width: 100 + i * 50, height: 100 + i * 50,
-            top: -10 + i * 8, right: -30 + i * 12, opacity: 0.03 + i * 0.008,
+            width: 110 + i * 50, height: 110 + i * 50,
+            top: -8 + i * 10, right: -25 + i * 14, opacity: 0.025 + i * 0.006,
           }]} />
         ))}
       </View>
@@ -312,7 +312,7 @@ const PageFrame = React.memo(function PageFrame({
                   <Text
                     onPress={() => { setSelected(sel ? null : i); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); }}
                     style={[
-                      playing && { fontWeight: '700' },
+                      playing && { fontWeight: '700', color: theme.primary },
                       sel && { backgroundColor: `${theme.gold}14` },
                       saved && !playing && !sel && { color: theme.primary },
                     ]}
@@ -437,8 +437,34 @@ const VerseCard = React.memo(function VerseCard({
   const isRtlTafseer = tafseerLang === 'ur' || tafseerLang === 'ar';
   const tafseerLabel = tafseerLang === 'ur' ? 'تفسیر' : tafseerLang === 'ar' ? 'تفسير' : 'TAFSEER';
 
+  // Smooth animated glow for playing state
+  const glowAnim = useRef(new Animated.Value(isPlaying ? 1 : 0)).current;
+  const prevPlayingRef = useRef(isPlaying);
+
+  useEffect(() => {
+    if (prevPlayingRef.current !== isPlaying) {
+      prevPlayingRef.current = isPlaying;
+      Animated.timing(glowAnim, {
+        toValue: isPlaying ? 1 : 0,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+    }
+  }, [isPlaying, glowAnim]);
+
+  const cardBorderColor = glowAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['transparent', theme.primary + 'A0'],
+  });
+  const cardBgColor = glowAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['transparent', theme.primary + '18'],
+  });
+
   return (
-    <View style={[s.vCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
+    <Animated.View style={[s.vCard, { backgroundColor: theme.surfaceElevated, borderColor: cardBorderColor, shadowColor: theme.shadowColor }]}>
+      {/* Animated overlay for playing state glow */}
+      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: cardBgColor, borderRadius: 16 }]} pointerEvents="none" />
       <View style={[s.vAccent, { backgroundColor: theme.border }, isPlaying && { backgroundColor: theme.primary }]} />
       <View style={s.vInner}>
         <View style={s.vTopRow}>
@@ -479,7 +505,7 @@ const VerseCard = React.memo(function VerseCard({
           </View>
         )}
       </View>
-    </View>
+    </Animated.View>
   );
 });
 
@@ -730,6 +756,7 @@ export default function SurahScreen() {
   const [meta, setMeta] = useState<any>(null);
   const [ayahs, setAyahs] = useState<Ayah[]>([]);
   const [bismillahText, setBismillahText] = useState<string | undefined>(undefined);
+  const [bismillahAudio, setBismillahAudio] = useState<string | undefined>(undefined);
   const [showEnglish, setShowEnglish] = useState(false);
   const [showUrdu, setShowUrdu] = useState(false);
   const [showTafseer, setShowTafseer] = useState(false);
@@ -762,6 +789,7 @@ export default function SurahScreen() {
   const spdScale = useRef(new Animated.Value(1)).current;
   const audioClickDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isAudioChangingRef = useRef(false);
+  const playingBismillahRef = useRef(false);
 
   // ─── Tracking refs ───
   const readTracker = useRef<Set<string>>(new Set());
@@ -849,6 +877,33 @@ export default function SurahScreen() {
   useEffect(() => {
     audioPlayer.setStatusCallback((st) => setPlayerState(st));
     audioPlayer.setFinishCallback(() => {
+      // ─── Bismillah intro just finished → auto-play first ayah ───
+      if (playingBismillahRef.current) {
+        playingBismillahRef.current = false;
+        if (ayahs[0]?.audio) {
+          setCurrentIndex(0);
+          setTimeout(() => {
+            if (isPageMode) {
+              const pl = pageLayouts.current[0];
+              if (pl && scrollRef.current) scrollRef.current.scrollTo({ y: Math.max(0, pl.y - 20), animated: true });
+            } else {
+              const l = ayahLayouts.current[0];
+              if (l && scrollRef.current) scrollRef.current.scrollTo({ y: Math.max(0, l.y - 100), animated: true });
+            }
+          }, 50);
+          audioPlayer.play(ayahs[0].audio).catch((e) => {
+            if (__DEV__) console.error('[Audio] Bismillah→Ayah1 error:', e);
+            setCurrentIndex(null);
+          });
+          // Preload next 2 ayahs
+          const preloadUris: string[] = [];
+          for (let i = 1; i < Math.min(3, ayahs.length); i++) {
+            if (ayahs[i]?.audio) preloadUris.push(ayahs[i].audio!);
+          }
+          if (preloadUris.length > 0) audioPlayer.preloadBatch(preloadUris).catch(() => {});
+        }
+        return;
+      }
       // Auto-continue to next ayah until manually stopped
       if (currentIndex != null) {
         const next = currentIndex + 1;
@@ -1006,10 +1061,11 @@ export default function SurahScreen() {
     setLoading(true);
     setError(null);
     try {
-      const { meta: m, ayahs: a, bismillahText: bt } = await QuranService.getSurah(surahNumber);
+      const { meta: m, ayahs: a, bismillahText: bt, bismillahAudio: ba } = await QuranService.getSurah(surahNumber);
       setMeta(m);
       setAyahs(a);
       setBismillahText(bt);
+      setBismillahAudio(ba);
       setError(null);
       Animated.timing(contentFade, { toValue: 1, duration: 500, delay: 200, useNativeDriver: true }).start();
       
@@ -1069,6 +1125,26 @@ export default function SurahScreen() {
     
     if (audioClickDebounceRef.current) clearTimeout(audioClickDebounceRef.current);
     
+    // ─── BISMILLAH INTRO: Play Bismillah audio before first ayah ───
+    // Only when starting from the beginning (index 0) and Bismillah audio is available
+    if (index === 0 && bismillahAudio && !playingBismillahRef.current && currentIndex === null) {
+      playingBismillahRef.current = true;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      try {
+        await audioPlayer.play(bismillahAudio);
+      } catch (e) {
+        if (__DEV__) console.error('[Audio] Bismillah play error:', e);
+        playingBismillahRef.current = false;
+        // Fall through to play ayah directly
+        // (don't return — continue below)
+      } finally {
+        audioClickDebounceRef.current = setTimeout(() => {
+          isAudioChangingRef.current = false;
+        }, 150);
+      }
+      if (playingBismillahRef.current) return; // Bismillah playing, finish callback will handle ayah 0
+    }
+    
     // ─── OPTIMISTIC: update UI immediately before audio loads ───
     setCurrentIndex(index);
     scrollToAyah(index);
@@ -1101,7 +1177,7 @@ export default function SurahScreen() {
         isAudioChangingRef.current = false;
       }, 150);
     }
-  }, [ayahs, surahNumber, meta, scrollToAyah, trackAyahRead]);
+  }, [ayahs, surahNumber, meta, scrollToAyah, trackAyahRead, bismillahAudio, currentIndex]);
 
   const togglePlayPause = useCallback(async () => { if (currentIndex === null) await playIndex(0); else await audioPlayer.togglePlayPause(); }, [currentIndex, playIndex]);
   const playPrev = useCallback(() => { if (currentIndex != null && currentIndex > 0) playIndex(currentIndex - 1); }, [currentIndex, playIndex]);
@@ -1570,7 +1646,7 @@ const s = StyleSheet.create({
   headerBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   headerBtn: { width: 36, height: 36, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
   headerCenter: { alignItems: 'center' },
-  headerArabic: { fontSize: 30, color: '#fff', marginBottom: 4 },
+  headerArabic: { fontSize: 30, color: '#fff', marginBottom: 4, fontWeight: '500', fontFamily: 'UthmanicHafs' },
   headerEnglish: { fontSize: 17, fontWeight: '600', color: 'rgba(255,255,255,0.9)', letterSpacing: -0.2, marginBottom: 10 },
   headerMeta: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   metaPill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, paddingHorizontal: 11, paddingVertical: 5, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
@@ -1591,7 +1667,7 @@ const s = StyleSheet.create({
   bisCrTR: { top: 12, right: 12, borderTopWidth: 1.5, borderRightWidth: 1.5, borderTopRightRadius: 6 },
   bisCrBL: { bottom: 12, left: 12, borderBottomWidth: 1.5, borderLeftWidth: 1.5, borderBottomLeftRadius: 6 },
   bisCrBR: { bottom: 12, right: 12, borderBottomWidth: 1.5, borderRightWidth: 1.5, borderBottomRightRadius: 6 },
-  bisArabic: { fontSize: 28, color: 'rgba(255,255,255,0.95)', marginVertical: 12 },
+  bisArabic: { fontSize: 28, color: 'rgba(255,255,255,0.95)', marginVertical: 12, fontWeight: '500', fontFamily: 'UthmanicHafs' },
   bisDiv: { width: 32, height: 1.5, marginVertical: 8 },
   bisTrans: { fontSize: 13, color: 'rgba(255,255,255,0.65)', textAlign: 'center', lineHeight: 20, fontStyle: 'italic' },
 
@@ -1600,14 +1676,14 @@ const s = StyleSheet.create({
   bisPageLine: { width: 48, height: 1.5, borderRadius: 1 },
   bisPageDm: { width: 6, height: 6, borderRadius: 1, transform: [{ rotate: '45deg' }] },
   bisPageDotSmall: { width: 4, height: 4, borderRadius: 2 },
-  bisPageText: { fontSize: 28, textAlign: 'center', marginVertical: 12 },
-  bisPageBismillah: { fontSize: 30, textAlign: 'center', marginVertical: 14, fontWeight: '400', letterSpacing: 1.5 },
+  bisPageText: { fontSize: 28, textAlign: 'center', marginVertical: 12, fontWeight: '500', fontFamily: 'UthmanicHafs' },
+  bisPageBismillah: { fontSize: 30, textAlign: 'center', marginVertical: 14, fontWeight: '500', letterSpacing: 1.5, fontFamily: 'UthmanicHafs' },
 
   /* Bismillah separator & styling */
   bisSeparator: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 14 },
   bisSepLine: { flex: 1, height: 1, borderRadius: 1 },
   bisSepDiamond: { width: 6, height: 6, borderRadius: 1, transform: [{ rotate: '45deg' }] },
-  bisBismillahText: { fontSize: 30, color: 'rgba(255,255,255,0.95)', textAlign: 'center', marginVertical: 8, fontWeight: '400', letterSpacing: 1.5 },
+  bisBismillahText: { fontSize: 30, color: 'rgba(255,255,255,0.95)', textAlign: 'center', marginVertical: 8, fontWeight: '500', letterSpacing: 1.5, fontFamily: 'UthmanicHafs' },
 
   /* Page frame — FULL WIDTH */
   frameWrap: { paddingHorizontal: 12, marginBottom: 16 },
@@ -1620,7 +1696,7 @@ const s = StyleSheet.create({
   pageSep: { fontSize: 11, fontWeight: '500' },
   pageTotalNum: { fontSize: 11, fontWeight: '500', fontVariant: ['tabular-nums'] },
   pageBody: { paddingHorizontal: 20, paddingVertical: 18 },
-  pageFlow: { textAlign: 'center', writingDirection: 'rtl' },
+  pageFlow: { textAlign: 'center', writingDirection: 'rtl', fontWeight: '500', fontFamily: 'UthmanicHafs' },
 
   pageActBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 14, marginBottom: 10, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14, borderWidth: 1, ...Platform.select({ ios: { shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8 }, android: { elevation: 2 } }) },
   pageActLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -1641,7 +1717,7 @@ const s = StyleSheet.create({
   endWrap: { alignItems: 'center', paddingVertical: 28, gap: 6 },
   endLabel: { fontSize: 14, fontWeight: '600', letterSpacing: 0.3 },
   endDiv: { width: 40, height: 1, marginVertical: 8 },
-  endVerse: { fontSize: 20, opacity: 0.6 },
+  endVerse: { fontSize: 20, opacity: 0.6, fontWeight: '500', fontFamily: 'UthmanicHafs' },
   endTrans: { fontSize: 12, fontStyle: 'italic' },
 
   /* Verse card */
@@ -1653,7 +1729,7 @@ const s = StyleSheet.create({
   vBadgeT: { fontSize: 12, fontWeight: '700' },
   vActions: { flexDirection: 'row', gap: 2 },
   vActBtn: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  vArabic: { fontSize: 24, lineHeight: 48, textAlign: 'right', marginBottom: 4 },
+  vArabic: { fontSize: 24, lineHeight: 48, textAlign: 'right', marginBottom: 4, fontWeight: '500', fontFamily: 'UthmanicHafs' },
   vTransWrap: { marginTop: 8 },
   vGoldLine: { width: 28, height: 1.5, marginBottom: 12 },
   vTransBlock: { marginBottom: 10 },

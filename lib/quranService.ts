@@ -1,8 +1,16 @@
 /**
  * QuranService - Production-Ready Quran API with Robust Error Handling
  * 
+ * Arabic Text: quran.com API v4 (text_uthmani — authentic Uthmani script)
+ * Translations: QuranEnc.com (Saudi Government backed — most authentic)
+ * Audio: alquran.cloud (ar.alafasy recitation)
+ * Fallbacks: fawazahmed0/quran-api → alquran.cloud → local cache
+ * 
  * Features:
- * - Multiple API fallbacks (alquran.cloud → quran.com → local cache)
+ * - quran.com text_uthmani for accurate Uthmani Arabic text (correct diacritics)
+ * - QuranEnc.com for English (Saheeh International) + Urdu (Junagarhi) translations
+ * - alquran.cloud for audio (ar.alafasy) and translation fallback
+ * - fawazahmed0/quran-api as Arabic text fallback
  * - Automatic retry with exponential backoff
  * - Request timeouts (15s)
  * - Request deduplication
@@ -14,9 +22,18 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// fawazahmed0/quran-api — CDN-hosted Arabic Quran text (Quran Academy Uthmani)
+const FAWAZ_QURAN_BASE = 'https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@1';
+const FAWAZ_ARABIC_EDITION = 'ara-quranacademy'; // Clean Uthmani script
+
+const QURANENC_BASE = 'https://quranenc.com/api/v1';
 const ALQURAN_BASE = 'https://api.alquran.cloud/v1';
 const QURANCOM_BASE = 'https://api.quran.com/api/v4';
 const BACKUP_QURAN_BASE = 'https://quran-api.com/api/v2';
+
+// QuranEnc translation keys (Saudi Government — most authentic)
+const QURANENC_ENGLISH_KEY = 'english_saheeh'; // Saheeh International
+const QURANENC_URDU_KEY = 'urdu_junagarhi';   // Muhammad Junagarhi
 
 // Cache keys
 const CACHE_KEYS = {
@@ -30,7 +47,14 @@ const CACHE_KEYS = {
 // v1.5: Al-Fatiha Bismillah now excluded from numbered ayahs (Mushaf-accurate)
 // v1.7: Fixed HTML stripping in translations, added fallback translation APIs,
 // guaranteed Bismillah for surahs 2-114 (except 9)
-const CACHE_VERSION = '1.7';
+// v2.0: Switched primary API to QuranEnc.com (Saudi Government backed, most authentic)
+// v2.1: Arabic text from fawazahmed0/quran-api (Quran Academy Uthmani), translations from QuranEnc
+// v2.2: Cache bust — force re-fetch to fix stale text (e.g. Surah 21 ayah 2 rendering)
+// v3.0: Switched primary Arabic text to quran.com text_uthmani (correct diacritics, matches Mushaf)
+// v3.1: Al-Fatiha Bismillah shown via card, numbered ayahs start from Al-Hamdulillah
+// v3.2: Fixed audio mapping — use numberInSurah for audioMap keys (fixes Al-Fatiha off-by-one)
+// v3.3: Preserve Bismillah audio (every surah starts with Bismillah recitation), strip U+06DF marks
+const CACHE_VERSION = '3.3';
 
 // Cache TTL (24 hours - but we use stale-while-revalidate)
 const CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -59,7 +83,6 @@ function stripHtmlFromTranslation(text: string): string {
 }
 
 // Fallback translation API endpoints
-const QURAN_API_V2 = 'https://api.quran.com/api/v4';
 // English: edition 131 (Sahih International), 20 (Pickthall)
 // Urdu: edition 97 (Ahmed Ali), 54 (Fateh Muhammad Jalandhry)
 
@@ -91,6 +114,8 @@ export interface SurahData {
   ayahs: Ayah[];
   /** Bismillah Arabic text extracted from the raw API response (undefined for At-Tawbah) */
   bismillahText?: string;
+  /** Bismillah audio URL — separate recitation of Bismillah before first ayah (Al-Fatiha only) */
+  bismillahAudio?: string;
 }
 
 export interface TafseerEntry {
@@ -170,6 +195,18 @@ function stripBismillahFromArabic(text: string): string {
     return stripped || trimmed;
   }
   return trimmed;
+}
+
+/**
+ * Clean Uthmani text for display by stripping Quranic annotation marks
+ * that render as visible dots/circles in the app:
+ *  - U+06DF (۟) ARABIC SMALL HIGH ROUNDED ZERO — renders as round green dots
+ *  - U+06E0 (۠) ARABIC SMALL HIGH UPRIGHT RECTANGULAR ZERO — renders as small rectangle
+ * These are reading/recitation marks, not essential text for display.
+ */
+function cleanUthmaniText(text: string): string {
+  if (!text) return '';
+  return text.replace(/[\u06DF\u06E0]/g, '');
 }
 
 /**
@@ -437,6 +474,7 @@ export const QuranService = {
       const version = await AsyncStorage.getItem(CACHE_KEYS.CACHE_VERSION);
       if (version !== CACHE_VERSION) {
         // Invalidate old cache
+        console.log(`[QuranService] 🗑️ Cache version mismatch (${version} → ${CACHE_VERSION}). Purging old cache...`);
         await this.clearCache();
         await AsyncStorage.setItem(CACHE_KEYS.CACHE_VERSION, CACHE_VERSION);
         return;
@@ -579,9 +617,9 @@ export const QuranService = {
     // Helper to ensure proper numbering AND Bismillah (handles legacy cached data)
     const ensureProperData = (data: SurahData): SurahData => {
       const normalizedAyahs = normalizeAyahNumbering(data.ayahs);
-      // Guarantee Bismillah for surahs 2-114 except 9 (At-Tawbah)
+      // Guarantee Bismillah for all surahs except At-Tawbah (9)
       let bismillahText = data.bismillahText;
-      if (surahNumber !== 1 && surahNumber !== 9 && !bismillahText) {
+      if (surahNumber !== 9 && !bismillahText) {
         bismillahText = DEFAULT_BISMILLAH;
       }
       // Only create new object if something changed
@@ -661,9 +699,9 @@ export const QuranService = {
         if (cached?.data) {
           console.warn('[QuranService] Using stale cache for Surah', surahNumber);
           const normalizedAyahs = normalizeAyahNumbering(cached.data.ayahs);
-          // Guarantee Bismillah for surahs 2-114 except 9
+          // Guarantee Bismillah for all surahs except At-Tawbah (9)
           let bismillahText = cached.data.bismillahText;
-          if (surahNumber !== 1 && surahNumber !== 9 && !bismillahText) {
+          if (surahNumber !== 9 && !bismillahText) {
             bismillahText = '\u0628\u0650\u0633\u0652\u0645\u0650 \u0671\u0644\u0644\u0651\u064E\u0647\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0652\u0645\u064E\u0640\u0670\u0646\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0650\u064A\u0645\u0650';
           }
           const normalizedData: SurahData = { ...cached.data, ayahs: normalizedAyahs, bismillahText };
@@ -680,28 +718,37 @@ export const QuranService = {
   },
 
   /**
-   * Fetch from primary API (alquran.cloud)
-   * 
-   * CRITICAL FIX (v1.4): Audio editions (ar.alafasy) may include Bismillah
-   * as a separate ayah entry, while text editions (en.sahih, ur.jalandhry) do NOT.
-   * We MUST remove the standalone Bismillah from the Arabic array BEFORE
-   * combining with translations by index, otherwise every translation is
-   * off by one and the first real ayah appears to be missing.
+   * Fetch from primary APIs:
+   *   - Arabic text: quran.com API v4 (text_uthmani — accurate Uthmani script with correct diacritics)
+   *   - Translations: QuranEnc.com (Saudi Government backed — most authentic)
+   *   - Audio: alquran.cloud (ar.alafasy recitation)
+   *
+   * quran.com response: { verses: [{ id, verse_key, text_uthmani }] }
+   *   - Clean verse_key format (e.g. "21:2"), no extra Bismillah entry
+   *   - Bismillah is verse 1 in Al-Fatiha, no Bismillah in At-Tawbah
+   *
+   * QuranEnc response: { result: [{ id, sura, aya, arabic_text, translation, footnotes }] }
+   *   - Footnotes in [N] format — stripped for clean display
    */
   async fetchSurahFromPrimaryAPI(surahNumber: number): Promise<SurahData> {
-    // Fetch Arabic + English + Urdu in parallel
-    const [arabicJson, englishJson, urduJson] = await Promise.allSettled([
+    // Fetch Arabic text, English + Urdu translations, and audio in parallel
+    console.log(`[QuranService] 🕌 Fetching Surah ${surahNumber} from APIs (quran.com Arabic + QuranEnc translations + alquran.cloud audio)`);
+    const [arabicJson, englishJson, urduJson, audioJson] = await Promise.allSettled([
+      safeFetch(
+        `${QURANCOM_BASE}/quran/verses/uthmani?chapter_number=${surahNumber}`,
+        `Fetch Arabic (quran.com text_uthmani) Surah ${surahNumber}`,
+      ),
+      safeFetch(
+        `${QURANENC_BASE}/translation/sura/${QURANENC_ENGLISH_KEY}/${surahNumber}`,
+        `Fetch QuranEnc English Surah ${surahNumber}`,
+      ),
+      safeFetch(
+        `${QURANENC_BASE}/translation/sura/${QURANENC_URDU_KEY}/${surahNumber}`,
+        `Fetch QuranEnc Urdu Surah ${surahNumber}`,
+      ),
       safeFetch(
         `${ALQURAN_BASE}/surah/${surahNumber}/ar.alafasy`,
-        `Fetch Arabic Surah ${surahNumber}`,
-      ),
-      safeFetch(
-        `${ALQURAN_BASE}/surah/${surahNumber}/en.sahih`,
-        `Fetch English Surah ${surahNumber}`,
-      ),
-      safeFetch(
-        `${ALQURAN_BASE}/surah/${surahNumber}/ur.jalandhry`,
-        `Fetch Urdu Surah ${surahNumber}`,
+        `Fetch audio Surah ${surahNumber}`,
       ),
     ]);
 
@@ -709,103 +756,145 @@ export const QuranService = {
     const arabicResult = arabicJson.status === 'fulfilled' ? arabicJson.value : null;
     const englishResult = englishJson.status === 'fulfilled' ? englishJson.value : null;
     const urduResult = urduJson.status === 'fulfilled' ? urduJson.value : null;
+    const audioResult = audioJson.status === 'fulfilled' ? audioJson.value : null;
 
-    // Validate Arabic response (required)
-    if (!arabicResult || arabicResult.code !== 200 || !arabicResult.data) {
-      throw new Error('Invalid response from primary API');
+    // quran.com returns { verses: [{ id, verse_key, text_uthmani }] }
+    // Convert to common format: { verse: N, text: "..." }
+    let arabicAyahs: any[] = [];
+    if (arabicResult?.verses && arabicResult.verses.length > 0) {
+      arabicAyahs = arabicResult.verses.map((v: any) => {
+        // verse_key is "21:2" — extract the ayah number after colon
+        const verseNum = parseInt((v.verse_key || '').split(':')[1], 10) || 0;
+        return { verse: verseNum, text: v.text_uthmani || '' };
+      });
     }
+    // QuranEnc returns { result: [...] }
+    const englishAyahs: any[] = englishResult?.result || [];
+    const urduAyahs: any[] = urduResult?.result || [];
 
-    const arabicData = arabicResult.data;
-    let englishData = (englishResult?.code === 200) ? englishResult.data : null;
-    let urduData = (urduResult?.code === 200) ? urduResult.data : null;
-
-    // ─── FALLBACK: If English translation failed, try alternative editions ───
-    if (!englishData || !englishData.ayahs || englishData.ayahs.length === 0) {
+    // We need Arabic text at minimum
+    if (arabicAyahs.length === 0) {
+      console.warn(`[QuranService] quran.com Arabic failed for Surah ${surahNumber}, trying fawazahmed0 fallback...`);
+      // Fallback 1: fawazahmed0/quran-api
       try {
-        // Try Pickthall edition as fallback
-        const fallback = await safeFetch(
-          `${ALQURAN_BASE}/surah/${surahNumber}/en.pickthall`,
-          `Fetch English fallback Surah ${surahNumber}`,
+        const fawazResult = await safeFetch(
+          `${FAWAZ_QURAN_BASE}/editions/${FAWAZ_ARABIC_EDITION}/${surahNumber}.json`,
+          `Fetch Arabic (fawazahmed0 fallback) Surah ${surahNumber}`,
         );
-        if (fallback?.code === 200 && fallback?.data) {
-          englishData = fallback.data;
+        if (fawazResult?.chapter && fawazResult.chapter.length > 0) {
+          arabicAyahs = fawazResult.chapter;
         }
-      } catch {
-        // Try quran.com API as second fallback
-        try {
-          const qcRes = await safeFetch(
-            `${QURAN_API_V2}/verses/by_chapter/${surahNumber}?language=en&translations=131&fields=text_uthmani&per_page=300`,
-            `Fetch English from quran.com Surah ${surahNumber}`,
-          );
-          if (qcRes?.verses) {
-            englishData = {
-              ayahs: qcRes.verses.map((v: any) => ({
-                text: v.translations?.[0]?.text || '',
-                numberInSurah: v.verse_number,
-              })),
-            };
-          }
-        } catch {}
+      } catch {}
+      // Fallback 2: QuranEnc arabic_text field
+      if (arabicAyahs.length === 0) {
+        const fallbackAyahs = englishAyahs.length > 0 ? englishAyahs : urduAyahs;
+        if (fallbackAyahs.length === 0) {
+          throw new Error('All primary APIs returned no data for Surah ' + surahNumber);
+        }
+        arabicAyahs.push(...fallbackAyahs.map((a: any) => ({
+          verse: parseInt(a.aya, 10),
+          text: a.arabic_text || '',
+        })));
       }
     }
 
-    // ─── FALLBACK: If Urdu translation failed, try alternative editions ───
-    if (!urduData || !urduData.ayahs || urduData.ayahs.length === 0) {
-      try {
-        // Try Ahmed Raza Khan edition as fallback
-        const fallback = await safeFetch(
-          `${ALQURAN_BASE}/surah/${surahNumber}/ur.ahmedali`,
-          `Fetch Urdu fallback Surah ${surahNumber}`,
-        );
-        if (fallback?.code === 200 && fallback?.data) {
-          urduData = fallback.data;
+    // Build audio URL map from alquran.cloud (keyed by actual ayah numberInSurah)
+    // NOTE: Do NOT filter Bismillah from audio — every surah must start with Bismillah recitation.
+    // For Al-Fatiha, the Bismillah audio is stored separately as bismillahAudio.
+    const audioMap = new Map<number, string>();
+    let bismillahAudio: string | undefined;
+    if (audioResult?.code === 200 && audioResult?.data?.ayahs) {
+      const rawAudioAyahs = audioResult.data.ayahs || [];
+      rawAudioAyahs.forEach((a: any) => {
+        const key = a.numberInSurah ?? 0;
+        audioMap.set(key, a.audio || a.audioSecondary?.[0] || '');
+      });
+      // Capture standalone Bismillah audio (Al-Fatiha verse 1 is Bismillah-only)
+      // For other surahs, Bismillah is already embedded in first ayah's audio
+      if (surahNumber !== 9 && rawAudioAyahs.length > 0) {
+        const firstAudioText = (rawAudioAyahs[0]?.text || '').trim();
+        if (isBismillahOnly(firstAudioText)) {
+          bismillahAudio = rawAudioAyahs[0]?.audio || rawAudioAyahs[0]?.audioSecondary?.[0] || undefined;
         }
-      } catch {
-        // Try quran.com API as second fallback (Urdu: resource 97)
-        try {
-          const qcRes = await safeFetch(
-            `${QURAN_API_V2}/verses/by_chapter/${surahNumber}?language=ur&translations=97&fields=text_uthmani&per_page=300`,
-            `Fetch Urdu from quran.com Surah ${surahNumber}`,
-          );
-          if (qcRes?.verses) {
-            urduData = {
-              ayahs: qcRes.verses.map((v: any) => ({
-                text: v.translations?.[0]?.text || '',
-                numberInSurah: v.verse_number,
-              })),
-            };
-          }
-        } catch {}
       }
     }
 
-    const meta: SurahMeta = {
-      number: arabicData.number,
-      name: arabicData.name,
-      englishName: arabicData.englishName,
-      englishNameTranslation: arabicData.englishNameTranslation,
-      numberOfAyahs: arabicData.numberOfAyahs,
-      revelationType: arabicData.revelationType,
-    };
+    // ─── FALLBACK: If English failed, try alquran.cloud as fallback ───
+    let englishFallbackMap: Map<number, string> | null = null;
+    if (englishAyahs.length === 0) {
+      try {
+        const fallback = await safeFetch(
+          `${ALQURAN_BASE}/surah/${surahNumber}/en.sahih`,
+          `Fetch English fallback from alquran.cloud Surah ${surahNumber}`,
+        );
+        if (fallback?.code === 200 && fallback?.data?.ayahs) {
+          englishFallbackMap = new Map();
+          const filtered = preFilterStandaloneBismillah(fallback.data.ayahs, surahNumber);
+          filtered.forEach((a: any, i: number) => {
+            englishFallbackMap!.set(i + 1, stripHtmlFromTranslation(a.text || ''));
+          });
+        }
+      } catch {}
+    }
 
-    // ─── STEP 0: Capture Bismillah text from raw API BEFORE any filtering ───
-    // This preserves the original API text for display in the SurahIntro component.
-    const rawArabicAyahs: any[] = arabicData.ayahs || [];
+    // ─── FALLBACK: If Urdu failed, try alquran.cloud as fallback ───
+    let urduFallbackMap: Map<number, string> | null = null;
+    if (urduAyahs.length === 0) {
+      try {
+        const fallback = await safeFetch(
+          `${ALQURAN_BASE}/surah/${surahNumber}/ur.jalandhry`,
+          `Fetch Urdu fallback from alquran.cloud Surah ${surahNumber}`,
+        );
+        if (fallback?.code === 200 && fallback?.data?.ayahs) {
+          urduFallbackMap = new Map();
+          const filtered = preFilterStandaloneBismillah(fallback.data.ayahs, surahNumber);
+          filtered.forEach((a: any, i: number) => {
+            urduFallbackMap!.set(i + 1, stripHtmlFromTranslation(a.text || ''));
+          });
+        }
+      } catch {}
+    }
+
+    // Build surah metadata from alquran.cloud if available, else from cache
+    let meta: SurahMeta;
+    if (audioResult?.code === 200 && audioResult?.data) {
+      const d = audioResult.data;
+      meta = {
+        number: d.number,
+        name: d.name,
+        englishName: d.englishName,
+        englishNameTranslation: d.englishNameTranslation,
+        numberOfAyahs: d.numberOfAyahs,
+        revelationType: d.revelationType,
+      };
+    } else {
+      // Derive from surahs cache
+      const cachedMeta = surahsCache?.find(s => s.number === surahNumber);
+      meta = {
+        number: surahNumber,
+        name: cachedMeta?.name || '',
+        englishName: cachedMeta?.englishName || '',
+        englishNameTranslation: cachedMeta?.englishNameTranslation || '',
+        numberOfAyahs: arabicAyahs.length,
+        revelationType: cachedMeta?.revelationType || '',
+      };
+    }
+
+    // ─── STEP 0: Capture Bismillah text from Arabic text ───
+    // Al-Fatiha (1): Bismillah IS verse 1 — extract it for the card, then remove from ayah list
+    // At-Tawbah (9): No Bismillah at all
     let bismillahText: string | undefined;
-    if (surahNumber !== 9 && rawArabicAyahs.length > 0) {
-      const firstRawText = (rawArabicAyahs[0]?.text || '').trim();
+    if (surahNumber !== 9 && arabicAyahs.length > 0) {
+      const firstRawText = (arabicAyahs[0]?.text || '').trim();
       if (isBismillahOnly(firstRawText)) {
-        // Standalone Bismillah ayah (audio editions like ar.alafasy)
         bismillahText = firstRawText;
       } else {
-        // Bismillah may be prepended to first ayah text — try exact patterns first
         for (const pattern of BISMILLAH_ARABIC_PATTERNS) {
           if (firstRawText.startsWith(pattern)) {
             bismillahText = pattern;
             break;
           }
         }
-        // Flexible regex fallback for any diacritical variant
         if (!bismillahText) {
           const flexMatch = matchBismillahFlexible(firstRawText);
           if (flexMatch) bismillahText = flexMatch;
@@ -813,71 +902,64 @@ export const QuranService = {
       }
     }
 
-    // ─── STEP 1: Pre-filter standalone Bismillah from all editions BEFORE alignment ───
-    // Audio editions (ar.alafasy) may include Bismillah as a separate ayah.
-    // For Al-Fatiha, ALL editions (Arabic, English, Urdu) include Bismillah as ayah 1.
-    // We filter all arrays so that index-based alignment stays correct.
-    const filteredArabicAyahs = preFilterStandaloneBismillah(rawArabicAyahs, surahNumber);
-
-    // Also filter English/Urdu translation arrays if their first ayah is Bismillah.
-    // This covers Al-Fatiha where all editions include Bismillah as ayah 1.
-    const rawEnglishAyahs: any[] = englishData?.ayahs || [];
-    const rawUrduAyahs: any[] = urduData?.ayahs || [];
-    const bismillahWasRemoved = filteredArabicAyahs.length < rawArabicAyahs.length;
-    const filteredEnglishAyahs = bismillahWasRemoved && rawEnglishAyahs.length > filteredArabicAyahs.length
-      ? rawEnglishAyahs.slice(rawEnglishAyahs.length - filteredArabicAyahs.length)
-      : rawEnglishAyahs;
-    const filteredUrduAyahs = bismillahWasRemoved && rawUrduAyahs.length > filteredArabicAyahs.length
-      ? rawUrduAyahs.slice(rawUrduAyahs.length - filteredArabicAyahs.length)
-      : rawUrduAyahs;
-
-    // Log alignment info in dev for debugging
-    if (__DEV__) {
-      const arabicCount = filteredArabicAyahs.length;
-      const englishCount = filteredEnglishAyahs.length;
-      const urduCount = filteredUrduAyahs.length;
-      if (arabicCount !== englishCount || arabicCount !== urduCount) {
-        console.warn(
-          `[QuranService] Surah ${surahNumber} ayah count mismatch after Bismillah filter: ` +
-          `Arabic=${arabicCount}, English=${englishCount}, Urdu=${urduCount}`
-        );
-      }
+    // ─── Al-Fatiha special handling: verse 1 IS Bismillah ───
+    // Remove it from the ayah list so numbered verses start from الحمد لله رب العالمين
+    // The Bismillah is already captured above for the BismillahCard header.
+    if (surahNumber === 1 && arabicAyahs.length > 0 && isBismillahOnly((arabicAyahs[0]?.text || '').trim())) {
+      arabicAyahs.splice(0, 1);
+      if (englishAyahs.length > 0) englishAyahs.splice(0, 1);
+      if (urduAyahs.length > 0) urduAyahs.splice(0, 1);
     }
 
-    // ─── STEP 2: Build ayahs with index-based translation alignment ───
-    // Now that standalone Bismillah is removed from Arabic, indices match:
-    //   filteredArabic[0] = Verse 1  ←→  English[0] = Verse 1 translation ✓
-    //   filteredArabic[1] = Verse 2  ←→  English[1] = Verse 2 translation ✓
-    const ayahs: Ayah[] = filteredArabicAyahs.map((a: any, i: number) => ({
-      number: a.number,
-      numberInSurah: a.numberInSurah,
-      text: a.text,
-      translation: stripHtmlFromTranslation(filteredEnglishAyahs[i]?.text || ''),
-      urduTranslation: stripHtmlFromTranslation(filteredUrduAyahs[i]?.text || ''),
-      audio: a.audio || a.audioSecondary?.[0] || null,
-      juz: a.juz,
-      page: a.page,
-      hizbQuarter: a.hizbQuarter,
-    }));
+    // ─── STEP 1: Build ayahs by combining Arabic text + translations ───
+    // quran.com text_uthmani uses clean 1-based verse numbering with no extra Bismillah entry.
+    // QuranEnc also uses 1-based aya numbering — indices align directly.
+    const ayahs: Ayah[] = arabicAyahs.map((arabicItem: any, i: number) => {
+      const ayaNum = arabicItem.verse || (i + 1);
+      // Get English translation from QuranEnc
+      let englishTranslation = '';
+      if (englishAyahs.length > 0 && englishAyahs[i]) {
+        englishTranslation = stripHtmlFromTranslation(
+          (englishAyahs[i].translation || '').replace(/\[\d+\]/g, '').trim()
+        );
+      } else if (englishFallbackMap) {
+        englishTranslation = englishFallbackMap.get(ayaNum) || '';
+      }
+      // Get Urdu translation from QuranEnc
+      let urduTranslation = '';
+      if (urduAyahs.length > 0 && urduAyahs[i]) {
+        urduTranslation = stripHtmlFromTranslation(
+          (urduAyahs[i].translation || '').replace(/\[\d+\]/g, '').trim()
+        );
+      } else if (urduFallbackMap) {
+        urduTranslation = urduFallbackMap.get(ayaNum) || '';
+      }
 
-    // ─── STEP 3: Strip Bismillah PREFIX from first ayah text (if prepended) ───
-    // Some API responses prepend Bismillah text to the first verse instead of
-    // having a separate entry. Since BismillahCard renders it in the UI,
-    // we strip the prefix to avoid duplication.
+      return {
+        number: i + 1,
+        numberInSurah: ayaNum,
+        text: cleanUthmaniText(arabicItem.text || ''),
+        translation: englishTranslation,
+        urduTranslation: urduTranslation,
+        audio: audioMap.get(ayaNum) || undefined,
+        juz: 1,   // quran.com text_uthmani endpoint doesn't provide juz/page — filled from cache or defaults
+        page: 1,
+        hizbQuarter: 1,
+      };
+    });
+
+    // ─── STEP 2: Strip Bismillah PREFIX from first ayah text (if prepended) ───
     const cleanedAyahs = stripFirstAyahBismillahPrefix(ayahs, surahNumber);
-    
-    // ─── STEP 4: Normalize numbering to ensure consistent 1-based indexing ───
+
+    // ─── STEP 3: Normalize numbering to ensure consistent 1-based indexing ───
     const normalizedAyahs = normalizeAyahNumbering(cleanedAyahs);
 
-    // ─── STEP 5: Guarantee Bismillah text for surahs 2-114 (except 9) ───
-    // If the API didn't return Bismillah text, use the standard hardcoded text.
-    // Surah Al-Fatiha (1): Bismillah is handled separately (it's part of the verses).
-    // Surah At-Tawbah (9): No Bismillah.
-    if (surahNumber !== 1 && surahNumber !== 9 && !bismillahText) {
+    // ─── STEP 4: Guarantee Bismillah text for all surahs except At-Tawbah (9) ───
+    if (surahNumber !== 9 && !bismillahText) {
       bismillahText = '\u0628\u0650\u0633\u0652\u0645\u0650 \u0671\u0644\u0644\u0651\u064E\u0647\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0652\u0645\u064E\u0640\u0670\u0646\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0650\u064A\u0645\u0650';
     }
 
-    return { meta, ayahs: normalizedAyahs, bismillahText };
+    return { meta, ayahs: normalizedAyahs, bismillahText, bismillahAudio };
   },
 
   /**
@@ -914,6 +996,8 @@ export const QuranService = {
     };
 
     // ─── Capture Bismillah text from raw API BEFORE filtering ───
+    // Al-Fatiha (1): Bismillah IS verse 1 — extract for card, filter from ayah list
+    // At-Tawbah (9): No Bismillah at all
     const rawVerses: any[] = versesJson?.verses || [];
     let bismillahText: string | undefined;
     if (surahNumber !== 9 && rawVerses.length > 0) {
@@ -943,7 +1027,7 @@ export const QuranService = {
     const ayahs: Ayah[] = filteredVerses.map((v: any) => ({
       number: v.id,
       numberInSurah: v.verse_number,
-      text: v.text_uthmani || v.text_imlaei || v.text || '',
+      text: cleanUthmaniText(v.text_uthmani || v.text_imlaei || v.text || ''),
       translation: stripHtmlFromTranslation(v.translations?.[0]?.text || ''),
       urduTranslation: stripHtmlFromTranslation(v.translations?.[1]?.text || ''),
       audio: v.audio?.url || null,
@@ -958,8 +1042,8 @@ export const QuranService = {
     // Normalize numbering to ensure consistent 1-based indexing across all surahs
     const normalizedAyahs = normalizeAyahNumbering(cleanedAyahs);
 
-    // Guarantee Bismillah text for surahs 2-114 (except 9)
-    if (surahNumber !== 1 && surahNumber !== 9 && !bismillahText) {
+    // Guarantee Bismillah text for all surahs except At-Tawbah (9)
+    if (surahNumber !== 9 && !bismillahText) {
       bismillahText = '\u0628\u0650\u0633\u0652\u0645\u0650 \u0671\u0644\u0644\u0651\u064E\u0647\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0652\u0645\u064E\u0640\u0670\u0646\u0650 \u0671\u0644\u0631\u0651\u064E\u062D\u0650\u064A\u0645\u0650';
     }
 
@@ -1009,35 +1093,72 @@ export const QuranService = {
   async getRandomAyah(): Promise<{ arabic: string; english: string; urdu: string; surah: number; ayah: number; surahName: string }> {
     try {
       return await retryWithBackoff(async () => {
+        // Pick a random surah and ayah
+        const surahsMetaList = surahsCache || await this.getAllSurahs();
+        const randomSurah = surahsMetaList[Math.floor(Math.random() * surahsMetaList.length)];
+        const randomAyaNum = Math.floor(Math.random() * randomSurah.numberOfAyahs) + 1;
+
+        // Fetch Arabic from fawazahmed0 + translations from QuranEnc in parallel
+        const [arabicRes, enRes, urRes] = await Promise.all([
+          safeFetch(
+            `${FAWAZ_QURAN_BASE}/editions/${FAWAZ_ARABIC_EDITION}/${randomSurah.number}/${randomAyaNum}.json`,
+            `Fetch random ayah Arabic`,
+          ),
+          safeFetch(
+            `${QURANENC_BASE}/translation/aya/${QURANENC_ENGLISH_KEY}/${randomSurah.number}/${randomAyaNum}`,
+            `Fetch random ayah EN`,
+          ),
+          safeFetch(
+            `${QURANENC_BASE}/translation/aya/${QURANENC_URDU_KEY}/${randomSurah.number}/${randomAyaNum}`,
+            `Fetch random ayah UR`,
+          ),
+        ]);
+
+        const enData = enRes?.result;
+        const urData = urRes?.result;
+        const arabicText = arabicRes?.text || enData?.arabic_text || urData?.arabic_text || '';
+
+        if (!arabicText && !enData && !urData) throw new Error('All APIs returned no data');
+
+        return {
+          arabic: cleanUthmaniText(arabicText),
+          english: stripHtmlFromTranslation((enData?.translation || '').replace(/\[\d+\]/g, '').trim()),
+          urdu: stripHtmlFromTranslation((urData?.translation || '').replace(/\[\d+\]/g, '').trim()),
+          surah: randomSurah.number,
+          ayah: randomAyaNum,
+          surahName: randomSurah.englishName,
+        };
+      }, 2);
+    } catch (e) {
+      console.warn('[QuranService] QuranEnc random ayah failed, trying alquran.cloud...');
+      // Fallback to alquran.cloud
+      try {
         const randomAyah = Math.floor(Math.random() * 6236) + 1;
         const [ar, en, ur] = await Promise.all([
           safeFetch(`${ALQURAN_BASE}/ayah/${randomAyah}`, `Fetch random ayah ${randomAyah}`),
           safeFetch(`${ALQURAN_BASE}/ayah/${randomAyah}/en.sahih`, `Fetch random ayah translation`),
           safeFetch(`${ALQURAN_BASE}/ayah/${randomAyah}/ur.jalandhry`, `Fetch random ayah Urdu`),
         ]);
-
         if (!ar || !ar.data) throw new Error('Invalid response');
-
         return {
-          arabic: ar.data.text,
+          arabic: cleanUthmaniText(ar.data.text || ''),
           english: en?.data?.text || '',
           urdu: ur?.data?.text || '',
           surah: ar.data.surah.number,
           ayah: ar.data.numberInSurah,
           surahName: ar.data.surah.englishName,
         };
-      }, 2);
-    } catch (e) {
-      console.warn('[QuranService] Failed to fetch random ayah, using fallback');
-      // Fallback
-      return {
-        arabic: 'أَلَا بِذِكْرِ اللَّهِ تَطْمَئِنُّ الْقُلُوبُ',
-        english: 'Verily, in the remembrance of Allah do hearts find rest.',
-        urdu: 'سن لو! اللہ کے ذکر سے ہی دلوں کو اطمینان نصیب ہوتا ہے',
-        surah: 13,
-        ayah: 28,
-        surahName: 'Ar-Ra\'d',
-      };
+      } catch {
+        // Hardcoded fallback
+        return {
+          arabic: 'أَلَا بِذِكْرِ اللَّهِ تَطْمَئِنُّ الْقُلُوبُ',
+          english: 'Verily, in the remembrance of Allah do hearts find rest.',
+          urdu: 'سن لو! اللہ کے ذکر سے ہی دلوں کو اطمینان نصیب ہوتا ہے',
+          surah: 13,
+          ayah: 28,
+          surahName: 'Ar-Ra\'d',
+        };
+      }
     }
   },
 

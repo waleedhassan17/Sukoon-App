@@ -18,6 +18,8 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import FontAwesome6 from '@expo/vector-icons/FontAwesome6';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -81,6 +83,148 @@ const SectionDivider = ({ borderColor }: { borderColor: string }) => (
     <View style={[styles.dividerDot, { backgroundColor: borderColor }]} />
   </View>
 );
+
+/* ─── Flying Birds Animation ─── */
+const BIRD_CONFIGS = [
+  { size: 16, topPct: 0.15, duration: 11000, delay: 0,    flapSpeed: 350 },
+  { size: 11, topPct: 0.30, duration: 16000, delay: 2000,  flapSpeed: 300 },
+  { size: 18, topPct: 0.08, duration: 9500,  delay: 4500,  flapSpeed: 380 },
+  { size: 10, topPct: 0.38, duration: 19000, delay: 8000,  flapSpeed: 280 },
+  { size: 13, topPct: 0.22, duration: 13500, delay: 3000,  flapSpeed: 330 },
+  { size: 9,  topPct: 0.12, duration: 17000, delay: 6000,  flapSpeed: 310 },
+  { size: 14, topPct: 0.32, duration: 12000, delay: 1000,  flapSpeed: 360 },
+];
+
+const BirdShape = React.memo(({ size, color }: { size: number; color: string }) => {
+  // Realistic bird silhouette: two curved arcs forming elegant wings
+  const wingW = size * 1.15;
+  const wingH = size * 0.55;
+  const stroke = Math.max(1.5, size * 0.14);
+  return (
+    <View style={{
+      width: size * 2.5,
+      height: size,
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+    }}>
+      {/* Left wing — curved arc stroke */}
+      <View style={{
+        width: wingW,
+        height: wingH,
+        borderTopWidth: stroke,
+        borderLeftWidth: stroke * 0.8,
+        borderBottomWidth: 0,
+        borderRightWidth: 0,
+        borderColor: color,
+        borderTopLeftRadius: wingW * 0.9,
+        borderTopRightRadius: wingW * 0.05,
+      }} />
+      {/* Right wing — mirrored curved arc */}
+      <View style={{
+        width: wingW,
+        height: wingH,
+        borderTopWidth: stroke,
+        borderRightWidth: stroke * 0.8,
+        borderBottomWidth: 0,
+        borderLeftWidth: 0,
+        borderColor: color,
+        borderTopRightRadius: wingW * 0.9,
+        borderTopLeftRadius: wingW * 0.05,
+        marginLeft: -stroke * 0.5,
+      }} />
+    </View>
+  );
+});
+
+const FlyingBirds = React.memo(() => {
+  const birdAnims = useRef(
+    BIRD_CONFIGS.map(() => ({
+      translateX: new Animated.Value(width + 60),
+      flapAnim: new Animated.Value(0),
+    }))
+  ).current;
+
+  useEffect(() => {
+    const timeouts: ReturnType<typeof setTimeout>[] = [];
+
+    BIRD_CONFIGS.forEach((cfg, i) => {
+      const anim = birdAnims[i];
+
+      // Horizontal flight — right to left, looping with gentle randomness
+      const startFlight = () => {
+        anim.translateX.setValue(width + 30 + Math.random() * 40);
+        Animated.timing(anim.translateX, {
+          toValue: -100,
+          duration: cfg.duration + Math.random() * 2000,
+          useNativeDriver: true,
+        }).start(() => {
+          const t = setTimeout(startFlight, 2000 + Math.random() * 4000);
+          timeouts.push(t);
+        });
+      };
+      const t = setTimeout(startFlight, cfg.delay);
+      timeouts.push(t);
+
+      // Wing flap — scaleY oscillation for realistic flapping motion
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(anim.flapAnim, {
+            toValue: 1,
+            duration: cfg.flapSpeed,
+            useNativeDriver: true,
+          }),
+          Animated.timing(anim.flapAnim, {
+            toValue: 0,
+            duration: cfg.flapSpeed,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    });
+
+    return () => {
+      timeouts.forEach(clearTimeout);
+      birdAnims.forEach((a) => {
+        a.translateX.stopAnimation();
+        a.flapAnim.stopAnimation();
+      });
+    };
+  }, []);
+
+  return (
+    <View style={styles.birdsContainer} pointerEvents="none">
+      {BIRD_CONFIGS.map((cfg, i) => {
+        const flapScaleY = birdAnims[i].flapAnim.interpolate({
+          inputRange: [0, 0.5, 1],
+          outputRange: [1, 0.55, 1],
+        });
+        const flapTranslateY = birdAnims[i].flapAnim.interpolate({
+          inputRange: [0, 0.5, 1],
+          outputRange: [0, 2, 0],
+        });
+        return (
+          <Animated.View
+            key={i}
+            style={[
+              styles.birdWrap,
+              {
+                top: `${cfg.topPct * 100}%` as any,
+                transform: [
+                  { translateX: birdAnims[i].translateX },
+                  { translateY: flapTranslateY },
+                  { scaleY: flapScaleY },
+                ],
+              },
+            ]}
+          >
+            <BirdShape size={cfg.size} color="rgba(255,255,255,0.18)" />
+          </Animated.View>
+        );
+      })}
+    </View>
+  );
+});
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -181,10 +325,10 @@ export default function HomeScreen() {
   ], [theme]);
 
   const quickActions = useMemo(() => [
-    { label: 'Tasbeeh', icon: 'ellipse-outline' as const, route: '/tools/tasbeeh', gradient: theme.actionGradient1 },
-    { label: 'Qiblah', icon: 'navigate-outline' as const, route: '/tools/qiblah', gradient: theme.actionGradient2 },
-    { label: 'Prayer', icon: 'time-outline' as const, route: '/tools/prayer', gradient: theme.actionGradient3 },
-    { label: 'Insights', icon: 'bar-chart-outline' as const, route: '/insights', gradient: theme.actionGradient4 },
+    { label: 'Tasbeeh', icon: 'ellipse-outline' as const, family: 'ion' as const, route: '/tools/tasbeeh', gradient: theme.actionGradient1 },
+    { label: 'Qiblah', icon: 'kaaba' as const, family: 'fa6' as const, route: '/tools/qiblah', gradient: theme.actionGradient2 },
+    { label: 'Prayer', icon: 'mosque' as const, family: 'mci' as const, route: '/tools/prayer', gradient: theme.actionGradient3 },
+    { label: 'Insights', icon: 'bar-chart-outline' as const, family: 'ion' as const, route: '/insights', gradient: theme.actionGradient4 },
   ], [theme]);
 
   useEffect(() => {
@@ -351,22 +495,25 @@ export default function HomeScreen() {
           >
             {/* Decorative pattern overlay */}
             <View style={styles.heroPattern}>
-              {[...Array(6)].map((_, i) => (
+              {[...Array(5)].map((_, i) => (
                 <View
                   key={i}
                   style={[
                     styles.heroPatternCircle,
                     {
-                      width: 120 + i * 60,
-                      height: 120 + i * 60,
-                      top: -20 + i * 10,
-                      right: -40 + i * 15,
-                      opacity: 0.03 + i * 0.008,
+                      width: 140 + i * 55,
+                      height: 140 + i * 55,
+                      top: -15 + i * 12,
+                      right: -35 + i * 18,
+                      opacity: 0.025 + i * 0.006,
                     },
                   ]}
                 />
               ))}
             </View>
+
+            {/* Flying birds animation */}
+            <FlyingBirds />
 
             {/* Top bar */}
             <View style={styles.heroTopBar}>
@@ -487,7 +634,7 @@ export default function HomeScreen() {
                 style={{ opacity: canAnalyze ? 1 : 0.4 }}
               >
                 <LinearGradient
-                  colors={['#2D6A4F', '#1B4332']}
+                  colors={['#143D2B', '#2D6A4F']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                   style={styles.guidanceBtn}
@@ -678,7 +825,13 @@ export default function HomeScreen() {
                     colors={action.gradient as [string, string]}
                     style={styles.actionIconWrap}
                   >
-                    <Ionicons name={action.icon} size={20} color={theme.textOnDark} />
+                    {action.family === 'fa6' ? (
+                      <FontAwesome6 name={action.icon as any} size={18} color={theme.textOnDark} />
+                    ) : action.family === 'mci' ? (
+                      <MaterialCommunityIcons name={action.icon as any} size={20} color={theme.textOnDark} />
+                    ) : (
+                      <Ionicons name={action.icon as any} size={20} color={theme.textOnDark} />
+                    )}
                   </LinearGradient>
                   <Text style={[styles.actionLabel, { color: theme.text }]}>{action.label}</Text>
                 </TouchableOpacity>
@@ -753,9 +906,9 @@ const styles = StyleSheet.create({
   /* ─── Hero ─── */
   heroGradient: {
     paddingHorizontal: 22,
-    paddingBottom: 28,
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
+    paddingBottom: 30,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
     overflow: 'hidden',
   },
   heroPattern: {
@@ -767,6 +920,13 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: '#fff',
+  },
+  birdsContainer: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'hidden',
+  },
+  birdWrap: {
+    position: 'absolute',
   },
   heroTopBar: {
     flexDirection: 'row',
@@ -803,10 +963,10 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   heroSubtitle: {
-    fontSize: 15,
-    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14.5,
+    color: 'rgba(255,255,255,0.65)',
     fontWeight: '400',
-    letterSpacing: 0.2,
+    letterSpacing: 0.3,
   },
 
   /* ─── Guidance Input Card ─── */
@@ -1048,8 +1208,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   emotionIconWrap: {
-    width: 42,
-    height: 42,
+    width: 44,
+    height: 44,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1067,7 +1227,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   ayahGradient: {
-    padding: 24,
+    padding: 26,
   },
   ayahCornerDecor: {
     position: 'absolute',
@@ -1081,7 +1241,8 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.95)',
     textAlign: 'right',
     marginBottom: 16,
-    fontWeight: '400',
+    fontWeight: '500',
+    fontFamily: 'UthmanicHafs',
   },
   ayahDividerLine: {
     width: 40,
@@ -1091,8 +1252,8 @@ const styles = StyleSheet.create({
   },
   ayahEnglish: {
     fontSize: 15,
-    lineHeight: 24,
-    color: 'rgba(255,255,255,0.8)',
+    lineHeight: 25,
+    color: 'rgba(255,255,255,0.82)',
     fontStyle: 'italic',
     marginBottom: 10,
     fontWeight: '400',
@@ -1132,15 +1293,15 @@ const styles = StyleSheet.create({
   actionCard: {
     flex: 1,
     alignItems: 'center',
-    borderRadius: 14,
-    paddingVertical: 14,
+    borderRadius: 16,
+    paddingVertical: 16,
     paddingHorizontal: 6,
     borderWidth: 1,
   },
   actionIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
@@ -1215,6 +1376,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 40,
     marginBottom: 16,
+    fontWeight: '500',
+    fontFamily: 'UthmanicHafs',
   },
   closingQuoteLine: {
     width: 32,
