@@ -275,18 +275,36 @@ const SurahIntro = React.memo(function SurahIntro({ isPageMode, bismillahText }:
    ═══════════════════════════════════════════════ */
 const PageFrame = React.memo(function PageFrame({
   ayahs, globalOffset, currentIndex, surahNumber, pageNumber, totalPages,
-  isVerseSaved, onPlayVerse, onBookmark,
+  isVerseSaved, onBookmark, onSelectVerse,
 }: {
   ayahs: Ayah[]; globalOffset: number;
   currentIndex: number | null; surahNumber: number;
   pageNumber: number; totalPages: number;
   isVerseSaved: (s: number, a: number) => boolean;
-  onPlayVerse: (idx: number) => void;
   onBookmark: (ay: Ayah) => void;
+  onSelectVerse: (globalIdx: number) => void;
 }) {
   const { theme } = useTheme();
   const { sizes } = useFontSize();
   const [selected, setSelected] = useState<number | null>(null);
+  const prevCurrentIndexRef = useRef<number | null>(null);
+
+  // Auto-update selection to follow the currently playing verse
+  useEffect(() => {
+    if (prevCurrentIndexRef.current !== currentIndex) {
+      prevCurrentIndexRef.current = currentIndex;
+      if (currentIndex !== null) {
+        // Check if the playing verse is within THIS page frame
+        const localIdx = currentIndex - globalOffset;
+        if (localIdx >= 0 && localIdx < ayahs.length) {
+          setSelected(localIdx);
+        } else if (selected !== null) {
+          // Playing verse is on a different page — dismiss our action bar
+          setSelected(null);
+        }
+      }
+    }
+  }, [currentIndex]);
 
   return (
     <View style={s.frameWrap}>
@@ -310,7 +328,15 @@ const PageFrame = React.memo(function PageFrame({
               return (
                 <Text key={`page-ayah-${ay.numberInSurah}`}>
                   <Text
-                    onPress={() => { setSelected(sel ? null : i); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); }}
+                    onPress={() => {
+                      if (sel) {
+                        setSelected(null);
+                      } else {
+                        setSelected(i);
+                        onSelectVerse(globalOffset + i);
+                      }
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                    }}
                     style={[
                       playing && { fontWeight: '700', color: theme.primary },
                       sel && { backgroundColor: `${theme.gold}14` },
@@ -336,21 +362,6 @@ const PageFrame = React.memo(function PageFrame({
               <Text style={[s.pageActLabel, { color: theme.textSecondary }]}>Ayah {ayahs[selected].numberInSurah}</Text>
             </View>
             <View style={s.pageActBtns}>
-              <TouchableOpacity 
-                style={[
-                  s.pageActBtn, 
-                  { backgroundColor: `${theme.primary}15` },
-                  currentIndex === (globalOffset + selected) && { backgroundColor: theme.primary }
-                ]} 
-                onPress={() => onPlayVerse(globalOffset + selected)} 
-                activeOpacity={0.7}
-              >
-                <Ionicons 
-                  name={currentIndex === (globalOffset + selected) ? 'pause' : 'play'} 
-                  size={14} 
-                  color={currentIndex === (globalOffset + selected) ? '#fff' : theme.primary} 
-                />
-              </TouchableOpacity>
               <TouchableOpacity style={[s.pageActBtn, { backgroundColor: `${theme.gold}12` }]} onPress={() => onBookmark(ayahs[selected])} activeOpacity={0.7}>
                 <Ionicons name={isVerseSaved(surahNumber, ayahs[selected].numberInSurah) ? 'bookmark' : 'bookmark-outline'} size={14} color={isVerseSaved(surahNumber, ayahs[selected].numberInSurah) ? theme.gold : theme.textTertiary} />
               </TouchableOpacity>
@@ -437,35 +448,9 @@ const VerseCard = React.memo(function VerseCard({
   const isRtlTafseer = tafseerLang === 'ur' || tafseerLang === 'ar';
   const tafseerLabel = tafseerLang === 'ur' ? 'تفسیر' : tafseerLang === 'ar' ? 'تفسير' : 'TAFSEER';
 
-  // Smooth animated glow for playing state
-  const glowAnim = useRef(new Animated.Value(isPlaying ? 1 : 0)).current;
-  const prevPlayingRef = useRef(isPlaying);
-
-  useEffect(() => {
-    if (prevPlayingRef.current !== isPlaying) {
-      prevPlayingRef.current = isPlaying;
-      Animated.timing(glowAnim, {
-        toValue: isPlaying ? 1 : 0,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
-    }
-  }, [isPlaying, glowAnim]);
-
-  const cardBorderColor = glowAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['transparent', theme.primary + 'A0'],
-  });
-  const cardBgColor = glowAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['transparent', theme.primary + '18'],
-  });
-
   return (
-    <Animated.View style={[s.vCard, { backgroundColor: theme.surfaceElevated, borderColor: cardBorderColor, shadowColor: theme.shadowColor }]}>
-      {/* Animated overlay for playing state glow */}
-      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: cardBgColor, borderRadius: 16 }]} pointerEvents="none" />
-      <View style={[s.vAccent, { backgroundColor: theme.border }, isPlaying && { backgroundColor: theme.primary }]} />
+    <View style={[s.vCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
+      <View style={[s.vAccent, { backgroundColor: theme.border }]} />
       <View style={s.vInner}>
         <View style={s.vTopRow}>
           <LinearGradient 
@@ -505,7 +490,7 @@ const VerseCard = React.memo(function VerseCard({
           </View>
         )}
       </View>
-    </Animated.View>
+    </View>
   );
 });
 
@@ -588,7 +573,7 @@ const PersistentPlayer = React.memo(function PersistentPlayer({
               />
             </TouchableOpacity>
             <TouchableOpacity 
-              onPress={() => { if (!isActive) onPlayIndex(0); else onTogglePlayPause(); }} 
+              onPress={() => { onTogglePlayPause(); }} 
               activeOpacity={0.8}
             >
               <LinearGradient 
@@ -790,6 +775,12 @@ export default function SurahScreen() {
   const audioClickDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isAudioChangingRef = useRef(false);
   const playingBismillahRef = useRef(false);
+  const lastPlayedIndexRef = useRef<number>(0);
+  const mountedRef = useRef(true);
+  const currentIndexRef = useRef<number | null>(null);
+  const ayahsRef = useRef<Ayah[]>([]);
+  const isPageModeRef = useRef(true);
+  const pagesRef = useRef<Ayah[][]>([]);
 
   // ─── Tracking refs ───
   const readTracker = useRef<Set<string>>(new Set());
@@ -801,6 +792,13 @@ export default function SurahScreen() {
   const tafseerLang = useMemo(() => tafseerSources.find(t => t.id === selectedTafseerId)?.language || 'ur', [tafseerSources, selectedTafseerId]);
   const pages = useMemo(() => splitIntoPages(ayahs), [ayahs]);
   const playerBarH = 72 + insets.bottom;
+
+  // ─── Keep refs in sync with state for stable callbacks ───
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+  useEffect(() => { ayahsRef.current = ayahs; }, [ayahs]);
+  useEffect(() => { isPageModeRef.current = isPageMode; }, [isPageMode]);
+  useEffect(() => { pagesRef.current = pages; }, [pages]);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
   /* ─── Load & Master Cleanup ─── */
   useEffect(() => {
@@ -874,81 +872,81 @@ export default function SurahScreen() {
     return () => { cancelled = true; };
   }, [showTafseer, selectedTafseerId, surahNumber, ayahs.length]);
 
+  /* ─── Helper: scroll to index using layout refs ─── */
+  const scrollToIndex = useCallback((index: number) => {
+    setTimeout(() => {
+      if (isPageModeRef.current) {
+        const pageIdx = findPageForIndex(pagesRef.current, index);
+        const pl = pageLayouts.current[pageIdx];
+        if (pl && scrollRef.current) scrollRef.current.scrollTo({ y: Math.max(0, pl.y - 20), animated: true });
+      } else {
+        const l = ayahLayouts.current[index];
+        if (l && scrollRef.current) scrollRef.current.scrollTo({ y: Math.max(0, l.y - 100), animated: true });
+      }
+    }, 50);
+  }, []);
+
+  /* ─── Helper: play a specific index and preload next ayahs (used by finishCallback) ─── */
+  const playAndAdvance = useCallback((index: number) => {
+    if (!mountedRef.current) return;
+    const a = ayahsRef.current;
+    const ay = a[index];
+    if (!ay?.audio) return;
+
+    setCurrentIndex(index);
+    lastPlayedIndexRef.current = index;
+    scrollToIndex(index);
+
+    audioPlayer.play(ay.audio).catch((e) => {
+      if (__DEV__) console.error('[Audio] Auto-advance error:', e);
+      if (mountedRef.current) setCurrentIndex(null);
+    });
+
+    // Preload next 2-3 ayahs for gapless playback
+    const preloadUris: string[] = [];
+    for (let i = index + 1; i < Math.min(index + 4, a.length); i++) {
+      if (a[i]?.audio) preloadUris.push(a[i].audio!);
+    }
+    if (preloadUris.length > 0) audioPlayer.preloadBatch(preloadUris).catch(() => {});
+  }, [scrollToIndex]);
+
+  /* ─── Audio callbacks: registered ONCE (use refs for latest state) ─── */
   useEffect(() => {
-    audioPlayer.setStatusCallback((st) => setPlayerState(st));
+    audioPlayer.setStatusCallback((st) => {
+      if (mountedRef.current) setPlayerState(st);
+    });
+
     audioPlayer.setFinishCallback(() => {
+      if (!mountedRef.current) return;
+
       // ─── Bismillah intro just finished → auto-play first ayah ───
       if (playingBismillahRef.current) {
         playingBismillahRef.current = false;
-        if (ayahs[0]?.audio) {
-          setCurrentIndex(0);
-          setTimeout(() => {
-            if (isPageMode) {
-              const pl = pageLayouts.current[0];
-              if (pl && scrollRef.current) scrollRef.current.scrollTo({ y: Math.max(0, pl.y - 20), animated: true });
-            } else {
-              const l = ayahLayouts.current[0];
-              if (l && scrollRef.current) scrollRef.current.scrollTo({ y: Math.max(0, l.y - 100), animated: true });
-            }
-          }, 50);
-          audioPlayer.play(ayahs[0].audio).catch((e) => {
-            if (__DEV__) console.error('[Audio] Bismillah→Ayah1 error:', e);
-            setCurrentIndex(null);
-          });
-          // Preload next 2 ayahs
-          const preloadUris: string[] = [];
-          for (let i = 1; i < Math.min(3, ayahs.length); i++) {
-            if (ayahs[i]?.audio) preloadUris.push(ayahs[i].audio!);
-          }
-          if (preloadUris.length > 0) audioPlayer.preloadBatch(preloadUris).catch(() => {});
-        }
+        playAndAdvance(0);
         return;
       }
-      // Auto-continue to next ayah until manually stopped
-      if (currentIndex != null) {
-        const next = currentIndex + 1;
-        if (next < ayahs.length && ayahs[next]?.audio) {
-          const ay = ayahs[next];
-          if (ay?.audio) {
-            // Optimistic: update index + scroll BEFORE loading audio
-            setCurrentIndex(next);
-            // scrollToAyah uses refs so we call it directly
-            setTimeout(() => {
-              if (isPageMode) {
-                const pageIdx = findPageForIndex(pages, next);
-                const pl = pageLayouts.current[pageIdx];
-                if (pl && scrollRef.current) scrollRef.current.scrollTo({ y: Math.max(0, pl.y - 20), animated: true });
-              } else {
-                const l = ayahLayouts.current[next];
-                if (l && scrollRef.current) scrollRef.current.scrollTo({ y: Math.max(0, l.y - 100), animated: true });
-              }
-            }, 50);
-            
-            // Play using preloaded audio for minimal gap
-            audioPlayer.play(ay.audio).catch((e) => {
-              if (__DEV__) console.error('[Audio] Auto-play error:', e);
-              setCurrentIndex(null);
-            });
-            
-            // Preload next 2 ayahs for gapless playback
-            const preloadUris: string[] = [];
-            for (let i = next + 1; i < Math.min(next + 3, ayahs.length); i++) {
-              if (ayahs[i]?.audio) preloadUris.push(ayahs[i].audio!);
-            }
-            if (preloadUris.length > 0) {
-              audioPlayer.preloadBatch(preloadUris).catch(() => {});
-            }
-          }
+
+      // ─── Auto-continue to next ayah ───
+      const idx = currentIndexRef.current;
+      const a = ayahsRef.current;
+      if (idx != null) {
+        const next = idx + 1;
+        if (next < a.length && a[next]?.audio) {
+          playAndAdvance(next);
         } else {
           // Reached end of surah
-          setCurrentIndex(null);
+          if (mountedRef.current) setCurrentIndex(null);
           audioPlayer.stop().catch(() => {});
           audioPlayer.clearPreloadCache().catch(() => {});
         }
       }
     });
-    return () => { audioPlayer.setStatusCallback(null); audioPlayer.setFinishCallback(null); };
-  }, [currentIndex, ayahs, isPageMode, pages]);
+
+    return () => {
+      audioPlayer.setStatusCallback(null);
+      audioPlayer.setFinishCallback(null);
+    };
+  }, [playAndAdvance]);
 
   /* ─── Unified auto-scroll (same smooth engine for both modes) ─── */
   useEffect(() => {
@@ -1024,9 +1022,15 @@ export default function SurahScreen() {
       }
 
       // ─── TRACK: visible ayahs in page mode ───
-      pages[Math.floor(currentPage - 1)]?.forEach((ay) => {
+      const pageAyahs = pages[Math.floor(currentPage - 1)];
+      pageAyahs?.forEach((ay) => {
         if (ay?.numberInSurah) trackAyahRead(surahNumber, ay.numberInSurah);
       });
+      // Track first ayah of current page for persistent player resume
+      if (currentIndex === null && pageAyahs && pageAyahs.length > 0) {
+        const pageGlobalIdx = pageGlobalOffset(pages, Math.floor(currentPage - 1));
+        lastPlayedIndexRef.current = pageGlobalIdx;
+      }
     }
 
     // ─── TRACK: visible ayahs in card mode ───
@@ -1042,6 +1046,22 @@ export default function SurahScreen() {
       });
     }
 
+    // ─── TRACK: visible verse for persistent player resume ───
+    // When no audio is active, update lastPlayedIndexRef to the most visible verse
+    // so tapping the persistent player ▶ starts from the verse the user is looking at
+    if (!isPageMode && currentIndex === null) {
+      const viewCenter = y + layoutHRef.current / 2;
+      let closestScrollIdx = 0;
+      let closestScrollDist = Infinity;
+      Object.entries(ayahLayouts.current).forEach(([idx, layout]) => {
+        const dist = Math.abs(layout.y - viewCenter);
+        if (dist < closestScrollDist) { closestScrollDist = dist; closestScrollIdx = Number(idx); }
+      });
+      if (closestScrollIdx < ayahs.length) {
+        lastPlayedIndexRef.current = closestScrollIdx;
+      }
+    }
+
     // ─── TRACK: last seen (debounced - every 1.5 seconds for reliable resume) ───
     if (lastSeenTimer.current) clearTimeout(lastSeenTimer.current);
     lastSeenTimer.current = setTimeout(() => {
@@ -1055,7 +1075,7 @@ export default function SurahScreen() {
         ReadingProgress.setLastSeen(surahNumber, meta.englishName, ayahs[closestIdx].numberInSurah).catch(() => {});
       }
     }, 1500);
-  }, [isPageMode, pages, currentPage, autoScrollActive, surahNumber, ayahs, meta, trackAyahRead]);
+  }, [isPageMode, pages, currentPage, autoScrollActive, surahNumber, ayahs, meta, trackAyahRead, currentIndex]);
 
   const loadSurah = async () => {
     setLoading(true);
@@ -1072,6 +1092,8 @@ export default function SurahScreen() {
       if (startAyahParam) {
         const idx = a.findIndex((x) => x.numberInSurah === startAyahParam);
         if (idx >= 0) {
+          // Set last played index so player bar starts from this verse
+          lastPlayedIndexRef.current = idx;
           setTimeout(() => scrollToAyah(idx), 600);
           
           // Auto-play if requested
@@ -1093,17 +1115,15 @@ export default function SurahScreen() {
   };
 
   const scrollToAyah = useCallback((index: number) => {
-    if (isPageMode) {
-      // In page mode, ayah layouts are inside page frames
-      // Find which page and scroll to that page frame
-      const pageIdx = findPageForIndex(pages, index);
+    if (isPageModeRef.current) {
+      const pageIdx = findPageForIndex(pagesRef.current, index);
       const pl = pageLayouts.current[pageIdx];
       if (pl && scrollRef.current) scrollRef.current.scrollTo({ y: Math.max(0, pl.y - 20), animated: true });
     } else {
       const l = ayahLayouts.current[index];
       if (l && scrollRef.current) scrollRef.current.scrollTo({ y: Math.max(0, l.y - 100), animated: true });
     }
-  }, [isPageMode, pages]);
+  }, []);
 
   /* ─── Auto-scroll to currently playing ayah whenever it changes ─── */
   useEffect(() => {
@@ -1116,72 +1136,106 @@ export default function SurahScreen() {
   }, [currentIndex, scrollToAyah]);
 
   const playIndex = useCallback(async (index: number) => {
-    const ay = ayahs[index]; 
+    const ay = ayahs[index];
     if (!ay?.audio) return;
-    
-    // Light debounce — prevent truly simultaneous taps only
+
+    // Debounce: prevent rapid double-tap, but with fail-safe timeout
     if (isAudioChangingRef.current) return;
     isAudioChangingRef.current = true;
-    
+
+    // Fail-safe: always unlock after 2 seconds no matter what
+    const failSafeTimer = setTimeout(() => { isAudioChangingRef.current = false; }, 2000);
     if (audioClickDebounceRef.current) clearTimeout(audioClickDebounceRef.current);
-    
-    // ─── BISMILLAH INTRO: Play Bismillah audio before first ayah ───
-    // Only when starting from the beginning (index 0) and Bismillah audio is available
-    if (index === 0 && bismillahAudio && !playingBismillahRef.current && currentIndex === null) {
+
+    const unlock = () => {
+      clearTimeout(failSafeTimer);
+      audioClickDebounceRef.current = setTimeout(() => { isAudioChangingRef.current = false; }, 120);
+    };
+
+    // Track the last requested index
+    lastPlayedIndexRef.current = index;
+
+    // Clear stale Bismillah flag if user picks a non-zero verse
+    if (index !== 0) playingBismillahRef.current = false;
+
+    // ─── BISMILLAH INTRO (index 0 only, first play only) ───
+    if (index === 0 && bismillahAudio && !playingBismillahRef.current && currentIndexRef.current === null) {
       playingBismillahRef.current = true;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
       try {
         await audioPlayer.play(bismillahAudio);
+        unlock();
+        return; // finishCallback will auto-play ayah 0
       } catch (e) {
         if (__DEV__) console.error('[Audio] Bismillah play error:', e);
         playingBismillahRef.current = false;
-        // Fall through to play ayah directly
-        // (don't return — continue below)
-      } finally {
-        audioClickDebounceRef.current = setTimeout(() => {
-          isAudioChangingRef.current = false;
-        }, 150);
+        // Fall through to play ayah 0 directly
       }
-      if (playingBismillahRef.current) return; // Bismillah playing, finish callback will handle ayah 0
     }
-    
-    // ─── OPTIMISTIC: update UI immediately before audio loads ───
+
+    // ─── OPTIMISTIC: update UI immediately ───
+    if (!mountedRef.current) { unlock(); return; }
     setCurrentIndex(index);
-    scrollToAyah(index);
+    scrollToIndex(index);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    
+
     // ─── TRACK: mark as read ───
     trackAyahRead(surahNumber, ay.numberInSurah);
     if (meta?.englishName) {
       ReadingProgress.setLastAudio(surahNumber, meta.englishName, ay.numberInSurah, audioPlayer.getPositionMs()).catch(() => {});
     }
-    
+
     try {
       await audioPlayer.play(ay.audio);
-      
-      // ─── PRELOAD next 2-3 ayahs for gapless playback ───
+      // Preload next 2-3 ayahs for gapless playback
       const preloadUris: string[] = [];
       for (let i = index + 1; i < Math.min(index + 4, ayahs.length); i++) {
         if (ayahs[i]?.audio) preloadUris.push(ayahs[i].audio!);
       }
-      if (preloadUris.length > 0) {
-        audioPlayer.preloadBatch(preloadUris).catch(() => {});
-      }
-    } catch (e) { 
+      if (preloadUris.length > 0) audioPlayer.preloadBatch(preloadUris).catch(() => {});
+    } catch (e) {
       if (__DEV__) console.error('[Audio] Play error:', e);
-      // Revert optimistic update on failure
-      setCurrentIndex(null);
+      if (mountedRef.current) setCurrentIndex(null);
     } finally {
-      // Short debounce — just enough to prevent double-tap
-      audioClickDebounceRef.current = setTimeout(() => {
-        isAudioChangingRef.current = false;
-      }, 150);
+      unlock();
     }
-  }, [ayahs, surahNumber, meta, scrollToAyah, trackAyahRead, bismillahAudio, currentIndex]);
+  }, [ayahs, surahNumber, meta, scrollToIndex, trackAyahRead, bismillahAudio]);
 
-  const togglePlayPause = useCallback(async () => { if (currentIndex === null) await playIndex(0); else await audioPlayer.togglePlayPause(); }, [currentIndex, playIndex]);
-  const playPrev = useCallback(() => { if (currentIndex != null && currentIndex > 0) playIndex(currentIndex - 1); }, [currentIndex, playIndex]);
-  const playNext = useCallback(() => { if (currentIndex != null && currentIndex < ayahs.length - 1) playIndex(currentIndex + 1); }, [currentIndex, ayahs.length, playIndex]);
+  const togglePlayPause = useCallback(async () => {
+    // Safety: always clear stale debounce so player is never stuck
+    isAudioChangingRef.current = false;
+    if (audioClickDebounceRef.current) { clearTimeout(audioClickDebounceRef.current); audioClickDebounceRef.current = null; }
+
+    if (currentIndexRef.current === null) {
+      // Start from the verse user is viewing, or beginning
+      const resumeIdx = lastPlayedIndexRef.current;
+      await playIndex(resumeIdx < ayahsRef.current.length ? resumeIdx : 0);
+    } else {
+      await audioPlayer.togglePlayPause();
+    }
+  }, [playIndex]);
+
+  // Smart play/pause for individual verse buttons (card mode):
+  const handleVersePlay = useCallback((index: number) => {
+    // Safety: clear stale debounce
+    isAudioChangingRef.current = false;
+    if (audioClickDebounceRef.current) { clearTimeout(audioClickDebounceRef.current); audioClickDebounceRef.current = null; }
+
+    if (currentIndexRef.current === index) {
+      audioPlayer.togglePlayPause();
+    } else {
+      playIndex(index);
+    }
+  }, [playIndex]);
+
+  const playPrev = useCallback(() => {
+    const idx = currentIndexRef.current;
+    if (idx != null && idx > 0) playIndex(idx - 1);
+  }, [playIndex]);
+  const playNext = useCallback(() => {
+    const idx = currentIndexRef.current;
+    if (idx != null && idx < ayahsRef.current.length - 1) playIndex(idx + 1);
+  }, [playIndex]);
   const handleSeek = useCallback((p: number) => { if (playerState?.durationMs) audioPlayer.seekTo(p * playerState.durationMs); }, [playerState?.durationMs]);
 
   const toggleBookmark = useCallback((ay: Ayah) => {
@@ -1361,8 +1415,14 @@ export default function SurahScreen() {
                     pageNumber={pIdx + 1}
                     totalPages={pages.length}
                     isVerseSaved={isVerseSaved}
-                    onPlayVerse={playIndex}
                     onBookmark={toggleBookmark}
+                    onSelectVerse={(globalIdx) => {
+                      lastPlayedIndexRef.current = globalIdx;
+                      // If audio is currently playing, seamlessly switch to the tapped verse
+                      if (currentIndexRef.current !== null && currentIndexRef.current !== globalIdx) {
+                        handleVersePlay(globalIdx);
+                      }
+                    }}
                   />
                 </View>
               ))}
@@ -1389,7 +1449,7 @@ export default function SurahScreen() {
                     tafseerLoading={tafseerLoading && !tafseerMap.has(ay.numberInSurah)}
                     tafseerLang={tafseerLang}
                     isBookmarked={isVerseSaved(surahNumber, ay.numberInSurah)} isPlaying={currentIndex === i}
-                    onBookmark={() => toggleBookmark(ay)} onPlay={() => playIndex(i)} onShare={() => shareVerse(ay, ay.numberInSurah)}
+                    onBookmark={() => toggleBookmark(ay)} onPlay={() => handleVersePlay(i)} onShare={() => shareVerse(ay, ay.numberInSurah)}
                   />
                 </View>
               ))}

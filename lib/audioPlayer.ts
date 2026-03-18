@@ -121,12 +121,15 @@ class AudioPlayer {
     if (!this.sound) return;
 
     if (!status.isLoaded) {
-      this.updateState({
-        isLoaded: false,
-        isPlaying: false,
-        isBuffering: false,
-        error: (status as any).error || null,
-      });
+      // Only update error state if this is a real error, not just an unload transition
+      if ((status as any).error) {
+        this.updateState({
+          isLoaded: false,
+          isPlaying: false,
+          isBuffering: false,
+          error: (status as any).error || null,
+        });
+      }
       return;
     }
 
@@ -154,10 +157,17 @@ class AudioPlayer {
   };
 
   private async handleFinish(): Promise<void> {
+    // Guard: don't handle finish if sound was already unloaded (race condition)
+    if (!this.sound || !this.state.isLoaded) return;
+
     if (this.repeatMode === 'one') {
       // Replay same track
-      await this.seekTo(0);
-      await this.sound?.playAsync();
+      try {
+        await this.seekTo(0);
+        await this.sound?.playAsync();
+      } catch {
+        // Sound may have been unloaded between finish and replay
+      }
     } else {
       // Signal parent to handle next or stop
       this.finishCallback?.();
@@ -168,63 +178,66 @@ class AudioPlayer {
      PLAYBACK CONTROLS
      ═══════════════════════════════════════════ */
 
+  private isUnloading = false;
+
   async play(uri: string): Promise<void> {
     if (!uri) return;
     await this.init();
 
     try {
+      // Wait for any in-progress unload
+      while (this.isUnloading) await this.delay(10);
+
       if (this.sound) {
         // Same URI: just restart from beginning (no reload needed)
         if (this.currentUri === uri) {
-          await this.sound.setPositionAsync(0);
-          await this.sound.playAsync();
-          return;
+          try {
+            await this.sound.setPositionAsync(0);
+            await this.sound.playAsync();
+            return;
+          } catch {
+            // Sound became invalid — fall through to reload
+            await this.unload();
+          }
+        } else {
+          // Different URI: properly await cleanup
+          await this.unload();
         }
-        
-        // Different URI: properly await cleanup to prevent Android race conditions
-        await this.unload();
       }
 
       // Check if we have this audio preloaded for instant playback
       const preloaded = this.preloadCache.get(uri);
       if (preloaded && (Date.now() - preloaded.loadedAt) < PRELOAD_CACHE_MAX_AGE) {
-        // Use preloaded audio - near-instant playback!
-        this.sound = preloaded.sound;
-        this.currentUri = uri;
-        this.preloadCache.delete(uri); // Remove from cache since it's now active
-        
-        // Configure and play immediately
-        await this.sound.setRateAsync(this.speed, true);
-        this.sound.setOnPlaybackStatusUpdate(this.onStatus);
-        await this.sound.playAsync();
-        
-        this.updateState({ currentUri: uri, isBuffering: false });
-        if (__DEV__) console.log('[AudioPlayer] Playing from preload cache');
-        return;
+        this.preloadCache.delete(uri);
+        try {
+          // Try to use preloaded audio — near-instant playback
+          this.sound = preloaded.sound;
+          this.currentUri = uri;
+          this.sound.setOnPlaybackStatusUpdate(this.onStatus);
+          await this.sound.setPositionAsync(0);
+          await this.sound.playAsync();
+          this.updateState({ currentUri: uri, isBuffering: false, isLoaded: true });
+          if (__DEV__) console.log('[AudioPlayer] Playing from preload cache');
+          return;
+        } catch {
+          // Preloaded sound became invalid — fall through to fresh load
+          this.sound = null;
+          this.currentUri = null;
+          preloaded.sound.unloadAsync().catch(() => {});
+        }
       }
 
       this.updateState({ isBuffering: true, isPlaying: false, error: null });
 
-      // Re-initialize audio mode before each play (handles interruptions like phone calls)
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        staysActiveInBackground: true,
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      }).catch(() => {});
-
-      // Optimized loading with larger buffer for smoother playback
+      // Load and play with default ExoPlayer backend (fast streaming)
       const { sound } = await Audio.Sound.createAsync(
         { uri },
         {
           shouldPlay: true,
           rate: this.speed,
           shouldCorrectPitch: true,
-          progressUpdateIntervalMillis: 200, // More frequent updates
+          progressUpdateIntervalMillis: 250,
           volume: 1.0,
-          // Android-specific: request larger buffer
-          androidImplementation: 'MediaPlayer',
         },
         this.onStatus
       );
@@ -319,9 +332,9 @@ class AudioPlayer {
 
   async pause(): Promise<void> {
     try {
-      if (this.sound && this.state.isPlaying) {
+      if (this.sound && this.state.isLoaded && this.state.isPlaying) {
         await this.fadeOut();
-        if (this.sound) await this.sound.pauseAsync();
+        if (this.sound && this.state.isLoaded) await this.sound.pauseAsync();
       }
     } catch (e) {
       if (__DEV__) console.warn('[AudioPlayer] Pause error:', e);
@@ -330,7 +343,7 @@ class AudioPlayer {
 
   async resume(): Promise<void> {
     try {
-      if (this.sound && !this.state.isPlaying) {
+      if (this.sound && this.state.isLoaded && !this.state.isPlaying) {
         // Re-claim audio focus on Android (lost after phone calls / other apps)
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
@@ -432,13 +445,13 @@ class AudioPlayer {
      ═══════════════════════════════════════════ */
 
   private async fadeOut(): Promise<void> {
-    if (!this.sound || this.isFading) return;
+    if (!this.sound || !this.state.isLoaded || this.isFading) return;
     this.isFading = true;
     try {
       const step = 1.0 / FADE_STEPS;
       const interval = FADE_DURATION_MS / FADE_STEPS;
       for (let i = FADE_STEPS - 1; i >= 0; i--) {
-        if (!this.sound) break;
+        if (!this.sound || !this.state.isLoaded) break;
         await this.sound.setVolumeAsync(i * step);
         await this.delay(interval);
       }
@@ -450,13 +463,13 @@ class AudioPlayer {
   }
 
   private async fadeIn(): Promise<void> {
-    if (!this.sound || this.isFading) return;
+    if (!this.sound || !this.state.isLoaded || this.isFading) return;
     this.isFading = true;
     try {
       const step = 1.0 / FADE_STEPS;
       const interval = FADE_DURATION_MS / FADE_STEPS;
       for (let i = 1; i <= FADE_STEPS; i++) {
-        if (!this.sound) break;
+        if (!this.sound || !this.state.isLoaded) break;
         await this.sound.setVolumeAsync(i * step);
         await this.delay(interval);
       }
@@ -506,6 +519,8 @@ class AudioPlayer {
      ═══════════════════════════════════════════ */
 
   private async unload(): Promise<void> {
+    if (this.isUnloading) return;
+    this.isUnloading = true;
     try {
       if (this.sound) {
         this.sound.setOnPlaybackStatusUpdate(null);
@@ -517,6 +532,8 @@ class AudioPlayer {
     } catch {
       this.sound = null;
       this.currentUri = null;
+    } finally {
+      this.isUnloading = false;
     }
   }
 

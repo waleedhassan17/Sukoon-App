@@ -84,147 +84,9 @@ const SectionDivider = ({ borderColor }: { borderColor: string }) => (
   </View>
 );
 
-/* ─── Flying Birds Animation ─── */
-const BIRD_CONFIGS = [
-  { size: 16, topPct: 0.15, duration: 11000, delay: 0,    flapSpeed: 350 },
-  { size: 11, topPct: 0.30, duration: 16000, delay: 2000,  flapSpeed: 300 },
-  { size: 18, topPct: 0.08, duration: 9500,  delay: 4500,  flapSpeed: 380 },
-  { size: 10, topPct: 0.38, duration: 19000, delay: 8000,  flapSpeed: 280 },
-  { size: 13, topPct: 0.22, duration: 13500, delay: 3000,  flapSpeed: 330 },
-  { size: 9,  topPct: 0.12, duration: 17000, delay: 6000,  flapSpeed: 310 },
-  { size: 14, topPct: 0.32, duration: 12000, delay: 1000,  flapSpeed: 360 },
-];
-
-const BirdShape = React.memo(({ size, color }: { size: number; color: string }) => {
-  // Realistic bird silhouette: two curved arcs forming elegant wings
-  const wingW = size * 1.15;
-  const wingH = size * 0.55;
-  const stroke = Math.max(1.5, size * 0.14);
-  return (
-    <View style={{
-      width: size * 2.5,
-      height: size,
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      justifyContent: 'center',
-    }}>
-      {/* Left wing — curved arc stroke */}
-      <View style={{
-        width: wingW,
-        height: wingH,
-        borderTopWidth: stroke,
-        borderLeftWidth: stroke * 0.8,
-        borderBottomWidth: 0,
-        borderRightWidth: 0,
-        borderColor: color,
-        borderTopLeftRadius: wingW * 0.9,
-        borderTopRightRadius: wingW * 0.05,
-      }} />
-      {/* Right wing — mirrored curved arc */}
-      <View style={{
-        width: wingW,
-        height: wingH,
-        borderTopWidth: stroke,
-        borderRightWidth: stroke * 0.8,
-        borderBottomWidth: 0,
-        borderLeftWidth: 0,
-        borderColor: color,
-        borderTopRightRadius: wingW * 0.9,
-        borderTopLeftRadius: wingW * 0.05,
-        marginLeft: -stroke * 0.5,
-      }} />
-    </View>
-  );
-});
-
-const FlyingBirds = React.memo(() => {
-  const birdAnims = useRef(
-    BIRD_CONFIGS.map(() => ({
-      translateX: new Animated.Value(width + 60),
-      flapAnim: new Animated.Value(0),
-    }))
-  ).current;
-
-  useEffect(() => {
-    const timeouts: ReturnType<typeof setTimeout>[] = [];
-
-    BIRD_CONFIGS.forEach((cfg, i) => {
-      const anim = birdAnims[i];
-
-      // Horizontal flight — right to left, looping with gentle randomness
-      const startFlight = () => {
-        anim.translateX.setValue(width + 30 + Math.random() * 40);
-        Animated.timing(anim.translateX, {
-          toValue: -100,
-          duration: cfg.duration + Math.random() * 2000,
-          useNativeDriver: true,
-        }).start(() => {
-          const t = setTimeout(startFlight, 2000 + Math.random() * 4000);
-          timeouts.push(t);
-        });
-      };
-      const t = setTimeout(startFlight, cfg.delay);
-      timeouts.push(t);
-
-      // Wing flap — scaleY oscillation for realistic flapping motion
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(anim.flapAnim, {
-            toValue: 1,
-            duration: cfg.flapSpeed,
-            useNativeDriver: true,
-          }),
-          Animated.timing(anim.flapAnim, {
-            toValue: 0,
-            duration: cfg.flapSpeed,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-    });
-
-    return () => {
-      timeouts.forEach(clearTimeout);
-      birdAnims.forEach((a) => {
-        a.translateX.stopAnimation();
-        a.flapAnim.stopAnimation();
-      });
-    };
-  }, []);
-
-  return (
-    <View style={styles.birdsContainer} pointerEvents="none">
-      {BIRD_CONFIGS.map((cfg, i) => {
-        const flapScaleY = birdAnims[i].flapAnim.interpolate({
-          inputRange: [0, 0.5, 1],
-          outputRange: [1, 0.55, 1],
-        });
-        const flapTranslateY = birdAnims[i].flapAnim.interpolate({
-          inputRange: [0, 0.5, 1],
-          outputRange: [0, 2, 0],
-        });
-        return (
-          <Animated.View
-            key={i}
-            style={[
-              styles.birdWrap,
-              {
-                top: `${cfg.topPct * 100}%` as any,
-                transform: [
-                  { translateX: birdAnims[i].translateX },
-                  { translateY: flapTranslateY },
-                  { scaleY: flapScaleY },
-                ],
-              },
-            ]}
-          >
-            <BirdShape size={cfg.size} color="rgba(255,255,255,0.18)" />
-          </Animated.View>
-        );
-      })}
-    </View>
-  );
-});
+/* ═══════════════════════════════════════════════
+   MAIN HOME SCREEN COMPONENT
+   ═══════════════════════════════════════════════ */
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -511,9 +373,6 @@ export default function HomeScreen() {
                 />
               ))}
             </View>
-
-            {/* Flying birds animation */}
-            <FlyingBirds />
 
             {/* Top bar */}
             <View style={styles.heroTopBar}>
@@ -920,13 +779,6 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: '#fff',
-  },
-  birdsContainer: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
-  },
-  birdWrap: {
-    position: 'absolute',
   },
   heroTopBar: {
     flexDirection: 'row',
