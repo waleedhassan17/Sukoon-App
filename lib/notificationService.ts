@@ -255,6 +255,16 @@ export const NotificationService = {
   async savePreferences(prefs: NotificationPreferences): Promise<void> {
     try {
       await AsyncStorage.setItem(KEYS.PREFS, JSON.stringify(prefs));
+
+      // Keep schedules in sync with latest preferences.
+      // This covers toggles like prayer selection, pre-alert minutes,
+      // quran reminder time, and azan sound settings.
+      if (prefs.enabled) {
+        await setupChannels().catch(() => {});
+        await this.rescheduleFromCache().catch(() => {});
+      } else {
+        await this.cancelPrayerNotifications().catch(() => {});
+      }
     } catch {}
   },
 

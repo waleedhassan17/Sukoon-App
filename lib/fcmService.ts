@@ -104,16 +104,26 @@ export const FCMService = {
       // Store locally
       await AsyncStorage.setItem(KEYS.FCM_TOKEN, token);
 
-      // Store in Firestore for server-side push
+      // Store in Firestore for server-side push.
+      // Salah Buddy requires fcmTokens to be an ARRAY (multi-device support — a user
+      // may sign in on phone + tablet and we need to push to both). We migrate the
+      // legacy `fcmToken` (string) field opportunistically: if it exists, fold it into
+      // the array; either way the array is the new source of truth.
       const db = await getFirestore();
       const userId = await AsyncStorage.getItem(KEYS.USER_ID);
-      if (db && userId) {
-        await db.collection('users').doc(userId).set({
-          fcmToken: token,
-          platform: Platform.OS,
-          lastTokenUpdate: Date.now(),
-        }, { merge: true });
-      }
+      if (!db || !userId) return;
+
+      const ref = db.collection('users').doc(userId);
+      // arrayUnion guards against duplicates if the same token re-registers.
+      const firestore = await import('@react-native-firebase/firestore');
+      await ref.set({
+        fcmTokens: firestore.default.FieldValue.arrayUnion(token),
+        platform: Platform.OS,
+        lastTokenUpdate: Date.now(),
+        // Keep the legacy field in lockstep so any code reading it still works
+        // during the transition window. Cleanup happens in UserProfileService.ensureProfile.
+        fcmToken: token,
+      }, { merge: true });
     } catch (error) {
       if (__DEV__) console.warn('[FCM] Token storage failed:', error);
     }

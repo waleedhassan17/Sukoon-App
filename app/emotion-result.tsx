@@ -715,6 +715,7 @@ const s = StyleSheet.create({
     fontSize: 22,
     lineHeight: 40,
     textAlign: 'right',
+    writingDirection: 'rtl',
     fontWeight: '500',
     fontFamily: 'UthmanicHafs',
   },

@@ -639,15 +639,7 @@ export default function SalahTrackerSettingsScreen() {
         <LinearGradient colors={theme.headerGradient}
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
           style={[st.hdr, { paddingTop: insets.top + 6 }]}>
-          <View style={st.hdrDeco}>
-            {[0, 1, 2, 3].map(i => (
-              <View key={i} style={[st.hdrCircle, {
-                width: 80 + i * 50, height: 80 + i * 50,
-                top: -10 + i * 10, right: -20 + i * 15,
-                opacity: 0.03 + i * 0.008,
-              }]} />
-            ))}
-          </View>
+
           <View style={st.hdrRow}>
             <TouchableOpacity style={st.hdrBack} onPress={() => router.back()} activeOpacity={0.7}>
               <Ionicons name="chevron-back" size={20} color="#fff" />
@@ -909,8 +901,7 @@ const st = StyleSheet.create({
 
   /* Header — matches tracker hdr */
   hdr: { paddingHorizontal: 20, paddingBottom: 20, overflow: 'hidden' },
-  hdrDeco: { ...StyleSheet.absoluteFillObject, overflow: 'hidden' },
-  hdrCircle: { position: 'absolute', borderRadius: 999, borderWidth: 1, borderColor: '#fff' },
+
   hdrRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   hdrBack: { width: 36, height: 36, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
   hdrTitle: { fontSize: 18, fontWeight: '700', color: '#fff', letterSpacing: -0.3 },

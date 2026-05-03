@@ -2,7 +2,7 @@
   "expo": {
     "name": "Sukoon",
     "slug": "sukoon-app",
-    "version": "1.2.0",
+    "version": "1.2.4",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "sukoon",
@@ -28,7 +28,8 @@
         "backgroundColor": "#0D3B2E"
       },
       "package": "com.sukoon.app",
-      "versionCode": 3,
+      "versionCode": 17,
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -74,7 +75,6 @@
     "experiments": {
       "typedRoutes": true
     },
-
     "extra": {
       "router": {},
       "eas": {

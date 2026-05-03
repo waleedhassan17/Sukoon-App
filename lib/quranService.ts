@@ -53,8 +53,9 @@ const CACHE_KEYS = {
 // v3.0: Switched primary Arabic text to quran.com text_uthmani (correct diacritics, matches Mushaf)
 // v3.1: Al-Fatiha Bismillah shown via card, numbered ayahs start from Al-Hamdulillah
 // v3.2: Fixed audio mapping — use numberInSurah for audioMap keys (fixes Al-Fatiha off-by-one)
-// v3.3: Preserve Bismillah audio (every surah starts with Bismillah recitation), strip U+06DF marks
-const CACHE_VERSION = '3.3';
+// v3.4: Expanded cleanUthmaniText to strip U+06E1 (dotless head of khah), tajweed marks U+0615-U+061A,
+// stop signs U+06D6-U+06DC, and extended annotation marks U+08D4-U+08E1 — fixes white spots in Arabic text
+const CACHE_VERSION = '3.4';
 
 // Cache TTL (24 hours - but we use stale-while-revalidate)
 const CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -198,15 +199,84 @@ function stripBismillahFromArabic(text: string): string {
 }
 
 /**
- * Clean Uthmani text for display by stripping Quranic annotation marks
- * that render as visible dots/circles in the app:
- *  - U+06DF (۟) ARABIC SMALL HIGH ROUNDED ZERO — renders as round green dots
- *  - U+06E0 (۠) ARABIC SMALL HIGH UPRIGHT RECTANGULAR ZERO — renders as small rectangle
- * These are reading/recitation marks, not essential text for display.
+ * Clean Uthmani text for display by:
+ * 1. Stripping Quranic annotation marks that render as visible white/green dots:
+ *    - U+0615-U+061A — Tajweed marks (small high tah, small high ligature, etc.)
+ *    - U+06D6-U+06DC — Quranic stop signs (small high sad, small high ain, etc.)
+ *    - U+06DF (۟) ARABIC SMALL HIGH ROUNDED ZERO — round green/white dots
+ *    - U+06E0 (۠) ARABIC SMALL HIGH UPRIGHT RECTANGULAR ZERO — small rectangles
+ *    - U+06E1 (ۡ) ARABIC SMALL HIGH DOTLESS HEAD OF KHAH — white spots!
+ *    - U+06E2 (ۢ) ARABIC SMALL HIGH MEEM ISOLATED FORM
+ *    - U+06E3 (ۣ) ARABIC SMALL LOW SEEN
+ *    - U+06E4 (ۤ) ARABIC SMALL HIGH MADDA
+ *    - U+06E5 (ۥ) ARABIC SMALL HIGH YEH
+ *    - U+06E6 (ۦ) ARABIC SMALL HIGH NOON
+ *    - U+06E7 (ۧ) ARABIC SMALL HIGH UTURN
+ *    - U+06E8 (ۨ) ARABIC SMALL HIGH DOTTED NOON PLACEHOLDER
+ *    - U+06EA (۪) ARABIC EMPTY CENTRE LOW STOP
+ *    - U+06EB (۫) ARABIC EMPTY CENTRE HIGH STOP
+ *    - U+06EC (۬) ARABIC ROUNDED HIGH STOP WITH FILLED CENTRE
+ *    - U+06ED (ۭ) ARABIC SMALL LOW MEEM
+ *    - U+08D4-U+08E1 — Extended Arabic supplement annotation marks
+ * 2. KEEP normal diacritics: fatha (َ), kasra (ِ), damma (ُ), sukun (ْ), shadda (ّ), etc.
+ * 3. Converting Arabic Presentation Forms (U+FB50-U+FDFF) to standard Arabic
+ * 4. Normalizing Unicode NFC for consistent rendering
  */
 function cleanUthmaniText(text: string): string {
   if (!text) return '';
-  return text.replace(/[\u06DF\u06E0]/g, '');
+
+  // Strip ALL unusual annotation marks that cause visible white/green dots
+  // Includes U+06E1 (the main culprit for white spots) and tajweed marks
+  // KEEP normal tashkeel: U+064B-U+065F (fatha, kasra, damma, shadda, sukun, etc.)
+  let cleaned = text.replace(/[\u0615-\u061A\u06D6-\u06DC\u06DF-\u06E8\u06EA-\u06ED\u08D4-\u08E1]/g, '');
+
+  // Normalize to NFC
+  cleaned = cleaned.normalize('NFC');
+
+  // Convert Arabic Presentation Forms to standard Arabic for proper joining
+  const presentationToStandard: Record<string, string> = {
+    // Arabic Presentation Forms-A mappings
+    '\uFB50': '\u0671', '\uFB51': '\u0671', // ٱ
+    '\uFB52': '\u067B', '\uFB53': '\u067B', '\uFB54': '\u067B', '\uFB55': '\u067B', // ٻ
+    '\uFB56': '\u067E', '\uFB57': '\u067E', '\uFB58': '\u067E', '\uFB59': '\u067E', // پ
+    '\uFB5A': '\u0680', '\uFB5B': '\u0680', '\uFB5C': '\u0680', '\uFB5D': '\u0680', // ڀ
+    '\uFB5E': '\u067A', '\uFB5F': '\u067A', '\uFB60': '\u067A', '\uFB61': '\u067A', // ښ
+    '\uFB62': '\u067F', '\uFB63': '\u067F', '\uFB64': '\u067F', '\uFB65': '\u067F', // ڟ
+    '\uFB66': '\u0679', '\uFB67': '\u0679', '\uFB68': '\u0679', '\uFB69': '\u0679', // ٹ
+    '\uFB6A': '\u0684', '\uFB6B': '\u0684', '\uFB6C': '\u0684', '\uFB6D': '\u0684', // ڤ
+    '\uFB6E': '\u0683', '\uFB6F': '\u0683', '\uFB70': '\u0683', '\uFB71': '\u0683', // ڣ
+    '\uFB72': '\u0687', '\uFB73': '\u0687', '\uFB74': '\u0687', '\uFB75': '\u0687', // ڧ
+    '\uFB76': '\u068C', '\uFB77': '\u068C', '\uFB78': '\u068C', '\uFB79': '\u068C', // ڬ
+    '\uFB7A': '\u068E', '\uFB7B': '\u068E', '\uFB7C': '\u068E', '\uFB7D': '\u068E', // ڮ
+    '\uFB7E': '\u068D', '\uFB7F': '\u068D', '\uFB80': '\u068D', '\uFB81': '\u068D', // ڭ
+    '\uFB82': '\u068F', '\uFB83': '\u068F', // گ
+    '\uFB84': '\u0691', '\uFB85': '\u0691', // ڱ
+    '\uFB86': '\u06A9', '\uFB87': '\u06A9', // ک
+    '\uFB88': '\u06AF', '\uFB89': '\u06AF', // گ
+    '\uFB8A': '\u06B3', '\uFB8B': '\u06B3', // ڳ
+    '\uFB8C': '\u06B1', '\uFB8D': '\u06B1', // ڱ
+    '\uFB8E': '\u06BA', '\uFB8F': '\u06BA', '\uFB90': '\u06BA', '\uFB91': '\u06BA', // ں
+    '\uFB92': '\u06BB', '\uFB93': '\u06BB', '\uFB94': '\u06BB', '\uFB95': '\u06BB', // ڻ
+    '\uFB96': '\u06C0', '\uFB97': '\u06C0', '\uFB98': '\u06C0', '\uFB99': '\u06C0', // ۀ
+    '\uFB9A': '\u06C1', '\uFB9B': '\u06C1', '\uFB9C': '\u06C1', '\uFB9D': '\u06C1', // ہ
+    '\uFB9E': '\u06C2', '\uFB9F': '\u06C2', // ۂ
+    '\uFBA0': '\u06C3', '\uFBA1': '\u06C3', // ع
+    '\uFBA2': '\u06C5', '\uFBA3': '\u06C5', // ۆ
+    '\uFBA4': '\u06C6', '\uFBA5': '\u06C6', // ۇ
+    '\uFBA6': '\u06C7', '\uFBA7': '\u06C7', // ۈ
+    '\uFBA8': '\u06C8', '\uFBA9': '\u06C8', // ۉ
+    '\uFBAA': '\u06C9', '\uFBAB': '\u06C9', // ۊ
+    '\uFBAC': '\u06CA', '\uFBAD': '\u06CA', // ۋ
+    '\uFBAE': '\u06CB', '\uFBAF': '\u06CB', // ی
+    '\uFBB0': '\u06CC', '\uFBB1': '\u06CC', // ی
+  };
+
+  // Convert Presentation Forms-A
+  for (const [pres, standard] of Object.entries(presentationToStandard)) {
+    cleaned = cleaned.split(pres).join(standard);
+  }
+
+  return cleaned.trim();
 }
 
 /**
@@ -461,6 +531,136 @@ function deduplicateRequest<T>(key: string, fetchFn: () => Promise<T>): Promise<
   
   pendingRequests.set(key, promise);
   return promise;
+}
+
+/**
+ * Normalizes Arabic text by removing tashkeel/diacritics for search matching
+ * Keeps the base letters for comparison
+ */
+function normalizeArabicForSearch(text: string): string {
+  if (!text) return '';
+  // Remove Arabic diacritics (harakat/tashkeel) for flexible matching
+  // U+064B-U+065F, U+0670, U+06EA-U+06ED
+  return text.replace(/[\u064B-\u065F\u0670\u06EA-\u06ED]/g, '').trim();
+}
+
+/**
+ * Calculates search relevance score for a surah
+ * Higher score = better match
+ */
+function calculateSurahScore(surah: SurahMeta, query: string): number {
+  const lowerQuery = query.toLowerCase().trim();
+  const normalizedQuery = normalizeArabicForSearch(lowerQuery);
+  
+  // Strip "Al-" prefix variations for English name matching
+  const englishNameLower = surah.englishName.toLowerCase();
+  const englishNameWithoutPrefix = englishNameLower.replace(/^(al-|el-|al\s)/, '');
+  const normalizedArabic = normalizeArabicForSearch(surah.name);
+  
+  let score = 0;
+  
+  // Exact number match (highest priority)
+  if (String(surah.number) === lowerQuery) {
+    return 1000;
+  }
+  
+  // Number starts with query (e.g., "1" matches "10", "11", etc.)
+  if (String(surah.number).startsWith(lowerQuery)) {
+    score += 500;
+  }
+  
+  // Exact English name match
+  if (englishNameLower === lowerQuery) {
+    score += 900;
+  }
+  
+  // English name starts with query
+  if (englishNameLower.startsWith(lowerQuery)) {
+    score += 400;
+  }
+  
+  // English name contains query
+  if (englishNameLower.includes(lowerQuery)) {
+    score += 300;
+  }
+  
+  // Name without "Al-" prefix starts with query (e.g., "baq" matches "Al-Baqarah")
+  if (englishNameWithoutPrefix.startsWith(lowerQuery)) {
+    score += 350;
+  }
+  
+  // Name without "Al-" prefix contains query
+  if (englishNameWithoutPrefix.includes(lowerQuery)) {
+    score += 250;
+  }
+  
+  // Arabic exact match (normalized)
+  if (normalizedArabic === normalizedQuery) {
+    score += 900;
+  }
+  
+  // Arabic starts with query (normalized)
+  if (normalizedArabic.startsWith(normalizedQuery)) {
+    score += 400;
+  }
+  
+  // Arabic contains query (normalized)
+  if (normalizedArabic.includes(normalizedQuery)) {
+    score += 300;
+  }
+  
+  // Translation contains query
+  const translationLower = surah.englishNameTranslation.toLowerCase();
+  if (translationLower.includes(lowerQuery)) {
+    score += 200;
+  }
+  
+  // Partial matching for multi-word queries
+  const queryWords = lowerQuery.split(/\s+/).filter(w => w.length > 0);
+  if (queryWords.length > 1) {
+    const matches = queryWords.filter(word => 
+      englishNameLower.includes(word) || 
+      englishNameWithoutPrefix.includes(word) ||
+      translationLower.includes(word)
+    ).length;
+    score += matches * 50;
+  }
+  
+  return score;
+}
+
+/**
+ * Fuzzy search surahs by name, number, or Arabic text
+ * Returns filtered and scored results sorted by relevance
+ * 
+ * Features:
+ * - Number search (exact or prefix)
+ * - English name with "Al-" prefix handling
+ * - Arabic name with diacritic-insensitive matching
+ * - Translation/translation search
+ * - Multi-word query support
+ * - Relevance scoring and sorting
+ */
+export function searchSurahs(surahs: SurahMeta[], query: string): SurahMeta[] {
+  if (!query || query.trim().length === 0) {
+    return surahs;
+  }
+  
+  const trimmedQuery = query.trim();
+  
+  // Score all surahs and filter for matches
+  const scored = surahs.map(surah => ({
+    surah,
+    score: calculateSurahScore(surah, trimmedQuery),
+  }));
+  
+  // Filter to only include matches (score > 0)
+  const matches = scored.filter(item => item.score > 0);
+  
+  // Sort by score descending (highest first)
+  matches.sort((a, b) => b.score - a.score);
+  
+  return matches.map(item => item.surah);
 }
 
 export const QuranService = {

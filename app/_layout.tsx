@@ -21,6 +21,9 @@ import { NotificationStorage } from '@/lib/notificationStorage';
 import { AzanPlayer } from '@/lib/azanPlayer';
 import { DataSyncService } from '@/lib/dataSyncService';
 import { FCMService } from '@/lib/fcmService';
+import { UserProfileService } from '@/lib/userProfileService';
+import { BranchService } from '@/lib/branchService';
+import { i18n } from '@/lib/i18n';
 
 // Lazy-load expo-notifications — not available in Expo Go (SDK 53+)
 let ExpoNotifications: any = null;
@@ -85,8 +88,15 @@ function RootLayoutInner() {
         // This is fire-and-forget, doesn't block app startup
         QuranService.prefetch();
 
+        // Initialise localization (English / Urdu) BEFORE rendering any new UI.
+        await i18n.init();
+
         // Initialize DataSync (anonymous auth + cloud sync readiness)
-        DataSyncService.init().catch(() => {});
+        await DataSyncService.init();
+
+        // Salah Buddy: ensure the public profile doc exists with timezone, displayName,
+        // photoURL and (after migration) fcmTokens array. Idempotent.
+        UserProfileService.ensureProfile().catch(() => {});
 
         // Initialize FCM push notifications (after DataSync for user ID)
         FCMService.init().then(() => {
@@ -178,6 +188,19 @@ function RootLayoutInner() {
     }
   }, [appReady]);
 
+  // Salah Buddy deep-link router. Branch surfaces both initial (cold-start) and
+  // subsequent invite links via a single subscribe(). Routing waits until the
+  // splash animation finishes so the user sees the Accept screen, not a flash
+  // of the home tab. Tear down on unmount so we don't double-handle on
+  // hot-reload during development.
+  useEffect(() => {
+    if (!splashDone) return;
+    const unsub = BranchService.subscribe(({ code }) => {
+      router.push(`/invite/${code}` as any);
+    });
+    return () => { try { unsub(); } catch {} };
+  }, [splashDone, router]);
+
   const handleSplashFinish = useCallback(() => {
     setSplashDone(true);
   }, []);
@@ -224,6 +247,9 @@ function RootLayoutInner() {
         {/* quran/ and tools/ have their own _layout.tsx — just declare the directory */}
         <Stack.Screen name="quran" options={{ headerShown: false }} />
         <Stack.Screen name="tools" options={{ headerShown: false }} />
+        {/* Salah Buddy: deep-link target + friend detail. Both have their own _layout.tsx. */}
+        <Stack.Screen name="invite" options={{ headerShown: false, presentation: 'modal' }} />
+        <Stack.Screen name="friends" options={{ headerShown: false }} />
       </Stack>
 
       {/* Custom animated splash overlay — renders on top, self-removes */}

@@ -496,6 +496,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     lineHeight: 40,
     textAlign: 'right',
+    writingDirection: 'rtl',
     fontWeight: '500',
     fontFamily: 'UthmanicHafs',
   },
@@ -556,7 +557,8 @@ const styles = StyleSheet.create({
   bottomArabic: {
     fontSize: 22,
     color: 'rgba(255,255,255,0.92)',
-    textAlign: 'center',
+    textAlign: 'right',
+    writingDirection: 'rtl',
     lineHeight: 40,
     marginBottom: 14,
     fontWeight: '500',

@@ -9,6 +9,10 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  ActivityIndicator,
   TouchableOpacity,
   Switch,
   Alert,
@@ -19,12 +23,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import Constants from 'expo-constants';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { QuranService } from '@/lib/quranService';
 import { DataSyncService } from '@/lib/dataSyncService';
+import { UserProfileService } from '@/lib/userProfileService';
 
 /* ─── Staggered entry hook ─── */
 function useStaggeredEntry(count: number, baseDelay = 70) {
@@ -62,6 +68,10 @@ export default function SettingsScreen() {
   const [dailyAyah, setDailyAyah] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState<string>('');
+  const [editNameOpen, setEditNameOpen] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [savingName, setSavingName] = useState(false);
   const cloudAvailable = DataSyncService.isCloudSyncAvailable();
 
   const headerFade = useRef(new Animated.Value(0)).current;
@@ -161,7 +171,17 @@ export default function SettingsScreen() {
     }).catch(() => {});
   }, []);
 
+  // Load current profile name (used by friends list)
+  useEffect(() => {
+    UserProfileService.ensureProfile()
+      .then((p) => {
+        if (p?.displayName) setProfileName(p.displayName);
+      })
+      .catch(() => {});
+  }, []);
+
   const switchTrack = { false: theme.border, true: theme.primaryMuted };
+  const appVersion = Constants.expoConfig?.version ?? '—';
 
   return (
     <View style={[styles.container, { backgroundColor: theme.surface }]}>
@@ -468,6 +488,34 @@ export default function SettingsScreen() {
           <Animated.View style={sectionAnims[4]}>
             <Text style={[styles.sectionLabel, { color: theme.textTertiary }]}>ABOUT</Text>
             <View style={[styles.group, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
+              {/* Display Name */}
+              <TouchableOpacity
+                style={styles.row}
+                onPress={() => {
+                  setNameDraft(profileName);
+                  setEditNameOpen(true);
+                  Haptics.selectionAsync().catch(() => {});
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.rowLeft}>
+                  <View style={[styles.iconWrap, { backgroundColor: theme.primaryMuted + '14' }]}>
+                    <Ionicons name="person-outline" size={18} color={theme.primaryMuted} />
+                  </View>
+                  <View style={styles.rowTextWrap}>
+                    <Text style={[styles.rowTitle, { color: theme.text }]}>Display Name</Text>
+                    <Text style={[styles.rowSub, { color: theme.textSecondary }]}>
+                      {profileName ? profileName : 'Tap to set your name'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={[styles.rowArrow, { backgroundColor: theme.surfaceMuted }]}>
+                  <Ionicons name="chevron-forward" size={14} color={theme.textTertiary} />
+                </View>
+              </TouchableOpacity>
+
+              <View style={[styles.rowDivider, { backgroundColor: theme.border }]} />
+
               {/* Rate */}
               <TouchableOpacity
                 style={styles.row}
@@ -498,7 +546,7 @@ export default function SettingsScreen() {
                   </View>
                   <View style={styles.rowTextWrap}>
                     <Text style={[styles.rowTitle, { color: theme.text }]}>Version</Text>
-                    <Text style={[styles.rowSub, { color: theme.textSecondary }]}>1.0.0</Text>
+                    <Text style={[styles.rowSub, { color: theme.textSecondary }]}>{appVersion}</Text>
                   </View>
                 </View>
                 <View style={[styles.versionPill, { backgroundColor: theme.primaryMuted + '12' }]}>
@@ -558,6 +606,78 @@ export default function SettingsScreen() {
 
         </View>
       </ScrollView>
+
+      <Modal
+        visible={editNameOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditNameOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={{ width: '100%' }}
+          >
+            <View style={[styles.modalCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}> 
+              <Text style={[styles.modalTitle, { color: theme.text }]}>Edit display name</Text>
+              <Text style={[styles.modalSub, { color: theme.textSecondary }]}>This is what your friends will see.</Text>
+
+              <TextInput
+                value={nameDraft}
+                onChangeText={setNameDraft}
+                placeholder="Your name"
+                placeholderTextColor={theme.textTertiary}
+                autoFocus
+                maxLength={40}
+                style={[styles.modalInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.surfaceMuted }]}
+              />
+
+              <View style={styles.modalButtonsRow}>
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: theme.surfaceMuted, borderColor: theme.border }]}
+                  onPress={() => setEditNameOpen(false)}
+                  disabled={savingName}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.modalButtonText, { color: theme.text }]}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.modalButton,
+                    {
+                      backgroundColor: nameDraft.trim() ? theme.primaryMuted : theme.surfaceMuted,
+                      borderColor: nameDraft.trim() ? theme.primaryMuted : theme.border,
+                    },
+                  ]}
+                  onPress={async () => {
+                    const trimmed = nameDraft.trim().slice(0, 40);
+                    if (!trimmed) return;
+                    setSavingName(true);
+                    try {
+                      await UserProfileService.setDisplayName(trimmed);
+                      setProfileName(trimmed);
+                      setEditNameOpen(false);
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                    } catch {
+                      Alert.alert('Error', 'Could not update your name. Please try again.');
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+                    } finally {
+                      setSavingName(false);
+                    }
+                  }}
+                  disabled={savingName || !nameDraft.trim()}
+                  activeOpacity={0.8}
+                >
+                  {savingName
+                    ? <ActivityIndicator color="#fff" />
+                    : <Text style={[styles.modalButtonText, { color: '#fff' }]}>Save</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -844,5 +964,52 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.5)',
     fontWeight: '500',
     letterSpacing: 0.5,
+  },
+
+  /* ─── Modal ─── */
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  modalCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 16,
+    gap: 10,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  modalSub: {
+    fontSize: 12,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+  },
+  modalButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  modalButton: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

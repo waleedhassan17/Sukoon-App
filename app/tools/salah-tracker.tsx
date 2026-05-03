@@ -14,7 +14,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Dimensions, Platform, Animated, LayoutAnimation, UIManager,
+  Dimensions, Platform, Animated, LayoutAnimation, UIManager, Share,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -24,9 +24,11 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { DataSyncService } from '@/lib/dataSyncService';
+import ShareStreakSheet from '@/components/friends/ShareStreakSheet';
 import { PrayerTimesService, PrayerTimesData } from '@/lib/prayerTimes';
 import { NotificationService } from '@/lib/notificationService';
 import { ReadingProgress } from '@/lib/readingProgress';
+import SalahTopTabs from '@/components/friends/SalahTopTabs';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -448,6 +450,7 @@ function SalahTrackerInner() {
   const [cache, setCache] = useState<Record<string, DayData>>({});
   const [pickerPrayer, setPickerPrayer] = useState<typeof PRAYERS[0] | null>(null);
   const [streak, setStreak] = useState(0);
+  const [shareSheetVisible, setShareSheetVisible] = useState(false);
   const [ready, setReady] = useState(false);
   
   // NEW: Prayer times for time-based activation logic
@@ -685,15 +688,16 @@ function SalahTrackerInner() {
   }, [selKey]);
 
   const calcStreak = useCallback(() => {
-    let cnt = 0;
+    let totalPrayers = 0;
     // Use fresh Date() for streak calc — not the stale `now` from initial render
     const today = new Date();
     const d = new Date(today);
     for (let i = 0; i < 365; i++) {
       const k = dk(d.getFullYear(), d.getMonth(), d.getDate());
       const data = cache[k];
-      if (data && countDone(data) === 5) {
-        cnt++;
+      const prayed = data ? countDone(data) : 0;
+      if (prayed > 0) {
+        totalPrayers += prayed;
         d.setDate(d.getDate() - 1);
       } else if (i === 0) {
         // Today might not be complete yet — skip to yesterday
@@ -702,7 +706,7 @@ function SalahTrackerInner() {
         break;
       }
     }
-    if (isMounted.current) setStreak(cnt);
+    if (isMounted.current) setStreak(totalPrayers);
   }, [cache]);
 
   // Keep loadMonth ref up-to-date so cloud sync always uses latest version
@@ -798,14 +802,7 @@ function SalahTrackerInner() {
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
           style={[st.hdr, { paddingTop: insets.top + 6 }]}
         >
-          <View style={st.hdrPat}>
-            {[...Array(5)].map((_, i) => (
-              <View key={i} style={[st.hdrCircle, {
-                width: 100 + i * 50, height: 100 + i * 50,
-                top: -10 + i * 8, right: -30 + i * 12, opacity: 0.03 + i * 0.008,
-              }]} />
-            ))}
-          </View>
+
 
           <View style={st.hdrTop}>
             <TouchableOpacity style={st.hdrBtn} onPress={() => router.back()} activeOpacity={0.7}>
@@ -828,7 +825,7 @@ function SalahTrackerInner() {
             <View style={st.statDivider} />
             <View style={st.statBox}>
               <Text style={st.statBigNum}>{streak}</Text>
-              <Text style={st.statLabel}>Day Streak 🔥</Text>
+              <Text style={st.statLabel}>Prayer Streak 🔥</Text>
             </View>
             <View style={st.statDivider} />
             <View style={st.statBox}>
@@ -837,6 +834,11 @@ function SalahTrackerInner() {
             </View>
           </View>
         </LinearGradient>
+
+        {/* ═══ SALAH BUDDY TABS ═══ */}
+        {/* Top segmented control routes to Friends / Invites screens. The existing
+            tracker layout below is unchanged — only this strip was added. */}
+        <SalahTopTabs />
 
         {/* ═══ CALENDAR CARD ═══ */}
         <View style={[st.calCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
@@ -956,6 +958,21 @@ function SalahTrackerInner() {
           ))}
         </View>
 
+        {/* ═══ SHARE STREAK ═══ */}
+        {streak > 0 && (
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              setShareSheetVisible(true);
+            }}
+            activeOpacity={0.85}
+            style={[st.shareBtn, { backgroundColor: theme.primary }]}
+          >
+            <Ionicons name="share-social-outline" size={16} color="#fff" />
+            <Text style={st.shareBtnText}>Share Streak ({streak} 🔥)</Text>
+          </TouchableOpacity>
+        )}
+
         {/* ═══ LEGEND ═══ */}
         <View style={[st.legend, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}>
           <Text style={[st.legendHint, { color: theme.textTertiary }]}>TAP TO CYCLE  •  LONG PRESS FOR OPTIONS</Text>
@@ -983,6 +1000,12 @@ function SalahTrackerInner() {
         onSelect={(s) => pickerPrayer && setStatus(pickerPrayer.key, s)}
         onClose={() => setPickerPrayer(null)}
       />
+
+      <ShareStreakSheet
+        visible={shareSheetVisible}
+        streak={streak}
+        onClose={() => setShareSheetVisible(false)}
+      />
     </View>
   );
 }
@@ -1000,8 +1023,6 @@ const st = StyleSheet.create({
 
   /* Header */
   hdr: { paddingHorizontal: 20, paddingBottom: 22, overflow: 'hidden' },
-  hdrPat: { ...StyleSheet.absoluteFillObject, overflow: 'hidden' },
-  hdrCircle: { position: 'absolute', borderRadius: 999, borderWidth: 1, borderColor: '#fff' },
   hdrTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   hdrBtn: { width: 36, height: 36, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
   hdrTitle: { fontSize: 18, fontWeight: '700', color: '#fff', letterSpacing: -0.3 },
@@ -1071,6 +1092,18 @@ const st = StyleSheet.create({
   /* Future date notice */
   futureNotice: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1, marginBottom: 8 },
   futureNoticeText: { fontSize: 13, fontWeight: '500' },
+
+  /* Share streak button */
+  shareBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, marginHorizontal: 16, marginTop: 16,
+    paddingVertical: 14, borderRadius: 14, minHeight: 48,
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 6 },
+      android: { elevation: 3 },
+    }),
+  },
+  shareBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
   /* Legend */
   legend: { marginHorizontal: 16, marginTop: 20, borderRadius: 16, borderWidth: 1, padding: 14 },

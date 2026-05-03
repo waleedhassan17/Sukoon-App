@@ -56,7 +56,7 @@ export function isFirebaseConfigured(): boolean {
 /**
  * Check if Firebase native modules are available (false in Expo Go)
  */
-function hasNativeFirebaseModules(): boolean {
+export function hasNativeFirebaseModules(): boolean {
   try {
     const { NativeModules } = require('react-native');
     return !!NativeModules.RNFBAppModule;

@@ -355,24 +355,7 @@ export default function HomeScreen() {
             end={{ x: 1, y: 1 }}
             style={[styles.heroGradient, { paddingTop: insets.top + 16 }]}
           >
-            {/* Decorative pattern overlay */}
-            <View style={styles.heroPattern}>
-              {[...Array(5)].map((_, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.heroPatternCircle,
-                    {
-                      width: 140 + i * 55,
-                      height: 140 + i * 55,
-                      top: -15 + i * 12,
-                      right: -35 + i * 18,
-                      opacity: 0.025 + i * 0.006,
-                    },
-                  ]}
-                />
-              ))}
-            </View>
+
 
             {/* Top bar */}
             <View style={styles.heroTopBar}>
@@ -642,10 +625,6 @@ export default function HomeScreen() {
                     <Ionicons name="sparkles" size={14} color={theme.gold + '80'} />
                   </View>
 
-                  <Text style={[styles.ayahArabic, { fontSize: sizes.arabic, lineHeight: sizes.arabicLine }]}>{dailyAyah.arabic}</Text>
-
-                  <View style={[styles.ayahDividerLine, { backgroundColor: theme.gold + '4D' }]} />
-
                   <Text style={[styles.ayahEnglish, { fontSize: sizes.english, lineHeight: sizes.englishLine }]}>{dailyAyah.english}</Text>
 
                   {dailyAyah.urdu && (
@@ -770,16 +749,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 28,
     overflow: 'hidden',
   },
-  heroPattern: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
-  },
-  heroPatternCircle: {
-    position: 'absolute',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#fff',
-  },
+
   heroTopBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1092,6 +1062,7 @@ const styles = StyleSheet.create({
     lineHeight: 44,
     color: 'rgba(255,255,255,0.95)',
     textAlign: 'right',
+    writingDirection: 'rtl',
     marginBottom: 16,
     fontWeight: '500',
     fontFamily: 'UthmanicHafs',

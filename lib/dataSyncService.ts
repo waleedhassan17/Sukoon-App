@@ -278,6 +278,64 @@ export const DataSyncService = {
     }
     // Non-blocking cloud sync (fire-and-forget with retry)
     this._pushSalahToCloudWithRetry(dateKey, dayData);
+    // ALSO mirror into the Salah Buddy schema at prayers/{uid}/days/{date}.
+    // This is what Cloud Functions watch for streak fan-out. Local AsyncStorage
+    // remains the source of truth for the user's own UI; this write is best-effort.
+    this._mirrorToFriendsSchema(dateKey, dayData).catch(() => {});
+  },
+
+  /**
+   * Translate the legacy {fajr, zuhr, asr, maghrib, isha: PrayerStatus} shape
+   * into the Salah-Buddy doc shape and write it under prayers/{uid}/days/{date}.
+   *
+   * Mapping:
+   *   - 'prayed' | 'jamaah' | 'qasr'  → logged: true
+   *   - 'missed' | 'none'             → logged: false
+   *   - the legacy `zuhr` key becomes `dhuhr` (canonical Arabic transliteration)
+   *
+   * prayerCount + completedAt are written client-side too as an optimization;
+   * the server's onPrayerWrite trigger will overwrite if anything is off.
+   */
+  async _mirrorToFriendsSchema(dateKey: string, dayData: any): Promise<void> {
+    if (!isFirebaseConfigured()) return;
+    try {
+      const db = await getFirestore();
+      const userId = await getCurrentUserId();
+      if (!db || !userId) return;
+
+      const isLogged = (s: unknown) => s === 'prayed' || s === 'jamaah' || s === 'qasr';
+      const now = Date.now();
+      const buildEntry = (statusKey: 'fajr' | 'zuhr' | 'asr' | 'maghrib' | 'isha') => ({
+        logged: isLogged(dayData[statusKey]),
+        loggedAt: isLogged(dayData[statusKey]) ? now : null,
+      });
+
+      const fajr = buildEntry('fajr');
+      const dhuhr = buildEntry('zuhr'); // legacy → canonical
+      const asr = buildEntry('asr');
+      const maghrib = buildEntry('maghrib');
+      const isha = buildEntry('isha');
+
+      const prayerCount =
+        Number(fajr.logged) + Number(dhuhr.logged) + Number(asr.logged)
+        + Number(maghrib.logged) + Number(isha.logged);
+
+      const tz = (() => {
+        try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
+        catch { return 'UTC'; }
+      })();
+
+      await db.collection('prayers').doc(userId).collection('days').doc(dateKey).set({
+        date: dateKey,
+        fajr, dhuhr, asr, maghrib, isha,
+        prayerCount,
+        completedAt: prayerCount === 5 ? now : null,
+        timezone: tz,
+        updatedAt: now,
+      }, { merge: true });
+    } catch (err) {
+      if (__DEV__) console.warn('[DataSync] friends-schema mirror failed:', err);
+    }
   },
 
   /**

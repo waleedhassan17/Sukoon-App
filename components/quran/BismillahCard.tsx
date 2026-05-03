@@ -42,10 +42,11 @@ export default function BismillahCard() {
             <Text style={{
               fontSize: 32,
               color: theme.primary,
-              textAlign: 'center',
+              textAlign: 'right',
+              writingDirection: 'rtl',
               fontWeight: '500',
               lineHeight: 52,
-              letterSpacing: 2,
+              letterSpacing: 1,
               fontFamily: 'UthmanicHafs',
             }}>
               أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ

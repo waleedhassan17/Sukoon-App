@@ -92,9 +92,10 @@ export default function AyahCard({
             fontSize: 28,
             lineHeight: 52,
             color: theme.text,
-            textAlign: 'center',
+            textAlign: 'right',
+            writingDirection: 'rtl',
             fontWeight: '400',
-            letterSpacing: 1,
+            letterSpacing: 0,
           }}>{arabicText}</Text>
         </View>
 

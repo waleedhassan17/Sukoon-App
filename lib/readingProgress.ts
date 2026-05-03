@@ -350,10 +350,8 @@ export const ReadingProgress = {
       const completion = `${completedCount}/5`;
       await AsyncStorage.setItem(key, completion);
       
-      // Update streak if it's a full day (5/5) or today
-      if (completedCount === 5 || date === todayStr()) {
-        await this._updateSalahStreak(date, completedCount);
-      }
+      // Update streak for any tracking activity (at least 1 prayer)
+      await this._updateSalahStreak(date, completedCount);
       
       // Note: Cloud sync for salah completion is handled by DataSyncService.saveSalahDay
     } catch (e) {
@@ -409,41 +407,64 @@ export const ReadingProgress = {
   },
 
   /**
-   * Internal: Update Salah streak
+   * Internal: Update Salah streak — CUMULATIVE PRAYER COUNT
+   * 
+   * Streak tracks the total prayers prayed across consecutive active days:
+   * - Day 1: 5 prayers → totalPrayers = 5, consecutiveDays = 1
+   * - Day 2: 4 prayers → totalPrayers = 9, consecutiveDays = 2
+   * - Day 3: 5 prayers → totalPrayers = 14, consecutiveDays = 3
+   * - Day 4: 0 prayers → RESET: totalPrayers = 0, consecutiveDays = 0
+   * 
+   * The displayed "streak" number = totalPrayers (cumulative prayers)
    */
   async _updateSalahStreak(date: string, completedCount: number): Promise<void> {
     try {
       const raw = await AsyncStorage.getItem(KEYS.SALAH_STREAK);
       const streak = safeJsonParse<{ 
-        currentStreak: number; 
-        longestStreak: number;
+        currentStreak: number;     // cumulative prayers across consecutive days
+        longestStreak: number;     // highest cumulative prayers ever achieved
+        consecutiveDays: number;   // number of consecutive active days
         lastDate: string;
         lastCount: number;
-      }>(raw) || { currentStreak: 0, longestStreak: 0, lastDate: '', lastCount: 0 };
+      }>(raw) || { currentStreak: 0, longestStreak: 0, consecutiveDays: 0, lastDate: '', lastCount: 0 };
 
-      // Only count full days (5/5) for streak
-      if (completedCount === 5) {
+      if (completedCount > 0) {
         const yesterday = yesterdayStr();
         
         if (streak.lastDate === date) {
-          // Already recorded for this date
-          return;
-        }
-        
-        if (streak.lastDate === yesterday) {
-          // Consecutive day - extend streak
-          streak.currentStreak += 1;
+          // Same day update — recalculate: subtract old count, add new count
+          const oldCount = streak.lastCount || 0;
+          streak.currentStreak = streak.currentStreak - oldCount + completedCount;
+          streak.lastCount = completedCount;
+        } else if (streak.lastDate === yesterday) {
+          // Consecutive day — extend streak
+          streak.currentStreak += completedCount;
+          streak.consecutiveDays += 1;
+          streak.lastDate = date;
+          streak.lastCount = completedCount;
         } else if (!streak.lastDate || date > streak.lastDate) {
-          // New streak starts
-          streak.currentStreak = 1;
+          // Gap in tracking — new streak starts
+          streak.currentStreak = completedCount;
+          streak.consecutiveDays = 1;
+          streak.lastDate = date;
+          streak.lastCount = completedCount;
         }
-        
-        streak.lastDate = date;
-        streak.lastCount = completedCount;
         
         // Update longest streak if current is higher
         if (streak.currentStreak > streak.longestStreak) {
           streak.longestStreak = streak.currentStreak;
+        }
+      } else {
+        // 0 prayers tracked — if this is today and was previously tracked, recalculate
+        if (streak.lastDate === date) {
+          const oldCount = streak.lastCount || 0;
+          streak.currentStreak = Math.max(0, streak.currentStreak - oldCount);
+          streak.lastCount = 0;
+          // If streak dropped to 0 from removing today's prayers, remove today from streak
+          if (streak.currentStreak === 0) {
+            streak.consecutiveDays = 0;
+            streak.lastDate = '';
+          }
         }
       }
 

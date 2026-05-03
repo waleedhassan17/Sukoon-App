@@ -14,7 +14,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Pressable, StyleSheet,
-  ActivityIndicator, Dimensions, Share, Platform, Modal,
+  ActivityIndicator, Dimensions, Share, Platform, Modal, Alert,
   Animated, PanResponder, LayoutAnimation, UIManager,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -133,14 +133,7 @@ const SurahHeader = React.memo(function SurahHeader({
       start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
       style={[s.header, { paddingTop: insets.top + 6 }]}
     >
-      <View style={s.headerPat}>
-        {[...Array(4)].map((_, i) => (
-          <View key={i} style={[s.patCircle, {
-            width: 110 + i * 50, height: 110 + i * 50,
-            top: -8 + i * 10, right: -25 + i * 14, opacity: 0.025 + i * 0.006,
-          }]} />
-        ))}
-      </View>
+
       <View style={s.headerBar}>
         <TouchableOpacity style={s.headerBtn} onPress={onBack} activeOpacity={0.7}>
           <Ionicons name="chevron-back" size={20} color="#fff" />
@@ -751,6 +744,7 @@ export default function SurahScreen() {
   const [isScrolling, setIsScrolling] = useState(false);
   const [autoScrollActive, setAutoScrollActive] = useState(false);
   const [scrollSpeed, setScrollSpeed] = useState(2);
+  const [savedLastSeenAyah, setSavedLastSeenAyah] = useState<number | null>(null);
 
   // ─── Tafseer state ───
   const [tafseerMap, setTafseerMap] = useState<Map<number, string>>(new Map());
@@ -778,6 +772,7 @@ export default function SurahScreen() {
   const lastPlayedIndexRef = useRef<number>(0);
   const mountedRef = useRef(true);
   const currentIndexRef = useRef<number | null>(null);
+  const currentPageRef = useRef(1);
   const ayahsRef = useRef<Ayah[]>([]);
   const isPageModeRef = useRef(true);
   const pagesRef = useRef<Ayah[][]>([]);
@@ -795,6 +790,7 @@ export default function SurahScreen() {
 
   // ─── Keep refs in sync with state for stable callbacks ───
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+  useEffect(() => { currentPageRef.current = currentPage; }, [currentPage]);
   useEffect(() => { ayahsRef.current = ayahs; }, [ayahs]);
   useEffect(() => { isPageModeRef.current = isPageMode; }, [isPageMode]);
   useEffect(() => { pagesRef.current = pages; }, [pages]);
@@ -1001,6 +997,68 @@ export default function SurahScreen() {
   }, []);
 
   /* ─── Scroll handler: track position + detect current page ─── */
+  const getVisibleAyahNumber = useCallback((scrollY: number): number | null => {
+    const allAyahs = ayahsRef.current;
+    if (!allAyahs.length) return null;
+
+    // In page mode, use the page currently centered in viewport.
+    if (isPageModeRef.current) {
+      const viewportCenter = scrollY + layoutHRef.current / 2;
+      let bestPageIdx = Math.max(0, currentPageRef.current - 1);
+      let bestDistance = Number.POSITIVE_INFINITY;
+
+      Object.entries(pageLayouts.current).forEach(([idx, layout]) => {
+        const pageIdx = Number(idx);
+        const pageCenter = layout.y + layout.h / 2;
+        const distance = Math.abs(pageCenter - viewportCenter);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestPageIdx = pageIdx;
+        }
+      });
+
+      const pageOffset = pageGlobalOffset(pagesRef.current, bestPageIdx);
+      return allAyahs[pageOffset]?.numberInSurah ?? allAyahs[0]?.numberInSurah ?? null;
+    }
+
+    // In card mode, find closest rendered ayah to the viewport top.
+    let closestIdx = 0;
+    let closestDist = Number.POSITIVE_INFINITY;
+    Object.entries(ayahLayouts.current).forEach(([idx, layout]) => {
+      const dist = Math.abs(layout.y - scrollY);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestIdx = Number(idx);
+      }
+    });
+
+    return allAyahs[closestIdx]?.numberInSurah ?? allAyahs[0]?.numberInSurah ?? null;
+  }, []);
+
+  const saveLastSeenManually = useCallback(async () => {
+    if (!meta?.englishName || !ayahs.length) return;
+
+    let ayahNumber: number | null = null;
+
+    if (currentIndexRef.current !== null && ayahs[currentIndexRef.current]) {
+      ayahNumber = ayahs[currentIndexRef.current].numberInSurah;
+    } else {
+      ayahNumber = getVisibleAyahNumber(scrollPosRef.current);
+    }
+
+    if (!ayahNumber) return;
+
+    try {
+      await ReadingProgress.setLastSeen(surahNumber, meta.englishName, ayahNumber);
+      await ReadingProgress.flushLastSeen();
+      setSavedLastSeenAyah(ayahNumber);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      Alert.alert('Last Seen Saved', `Resume will start from Ayah ${ayahNumber}.`);
+    } catch {
+      Alert.alert('Save Failed', 'Could not save your last seen ayah right now.');
+    }
+  }, [meta, ayahs, getVisibleAyahNumber, surahNumber]);
+
   const handleScroll = useCallback((e: any) => {
     const y = e.nativeEvent.contentOffset.y;
     scrollPosRef.current = y;
@@ -1016,7 +1074,10 @@ export default function SurahScreen() {
       for (let i = 0; i < pages.length; i++) {
         const pl = pageLayouts.current[i];
         if (pl && viewCenter >= pl.y && viewCenter < pl.y + pl.h) {
-          if (currentPage !== i + 1) setCurrentPage(i + 1);
+          if (currentPage !== i + 1) {
+            setCurrentPage(i + 1);
+            currentPageRef.current = i + 1;
+          }
           break;
         }
       }
@@ -1065,17 +1126,12 @@ export default function SurahScreen() {
     // ─── TRACK: last seen (debounced - every 1.5 seconds for reliable resume) ───
     if (lastSeenTimer.current) clearTimeout(lastSeenTimer.current);
     lastSeenTimer.current = setTimeout(() => {
-      let closestIdx = 0;
-      let closestDist = Infinity;
-      Object.entries(ayahLayouts.current).forEach(([idx, layout]) => {
-        const dist = Math.abs(layout.y - y);
-        if (dist < closestDist) { closestDist = dist; closestIdx = Number(idx); }
-      });
-      if (ayahs[closestIdx] && meta?.englishName) {
-        ReadingProgress.setLastSeen(surahNumber, meta.englishName, ayahs[closestIdx].numberInSurah).catch(() => {});
+      const ayahNumber = getVisibleAyahNumber(y);
+      if (ayahNumber && meta?.englishName) {
+        ReadingProgress.setLastSeen(surahNumber, meta.englishName, ayahNumber).catch(() => {});
       }
     }, 1500);
-  }, [isPageMode, pages, currentPage, autoScrollActive, surahNumber, ayahs, meta, trackAyahRead, currentIndex]);
+  }, [isPageMode, pages, currentPage, autoScrollActive, surahNumber, meta, trackAyahRead, currentIndex, getVisibleAyahNumber]);
 
   const loadSurah = async () => {
     setLoading(true);
@@ -1471,6 +1527,22 @@ export default function SurahScreen() {
         <AutoScrollBar active={autoScrollActive} speed={scrollSpeed} onStart={startAS} onStop={stopAS} onUp={spdUp} onDown={spdDown} scaleAnim={spdScale} />
       </View>
 
+      {/* Manual Last Seen Save */}
+      <View style={{ position: 'absolute', left: 16, bottom: playerBarH + 14, zIndex: 15 }}>
+        <TouchableOpacity
+          onPress={saveLastSeenManually}
+          activeOpacity={0.85}
+          style={[s.lsBtn, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}
+        >
+          <LinearGradient colors={[theme.primaryLight, theme.primary]} style={s.lsBtnIcon}>
+            <Ionicons name="bookmark" size={12} color="#fff" />
+          </LinearGradient>
+          <Text style={[s.lsBtnText, { color: theme.textSecondary }]} numberOfLines={1}>
+            {savedLastSeenAyah ? `Saved Ayah ${savedLastSeenAyah}` : 'Save Last Seen'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {/* PERSISTENT PLAYER */}
       <PersistentPlayer
         surahName={meta?.englishName || ''} ayahs={ayahs}
@@ -1701,12 +1773,11 @@ const s = StyleSheet.create({
   ornDot: { width: 4, height: 4, borderRadius: 2 },
 
   header: { paddingHorizontal: 20, paddingBottom: 14, overflow: 'hidden' },
-  headerPat: { ...StyleSheet.absoluteFillObject, overflow: 'hidden' },
-  patCircle: { position: 'absolute', borderRadius: 999, borderWidth: 1, borderColor: '#fff' },
+
   headerBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   headerBtn: { width: 36, height: 36, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
   headerCenter: { alignItems: 'center' },
-  headerArabic: { fontSize: 30, color: '#fff', marginBottom: 4, fontWeight: '500', fontFamily: 'UthmanicHafs' },
+  headerArabic: { fontSize: 30, color: '#fff', marginBottom: 4, fontWeight: '500', fontFamily: 'UthmanicHafs', textAlign: 'right', writingDirection: 'rtl' },
   headerEnglish: { fontSize: 17, fontWeight: '600', color: 'rgba(255,255,255,0.9)', letterSpacing: -0.2, marginBottom: 10 },
   headerMeta: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   metaPill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, paddingHorizontal: 11, paddingVertical: 5, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
@@ -1727,7 +1798,7 @@ const s = StyleSheet.create({
   bisCrTR: { top: 12, right: 12, borderTopWidth: 1.5, borderRightWidth: 1.5, borderTopRightRadius: 6 },
   bisCrBL: { bottom: 12, left: 12, borderBottomWidth: 1.5, borderLeftWidth: 1.5, borderBottomLeftRadius: 6 },
   bisCrBR: { bottom: 12, right: 12, borderBottomWidth: 1.5, borderRightWidth: 1.5, borderBottomRightRadius: 6 },
-  bisArabic: { fontSize: 28, color: 'rgba(255,255,255,0.95)', marginVertical: 12, fontWeight: '500', fontFamily: 'UthmanicHafs' },
+  bisArabic: { fontSize: 28, color: 'rgba(255,255,255,0.95)', marginVertical: 12, fontWeight: '500', fontFamily: 'UthmanicHafs', textAlign: 'right', writingDirection: 'rtl' },
   bisDiv: { width: 32, height: 1.5, marginVertical: 8 },
   bisTrans: { fontSize: 13, color: 'rgba(255,255,255,0.65)', textAlign: 'center', lineHeight: 20, fontStyle: 'italic' },
 
@@ -1736,14 +1807,14 @@ const s = StyleSheet.create({
   bisPageLine: { width: 48, height: 1.5, borderRadius: 1 },
   bisPageDm: { width: 6, height: 6, borderRadius: 1, transform: [{ rotate: '45deg' }] },
   bisPageDotSmall: { width: 4, height: 4, borderRadius: 2 },
-  bisPageText: { fontSize: 28, textAlign: 'center', marginVertical: 12, fontWeight: '500', fontFamily: 'UthmanicHafs' },
-  bisPageBismillah: { fontSize: 30, textAlign: 'center', marginVertical: 14, fontWeight: '500', letterSpacing: 1.5, fontFamily: 'UthmanicHafs' },
+  bisPageText: { fontSize: 28, textAlign: 'right', marginVertical: 12, fontWeight: '500', fontFamily: 'UthmanicHafs', writingDirection: 'rtl' },
+  bisPageBismillah: { fontSize: 30, textAlign: 'right', marginVertical: 14, fontWeight: '500', letterSpacing: 0.5, fontFamily: 'UthmanicHafs', writingDirection: 'rtl' },
 
   /* Bismillah separator & styling */
   bisSeparator: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 14 },
   bisSepLine: { flex: 1, height: 1, borderRadius: 1 },
   bisSepDiamond: { width: 6, height: 6, borderRadius: 1, transform: [{ rotate: '45deg' }] },
-  bisBismillahText: { fontSize: 30, color: 'rgba(255,255,255,0.95)', textAlign: 'center', marginVertical: 8, fontWeight: '500', letterSpacing: 1.5, fontFamily: 'UthmanicHafs' },
+  bisBismillahText: { fontSize: 30, color: 'rgba(255,255,255,0.95)', textAlign: 'right', marginVertical: 8, fontWeight: '500', letterSpacing: 0.5, fontFamily: 'UthmanicHafs', writingDirection: 'rtl' },
 
   /* Page frame — FULL WIDTH */
   frameWrap: { paddingHorizontal: 12, marginBottom: 16 },
@@ -1789,7 +1860,7 @@ const s = StyleSheet.create({
   vBadgeT: { fontSize: 12, fontWeight: '700' },
   vActions: { flexDirection: 'row', gap: 2 },
   vActBtn: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  vArabic: { fontSize: 24, lineHeight: 48, textAlign: 'right', marginBottom: 4, fontWeight: '500', fontFamily: 'UthmanicHafs' },
+  vArabic: { fontSize: 24, lineHeight: 48, textAlign: 'right', writingDirection: 'rtl', marginBottom: 4, fontWeight: '500', fontFamily: 'UthmanicHafs' },
   vTransWrap: { marginTop: 8 },
   vGoldLine: { width: 28, height: 1.5, marginBottom: 12 },
   vTransBlock: { marginBottom: 10 },
@@ -1833,6 +1904,21 @@ const s = StyleSheet.create({
   asSide: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   asDis: { opacity: 0.35 },
   asLabel: { fontSize: 10, fontWeight: '700', color: '#fff' },
+
+  /* Last seen button */
+  lsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 44,
+    maxWidth: 170,
+    borderRadius: 22,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    ...Platform.select({ ios: { shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.1, shadowRadius: 10 }, android: { elevation: 4 } }),
+  },
+  lsBtnIcon: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  lsBtnText: { fontSize: 12, fontWeight: '600' },
 
   /* Tafseer Picker Bar */
   tafseerPickerBar: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 14, borderWidth: 1, gap: 10 },

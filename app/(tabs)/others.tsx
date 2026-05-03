@@ -130,24 +130,7 @@ export default function OthersScreen() {
           end={{ x: 1, y: 1 }}
           style={[styles.header, { paddingTop: insets.top + 16 }]}
         >
-          {/* Decorative circles */}
-          <View style={styles.headerPattern}>
-            {[...Array(5)].map((_, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.headerPatternCircle,
-                  {
-                    width: 100 + i * 50,
-                    height: 100 + i * 50,
-                    top: -10 + i * 8,
-                    right: -30 + i * 12,
-                    opacity: 0.03 + i * 0.008,
-                  },
-                ]}
-              />
-            ))}
-          </View>
+
 
           <Animated.View style={{ opacity: headerFade, transform: [{ translateY: headerSlide }] }}>
             <View style={styles.headerIconRow}>
@@ -250,16 +233,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 32,
     overflow: 'hidden',
   },
-  headerPattern: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
-  },
-  headerPatternCircle: {
-    position: 'absolute',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#fff',
-  },
+
   headerIconRow: {
     marginBottom: 16,
   },

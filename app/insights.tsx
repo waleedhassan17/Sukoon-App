@@ -209,14 +209,7 @@ export default function InsightsScreen() {
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
           style={[st.hdr, { paddingTop: insets.top + 6 }]}
         >
-          <View style={st.hdrPat}>
-            {[...Array(5)].map((_, i) => (
-              <View key={i} style={[st.hdrCircle, {
-                width: 100 + i * 50, height: 100 + i * 50,
-                top: -10 + i * 8, right: -30 + i * 12, opacity: 0.03 + i * 0.008,
-              }]} />
-            ))}
-          </View>
+
 
           <View style={st.hdrTop}>
             <TouchableOpacity style={st.hdrBtn} onPress={() => router.back()} activeOpacity={0.7}>
@@ -362,8 +355,7 @@ const st = StyleSheet.create({
 
   /* Header */
   hdr: { paddingHorizontal: 20, paddingBottom: 22, overflow: 'hidden' },
-  hdrPat: { ...StyleSheet.absoluteFillObject, overflow: 'hidden' },
-  hdrCircle: { position: 'absolute', borderRadius: 999, borderWidth: 1, borderColor: '#fff' },
+
   hdrTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   hdrBtn: { width: 36, height: 36, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
   hdrTitle: { fontSize: 20, fontWeight: '800', color: '#fff', letterSpacing: -0.3 },
@@ -425,7 +417,7 @@ const st = StyleSheet.create({
 
   /* Quote */
   quoteCard: { marginHorizontal: 16, marginTop: 20, marginBottom: 20, borderRadius: 18, padding: 20, ...Platform.select({ ios: { shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 12 }, android: { elevation: 4 } }) },
-  quoteArabic: { fontSize: 18, fontWeight: '700', color: '#fff', marginBottom: 12, textAlign: 'center', lineHeight: 28, fontFamily: 'UthmanicHafs' },
+  quoteArabic: { fontSize: 18, fontWeight: '700', color: '#fff', marginBottom: 12, textAlign: 'right', writingDirection: 'rtl', lineHeight: 32, fontFamily: 'UthmanicHafs' },
   quoteEnglish: { fontSize: 13, color: 'rgba(255,255,255,0.85)', marginBottom: 12, textAlign: 'center', lineHeight: 20 },
   quoteRef: { fontSize: 11, color: 'rgba(255,255,255,0.6)', textAlign: 'center', fontWeight: '600' },
 });

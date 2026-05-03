@@ -30,7 +30,7 @@ import { useRouter, useNavigation } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '@/contexts/ThemeContext';
-import { QuranService, SurahMeta } from '@/lib/quranService';
+import { QuranService, SurahMeta, searchSurahs } from '@/lib/quranService';
 import { ReadingProgress } from '@/lib/readingProgress';
 import { RADIUS } from '@/constants/theme';
 
@@ -109,13 +109,21 @@ export default function QuranListScreen() {
   }, []);
 
   const filtered = useMemo(() => {
-    if (!search) return surahs;
-    const q = search.toLowerCase();
-    return surahs.filter((s) =>
-      s.englishName.toLowerCase().includes(q) ||
-      s.name.includes(q) ||
-      String(s.number).includes(q)
-    );
+    if (!search || search.trim().length === 0) return surahs;
+
+    // Use production-ready fuzzy search implemented in QuranService
+    try {
+      return searchSurahs(surahs, search);
+    } catch (err) {
+      // Defensive fallback: simple, case-insensitive substring match
+      const q = search.toLowerCase().trim();
+      return surahs.filter((s) =>
+        s.englishName.toLowerCase().includes(q) ||
+        s.name.toLowerCase().includes(q) ||
+        s.englishNameTranslation.toLowerCase().includes(q) ||
+        String(s.number).includes(q)
+      );
+    }
   }, [surahs, search]);
 
   // FlatList optimizations
