@@ -382,19 +382,8 @@ export default function HomeScreen() {
                 </Text>
               </View>
               <View style={styles.heroTopRight}>
-                <TouchableOpacity
-                  style={styles.heroIconBtn}
-                  activeOpacity={0.7}
-                  onPress={() => router.push('/notifications' as any)}
-                >
+                <TouchableOpacity style={styles.heroIconBtn} activeOpacity={0.7} onPress={() => router.push('/notifications' as any)}>
                   <Ionicons name="notifications-outline" size={20} color="rgba(255,255,255,0.85)" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.heroIconBtn, styles.agentBtn]}
-                  activeOpacity={0.7}
-                  onPress={handleAgentOpen}
-                >
-                  <Ionicons name="mic" size={20} color="#fff" />
                 </TouchableOpacity>
               </View>
             </View>
@@ -755,6 +744,20 @@ export default function HomeScreen() {
           </Animated.View>
         </View>
       </ScrollView>
+
+      {/* ═══════════════ AGENT BUTTON (centered above tab bar) ═══════════════ */}
+      <View style={[styles.agentDock, { bottom: insets.bottom + 68 }]}>
+        <TouchableOpacity onPress={handleAgentOpen} activeOpacity={0.85} style={styles.agentDockBtn}>
+          <LinearGradient
+            colors={['#1B4332', '#2D6A4F', '#52B788']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.agentDockGradient}
+          >
+            <Ionicons name="mic" size={26} color="#fff" />
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
 
       {/* ═══════════════ VOICE AGENT MODAL ═══════════════ */}
       <VoiceAgentModal
@@ -1256,9 +1259,31 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  agentBtn: {
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.25)',
+  /* ─── Agent dock button ─── */
+  agentDock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  agentDockBtn: {
+    borderRadius: 34,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#1B4332',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.45,
+        shadowRadius: 18,
+      },
+      android: { elevation: 10 },
+    }),
+  },
+  agentDockGradient: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
