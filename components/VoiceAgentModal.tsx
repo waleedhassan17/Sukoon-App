@@ -1,12 +1,8 @@
 /**
  * VoiceAgentModal — Siri-style voice agent overlay
  *
- * Modes:
- *   voice — full STT + TTS (dev build / production)
- *   text  — typed input + TTS response (Expo Go / no mic permission)
- *
- * Flow (voice): open → permission check → auto-listen → silence stops →
- *               send to agent → TTS reply → execute commands → idle
+ * Flow: open → auto-listen → silence stops → agent thinks → TTS reply → idle
+ * Fallback: text input when mic unavailable (Expo Go / denied)
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -19,7 +15,6 @@ import {
   Animated,
   Dimensions,
   Platform,
-  Alert,
   Linking,
   TextInput,
   ActivityIndicator,
@@ -28,7 +23,6 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -42,126 +36,156 @@ import {
   NavigateQuranCommand,
 } from '@/lib/agentService';
 
-// Lazy load TTS so missing native module never crashes
 let Speech: typeof import('expo-speech') | null = null;
-try {
-  Speech = require('expo-speech');
-} catch {}
+try { Speech = require('expo-speech'); } catch {}
 
 const { width } = Dimensions.get('window');
-const ORB_SIZE = 136;
+const ORB = 148;
 
-// ── State machine ──────────────────────────────────────────────────────────
 type AgentState =
-  | 'checking'        // determining mode + permission on open
-  | 'needs_permission'// permission not yet granted
-  | 'blocked'         // permission permanently denied
-  | 'idle'            // ready — tap orb to speak
-  | 'listening'       // mic open
-  | 'thinking'        // calling agent
-  | 'speaking'        // TTS playing
-  | 'error';          // recoverable error
+  | 'checking'
+  | 'needs_permission'
+  | 'blocked'
+  | 'idle'
+  | 'listening'
+  | 'thinking'
+  | 'speaking'
+  | 'error';
 
-type InputMode = 'voice' | 'text'; // text = Expo Go fallback
+type InputMode = 'voice' | 'text';
 
-// ── Props ──────────────────────────────────────────────────────────────────
 interface Props {
   visible: boolean;
   onClose: () => void;
   onNavigateQuran: (surah: number, ayah: number) => void;
 }
 
+const HINTS = [
+  '"I just prayed Fajr"',
+  '"Open Surah Al-Kahf"',
+  '"How is my streak?"',
+  '"Log Maghrib prayer"',
+  '"Take me to Yaseen"',
+];
+
 export function VoiceAgentModal({ visible, onClose, onNavigateQuran }: Props) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
 
-  const [state, setState_] = useState<AgentState>('checking');
+  const [state, setState_]     = useState<AgentState>('checking');
   const [inputMode, setInputMode] = useState<InputMode>('voice');
-  const [statusLabel, setStatusLabel] = useState('');
+  const [statusLabel, setStatus]  = useState('');
   const [transcript, setTranscript] = useState('');
   const [agentReply, setAgentReply] = useState('');
-  const [textInput, setTextInput] = useState('');
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [textInput, setTextInput]   = useState('');
+  const [sessionId, setSessionId]   = useState<string | null>(null);
+  const [hintIdx, setHintIdx]       = useState(0);
 
-  const stateRef = useRef<AgentState>('checking');
-  const pendingNavRef = useRef<NavigateQuranCommand[]>([]);
-  const autoStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stateRef     = useRef<AgentState>('checking');
+  const pendingNav   = useRef<NavigateQuranCommand[]>([]);
+  const autoTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hintTimer    = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Animations
+  // ── Animations ────────────────────────────────────────────────────────────
   const overlayAnim = useRef(new Animated.Value(0)).current;
-  const orbScale = useRef(new Animated.Value(1)).current;
-  const orbGlow = useRef(new Animated.Value(0)).current;
-  const replyAnim = useRef(new Animated.Value(0)).current;
-  const barAnims = useRef([0.3, 0.6, 0.4, 0.7, 0.3].map(v => new Animated.Value(v))).current;
-  const waveRef = useRef<Animated.CompositeAnimation | null>(null);
-  const pulseRef = useRef<Animated.CompositeAnimation | null>(null);
+  const orbScale    = useRef(new Animated.Value(0.85)).current;
+  const orbOpacity  = useRef(new Animated.Value(0)).current;
+  const glowAnim    = useRef(new Animated.Value(0)).current;
+  const replyAnim   = useRef(new Animated.Value(0)).current;
+  const ripple1     = useRef(new Animated.Value(0)).current;
+  const ripple2     = useRef(new Animated.Value(0)).current;
+  const barAnims    = useRef([0.25, 0.55, 0.85, 0.55, 0.25].map(v => new Animated.Value(v))).current;
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  const waveLoop  = useRef<Animated.CompositeAnimation | null>(null);
+  const pulseLoop = useRef<Animated.CompositeAnimation | null>(null);
+  const rippleLoop= useRef<Animated.CompositeAnimation | null>(null);
+
+  // ── State helpers ─────────────────────────────────────────────────────────
 
   const setState = useCallback((s: AgentState, label: string) => {
     stateRef.current = s;
     setState_(s);
-    setStatusLabel(label);
+    setStatus(label);
   }, []);
 
   const startWave = useCallback(() => {
-    const anim = Animated.loop(
-      Animated.stagger(70, barAnims.map(bar =>
+    waveLoop.current = Animated.loop(
+      Animated.stagger(60, barAnims.map(bar =>
         Animated.sequence([
-          Animated.timing(bar, { toValue: 0.85 + Math.random() * 0.15, duration: 200, useNativeDriver: true }),
-          Animated.timing(bar, { toValue: 0.15, duration: 200, useNativeDriver: true }),
+          Animated.timing(bar, { toValue: 0.9, duration: 220, useNativeDriver: true }),
+          Animated.timing(bar, { toValue: 0.1, duration: 220, useNativeDriver: true }),
         ])
       ))
     );
-    waveRef.current = anim;
-    anim.start();
+    waveLoop.current.start();
   }, [barAnims]);
 
   const stopWave = useCallback(() => {
-    waveRef.current?.stop();
-    waveRef.current = null;
-    barAnims.forEach(b => b.setValue(0.3));
+    waveLoop.current?.stop();
+    waveLoop.current = null;
+    barAnims.forEach((b, i) => b.setValue([0.25, 0.55, 0.85, 0.55, 0.25][i]));
   }, [barAnims]);
 
   const startPulse = useCallback(() => {
-    const anim = Animated.loop(
+    pulseLoop.current = Animated.loop(
       Animated.sequence([
         Animated.parallel([
-          Animated.timing(orbScale, { toValue: 1.1, duration: 800, useNativeDriver: true }),
-          Animated.timing(orbGlow,  { toValue: 1,   duration: 800, useNativeDriver: true }),
+          Animated.timing(orbScale, { toValue: 1.06, duration: 900, useNativeDriver: true }),
+          Animated.timing(glowAnim, { toValue: 1,    duration: 900, useNativeDriver: true }),
         ]),
         Animated.parallel([
-          Animated.timing(orbScale, { toValue: 1,   duration: 800, useNativeDriver: true }),
-          Animated.timing(orbGlow,  { toValue: 0,   duration: 800, useNativeDriver: true }),
+          Animated.timing(orbScale, { toValue: 1,   duration: 900, useNativeDriver: true }),
+          Animated.timing(glowAnim, { toValue: 0.3, duration: 900, useNativeDriver: true }),
         ]),
       ])
     );
-    pulseRef.current = anim;
-    anim.start();
-  }, [orbScale, orbGlow]);
+    pulseLoop.current.start();
+  }, [orbScale, glowAnim]);
 
   const stopPulse = useCallback(() => {
-    pulseRef.current?.stop();
-    pulseRef.current = null;
+    pulseLoop.current?.stop();
+    pulseLoop.current = null;
     orbScale.setValue(1);
-    orbGlow.setValue(0);
-  }, [orbScale, orbGlow]);
+    glowAnim.setValue(0);
+  }, [orbScale, glowAnim]);
+
+  const startRipple = useCallback(() => {
+    ripple1.setValue(0); ripple2.setValue(0);
+    rippleLoop.current = Animated.loop(
+      Animated.stagger(500, [
+        Animated.sequence([
+          Animated.timing(ripple1, { toValue: 1, duration: 1400, useNativeDriver: true }),
+          Animated.timing(ripple1, { toValue: 0, duration: 0, useNativeDriver: true }),
+        ]),
+        Animated.sequence([
+          Animated.timing(ripple2, { toValue: 1, duration: 1400, useNativeDriver: true }),
+          Animated.timing(ripple2, { toValue: 0, duration: 0, useNativeDriver: true }),
+        ]),
+      ])
+    );
+    rippleLoop.current.start();
+  }, [ripple1, ripple2]);
+
+  const stopRipple = useCallback(() => {
+    rippleLoop.current?.stop();
+    rippleLoop.current = null;
+    ripple1.setValue(0); ripple2.setValue(0);
+  }, [ripple1, ripple2]);
 
   const transition = useCallback((s: AgentState, label: string) => {
-    stopWave();
-    stopPulse();
+    stopWave(); stopPulse(); stopRipple();
     setState(s, label);
-    if (s === 'listening') startWave();
+    if (s === 'listening') { startWave(); startRipple(); }
     if (s === 'thinking')  startPulse();
-  }, [stopWave, stopPulse, setState, startWave, startPulse]);
+  }, [stopWave, stopPulse, stopRipple, setState, startWave, startRipple, startPulse]);
 
   const showReply = useCallback((text: string) => {
     setAgentReply(text);
     replyAnim.setValue(0);
-    Animated.timing(replyAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
+    Animated.spring(replyAnim, { toValue: 1, tension: 60, friction: 10, useNativeDriver: true }).start();
   }, [replyAnim]);
 
-  // ── Agent call (shared by voice + text modes) ────────────────────────────
+  // ── Agent call ────────────────────────────────────────────────────────────
 
   const callAgent = useCallback(async (userText: string) => {
     transition('thinking', 'Thinking...');
@@ -174,16 +198,16 @@ export function VoiceAgentModal({ visible, onClose, onNavigateQuran }: Props) {
     }
 
     try {
-      const response = await AgentService.sendMessage(userText, sid);
-      pendingNavRef.current = response.commands || [];
+      const response = await AgentService.sendMessage(userText, sid!);
+      pendingNav.current = response.commands || [];
 
       transition('speaking', 'Sukoon');
       showReply(response.reply);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
 
       const afterSpeak = () => {
-        const nav = pendingNavRef.current[0];
-        pendingNavRef.current = [];
+        const nav = pendingNav.current[0];
+        pendingNav.current = [];
         if (nav) {
           setTimeout(() => {
             onClose();
@@ -197,46 +221,39 @@ export function VoiceAgentModal({ visible, onClose, onNavigateQuran }: Props) {
       if (Speech) {
         Speech.speak(response.reply, {
           language: 'en-US',
-          rate: Platform.OS === 'ios' ? 0.52 : 0.85,
-          pitch: 1.0,
+          rate: Platform.OS === 'ios' ? 0.50 : 0.82,
+          pitch: 1.05,
           onDone: afterSpeak,
           onError: afterSpeak,
           onStopped: () => {},
         });
       } else {
-        setTimeout(afterSpeak, Math.min(response.reply.length * 50, 4000));
+        setTimeout(afterSpeak, Math.min(response.reply.length * 48, 5000));
       }
     } catch (err: any) {
-      let msg = 'Something went wrong. Try again.';
+      let msg = 'Something went wrong. Tap to retry.';
       if (err instanceof AgentRateLimitError) msg = err.message;
-      else if (err?.message?.includes('AGENT_UNAVAILABLE')) msg = 'Agent not connected. Is the emulator running?';
-
+      else if (err?.message?.includes('AGENT_UNAVAILABLE')) msg = 'Could not reach Sukoon AI.';
       transition('error', msg);
       showReply('');
       setTimeout(() => transition('idle', inputMode === 'text' ? 'Type your message' : 'Tap to speak'), 3000);
     }
   }, [sessionId, transition, showReply, onClose, onNavigateQuran, inputMode]);
 
-  // ── Voice mode: STT handler ───────────────────────────────────────────────
+  // ── Speech result handler ─────────────────────────────────────────────────
 
   const handleSpeechResult = useCallback(async (result: SpeechRecognitionResult) => {
-    if (result.status === 'listening') {
-      if (result.text) setTranscript(result.text);
-      return;
-    }
-    if (result.status === 'processing') {
+    if (result.status === 'listening' || result.status === 'processing') {
       if (result.text) setTranscript(result.text);
       return;
     }
     if (result.status === 'unavailable') {
-      // Fallback to text mode
       setInputMode('text');
       transition('idle', 'Type your message');
       return;
     }
     if (result.status === 'error') {
       const msg = result.error || '';
-      // "no-speech" is normal — user just didn't say anything
       if (msg.includes('no-speech') || msg.includes('No speech') || msg.includes('7')) {
         transition('idle', 'Tap to speak');
       } else if (msg.includes('not-allowed') || msg.includes('permission') || msg.includes('1')) {
@@ -256,70 +273,69 @@ export function VoiceAgentModal({ visible, onClose, onNavigateQuran }: Props) {
 
   const startListening = useCallback(async () => {
     if (stateRef.current === 'listening' || stateRef.current === 'thinking') return;
-
     Speech?.stop?.();
     setTranscript('');
     setAgentReply('');
     replyAnim.setValue(0);
     transition('listening', 'Listening...');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-
     try {
       await speechRecognitionService.startListening(handleSpeechResult);
-    } catch (err: any) {
+    } catch {
       transition('error', 'Could not start microphone');
       setTimeout(() => transition('idle', 'Tap to speak'), 2000);
     }
   }, [transition, handleSpeechResult, replyAnim]);
 
-  // ── Permission pre-check on modal open ───────────────────────────────────
+  // ── Modal lifecycle ───────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!visible) {
-      // Clean up on close
-      if (autoStartTimerRef.current) clearTimeout(autoStartTimerRef.current);
+      if (autoTimer.current) clearTimeout(autoTimer.current);
+      if (hintTimer.current) clearInterval(hintTimer.current);
       speechRecognitionService.cancelListening().catch(() => {});
       Speech?.stop?.();
-      stopWave();
-      stopPulse();
+      stopWave(); stopPulse(); stopRipple();
       setState_('checking');
-      setStatusLabel('');
+      setStatus('');
       setTranscript('');
       setAgentReply('');
       setTextInput('');
+      Animated.timing(overlayAnim, { toValue: 0, duration: 220, useNativeDriver: true }).start();
       return;
     }
 
-    // Load session ID
     AgentService.getOrCreateSessionId().then(setSessionId).catch(() => {});
 
-    // Fade in overlay
-    Animated.timing(overlayAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+    // Entrance: scale + fade orb in
+    Animated.parallel([
+      Animated.timing(overlayAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+      Animated.spring(orbScale,    { toValue: 1, tension: 55, friction: 9, useNativeDriver: true }),
+      Animated.timing(orbOpacity,  { toValue: 1, duration: 300, useNativeDriver: true }),
+    ]).start();
 
-    // Detect Expo Go / no native module
+    // Rotate through hint examples
+    hintTimer.current = setInterval(() => setHintIdx(i => (i + 1) % HINTS.length), 3000);
+
     if (!speechRecognitionService.isAvailable()) {
       setInputMode('text');
       transition('idle', 'Type your message');
       return;
     }
 
-    // Check permission, then auto-start
     const init = async () => {
       try {
-        const alreadyGranted = await speechRecognitionService.checkPermission();
-        if (alreadyGranted) {
-          transition('idle', 'Tap to speak');
-          autoStartTimerRef.current = setTimeout(startListening, 500);
-          return;
-        }
-
-        // Request permission
-        setState_('checking');
-        setStatusLabel('Requesting microphone...');
-        const granted = await speechRecognitionService.requestPermission();
+        const granted = await speechRecognitionService.checkPermission();
         if (granted) {
           transition('idle', 'Tap to speak');
-          autoStartTimerRef.current = setTimeout(startListening, 400);
+          autoTimer.current = setTimeout(startListening, 500);
+          return;
+        }
+        setStatus('Requesting microphone...');
+        const approved = await speechRecognitionService.requestPermission();
+        if (approved) {
+          transition('idle', 'Tap to speak');
+          autoTimer.current = setTimeout(startListening, 400);
         } else {
           transition('needs_permission', 'Microphone access needed');
         }
@@ -327,23 +343,18 @@ export function VoiceAgentModal({ visible, onClose, onNavigateQuran }: Props) {
         if (e?.message === 'PERMISSION_DENIED_PERMANENTLY') {
           transition('blocked', 'Microphone blocked in Settings');
         } else {
-          // Couldn't determine — allow manual tap
           transition('idle', 'Tap to speak');
         }
       }
     };
-
     init();
+
+    return () => {
+      if (hintTimer.current) clearInterval(hintTimer.current);
+    };
   }, [visible]);
 
-  // Fade out
-  useEffect(() => {
-    if (!visible) {
-      Animated.timing(overlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
-    }
-  }, [visible]);
-
-  // ── Orb press handler ─────────────────────────────────────────────────────
+  // ── Orb press ─────────────────────────────────────────────────────────────
 
   const handleOrbPress = useCallback(() => {
     switch (stateRef.current) {
@@ -362,12 +373,7 @@ export function VoiceAgentModal({ visible, onClose, onNavigateQuran }: Props) {
         break;
       case 'needs_permission':
         speechRecognitionService.requestPermission()
-          .then(granted => {
-            if (granted) {
-              transition('idle', 'Tap to speak');
-              setTimeout(startListening, 300);
-            }
-          })
+          .then(g => { if (g) { transition('idle', 'Tap to speak'); setTimeout(startListening, 300); } })
           .catch(() => {});
         break;
       case 'blocked':
@@ -377,13 +383,11 @@ export function VoiceAgentModal({ visible, onClose, onNavigateQuran }: Props) {
   }, [startListening, handleSpeechResult, transition]);
 
   const handleClose = useCallback(() => {
-    if (autoStartTimerRef.current) clearTimeout(autoStartTimerRef.current);
+    if (autoTimer.current) clearTimeout(autoTimer.current);
     speechRecognitionService.cancelListening().catch(() => {});
     Speech?.stop?.();
     onClose();
   }, [onClose]);
-
-  // ── Text mode: send ───────────────────────────────────────────────────────
 
   const handleTextSend = useCallback(() => {
     const text = textInput.trim();
@@ -393,173 +397,181 @@ export function VoiceAgentModal({ visible, onClose, onNavigateQuran }: Props) {
     callAgent(text);
   }, [textInput, callAgent]);
 
-  // ── Orb visuals ───────────────────────────────────────────────────────────
+  // ── Orb visual config ─────────────────────────────────────────────────────
 
-  const orbColors: [string, string] = (() => {
+  const orbColors: [string, string, string] = (() => {
     switch (state) {
-      case 'listening':       return ['#1B5E20', '#388E3C'];
-      case 'thinking':        return ['#0D3B2E', '#1B5E20'];
-      case 'speaking':        return ['#1A237E', '#3949AB'];
-      case 'error':           return ['#7B1FA2', '#9C27B0'];
+      case 'listening':        return ['#1B5E20', '#2E7D32', '#43A047'];
+      case 'thinking':         return ['#0D3B2E', '#1B4332', '#2D6A4F'];
+      case 'speaking':         return ['#1A237E', '#283593', '#3949AB'];
+      case 'error':            return ['#6A1B9A', '#7B1FA2', '#9C27B0'];
       case 'needs_permission':
-      case 'blocked':         return ['#E65100', '#EF6C00'];
-      default:                return ['#1B4332', '#40916C'];
+      case 'blocked':          return ['#BF360C', '#D84315', '#F4511E'];
+      default:                 return ['#1B4332', '#2D6A4F', '#40916C'];
     }
   })();
 
-  const orbIcon = () => {
+  const orbContent = () => {
     switch (state) {
-      case 'checking':        return <ActivityIndicator size="large" color="#fff" />;
-      case 'needs_permission':return <Ionicons name="mic-off" size={44} color="#fff" />;
-      case 'blocked':         return <Ionicons name="settings-outline" size={44} color="#fff" />;
-      case 'listening':       return (
-        <View style={styles.waveform}>
-          {barAnims.map((bar, i) => (
-            <Animated.View key={i} style={[styles.waveBar, { transform: [{ scaleY: bar }] }]} />
-          ))}
-        </View>
-      );
-      case 'thinking':        return <MaterialCommunityIcons name="robot-outline" size={46} color="#fff" />;
-      case 'speaking':        return <Ionicons name="volume-high" size={44} color="#fff" />;
-      case 'error':           return <Ionicons name="refresh" size={44} color="#fff" />;
-      default:                return <MaterialCommunityIcons name="robot-outline" size={46} color="#fff" />;
+      case 'checking':
+        return <ActivityIndicator size="large" color="rgba(255,255,255,0.9)" />;
+      case 'needs_permission':
+        return <Ionicons name="mic-off" size={52} color="#fff" />;
+      case 'blocked':
+        return <Ionicons name="settings-outline" size={48} color="#fff" />;
+      case 'listening':
+        return (
+          <View style={styles.waveform}>
+            {barAnims.map((bar, i) => (
+              <Animated.View key={i} style={[styles.waveBar, { transform: [{ scaleY: bar }] }]} />
+            ))}
+          </View>
+        );
+      case 'thinking':
+        return <Ionicons name="ellipsis-horizontal" size={38} color="rgba(255,255,255,0.9)" />;
+      case 'speaking':
+        return <Ionicons name="volume-high" size={50} color="#fff" />;
+      case 'error':
+        return <Ionicons name="refresh" size={48} color="#fff" />;
+      default:
+        return <Ionicons name="mic" size={54} color="#fff" />;
     }
   };
+
+  const rippleScale1 = ripple1.interpolate({ inputRange: [0, 1], outputRange: [1, 1.7] });
+  const rippleOpacity1 = ripple1.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.35, 0.15, 0] });
+  const rippleScale2 = ripple2.interpolate({ inputRange: [0, 1], outputRange: [1, 1.55] });
+  const rippleOpacity2 = ripple2.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.25, 0.1, 0] });
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="none"
-      statusBarTranslucent
-      onRequestClose={handleClose}
-    >
+    <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={handleClose}>
       <Animated.View style={[styles.overlay, { opacity: overlayAnim }]}>
-        <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
-        <View style={[StyleSheet.absoluteFill, styles.overlayDim]} />
+        <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(4,12,8,0.55)' }]} />
 
-        {/* Close button */}
+        {/* Close */}
         <TouchableOpacity
           style={[styles.closeBtn, { top: insets.top + 14 }]}
           onPress={handleClose}
           activeOpacity={0.7}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          <Ionicons name="close" size={22} color="rgba(255,255,255,0.75)" />
+          <Ionicons name="close" size={22} color="rgba(255,255,255,0.7)" />
         </TouchableOpacity>
 
-        {/* Mode badge (Expo Go notice) */}
+        {/* Text mode badge */}
         {inputMode === 'text' && (
-          <View style={[styles.modeBadge, { top: insets.top + 14, left: 20 }]}>
-            <Ionicons name="information-circle-outline" size={13} color="rgba(255,255,255,0.6)" />
-            <Text style={styles.modeBadgeText}>Text mode (install dev build for voice)</Text>
+          <View style={[styles.modeBadge, { top: insets.top + 18, left: 20 }]}>
+            <Ionicons name="information-circle-outline" size={13} color="rgba(255,255,255,0.5)" />
+            <Text style={styles.modeBadgeText}>Text mode</Text>
           </View>
         )}
 
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.content}
-        >
-          {/* User transcript */}
-          {!!transcript && state !== 'idle' && (
-            <Text style={styles.transcript} numberOfLines={2}>
-              "{transcript}"
-            </Text>
-          )}
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.content}>
 
-          {/* ORB */}
-          {inputMode === 'voice' && (
+          {/* App name */}
+          <Text style={styles.appName}>Sukoon AI</Text>
+
+          {/* Orb area */}
+          <View style={styles.orbArea}>
+            {/* Ripple rings (listening only) */}
+            {state === 'listening' && (
+              <>
+                <Animated.View style={[
+                  styles.ripple,
+                  { transform: [{ scale: rippleScale1 }], opacity: rippleOpacity1, borderColor: '#4CAF50' },
+                ]} />
+                <Animated.View style={[
+                  styles.ripple,
+                  { transform: [{ scale: rippleScale2 }], opacity: rippleOpacity2, borderColor: '#4CAF50' },
+                ]} />
+              </>
+            )}
+
+            {/* Glow halo */}
+            <Animated.View style={[
+              styles.glowHalo,
+              {
+                opacity: glowAnim,
+                backgroundColor: state === 'listening' ? '#4CAF5030' : '#40916C30',
+              },
+            ]} />
+
+            {/* Orb */}
             <TouchableOpacity
               onPress={handleOrbPress}
               activeOpacity={0.85}
               disabled={state === 'checking'}
             >
-              <Animated.View style={{ transform: [{ scale: orbScale }] }}>
-                <LinearGradient colors={orbColors} style={styles.orb}>
-                  {orbIcon()}
+              <Animated.View style={{ transform: [{ scale: orbScale }], opacity: orbOpacity }}>
+                <LinearGradient colors={orbColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.orb}>
+                  {orbContent()}
                 </LinearGradient>
-
-                {/* Glow ring — visible during listening/thinking */}
-                <Animated.View
-                  style={[
-                    styles.orbRing,
-                    {
-                      borderColor: state === 'listening' ? '#4CAF50' : '#40916C',
-                      opacity: orbGlow,
-                    },
-                  ]}
-                />
               </Animated.View>
             </TouchableOpacity>
-          )}
+          </View>
 
-          {/* Text mode orb (non-interactive visual) */}
-          {inputMode === 'text' && (
-            <View>
-              <LinearGradient colors={orbColors} style={styles.orb}>
-                <MaterialCommunityIcons name="robot-outline" size={46} color="#fff" />
-              </LinearGradient>
-            </View>
-          )}
+          {/* Status */}
+          <Text style={styles.status}>{statusLabel}</Text>
 
-          {/* Status label */}
-          <Text style={styles.statusLabel}>{statusLabel}</Text>
+          {/* User transcript */}
+          {!!transcript && state !== 'idle' && (
+            <Text style={styles.transcript} numberOfLines={2}>"{transcript}"</Text>
+          )}
 
           {/* Agent reply */}
           {!!agentReply && (
-            <Animated.View style={[styles.replyCard, { opacity: replyAnim }]}>
-              <Text style={styles.replyText} numberOfLines={7}>
-                {agentReply}
-              </Text>
+            <Animated.View style={[
+              styles.replyCard,
+              { opacity: replyAnim, transform: [{ scale: replyAnim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }] },
+            ]}>
+              <Text style={styles.replyText} numberOfLines={8}>{agentReply}</Text>
             </Animated.View>
           )}
 
-          {/* Text input (Expo Go fallback) */}
+          {/* Hint examples (idle, no reply yet) */}
+          {state === 'idle' && !agentReply && inputMode === 'voice' && (
+            <Text style={styles.hint}>{HINTS[hintIdx]}</Text>
+          )}
+          {state === 'listening' && (
+            <Text style={styles.hint}>Tap orb to stop</Text>
+          )}
+          {state === 'speaking' && (
+            <Text style={styles.hint}>Tap orb to interrupt</Text>
+          )}
+          {(state === 'needs_permission') && (
+            <Text style={styles.hint}>Tap orb to allow microphone</Text>
+          )}
+          {state === 'blocked' && (
+            <Text style={styles.hint}>Tap to open Settings → allow microphone</Text>
+          )}
+
+          {/* Text mode input */}
           {inputMode === 'text' && state !== 'thinking' && state !== 'speaking' && (
             <View style={styles.textRow}>
               <TextInput
-                style={[styles.textField, { color: '#fff', borderColor: 'rgba(255,255,255,0.2)' }]}
+                style={styles.textField}
                 placeholder="Ask anything..."
-                placeholderTextColor="rgba(255,255,255,0.35)"
+                placeholderTextColor="rgba(255,255,255,0.3)"
                 value={textInput}
                 onChangeText={setTextInput}
                 onSubmitEditing={handleTextSend}
                 returnKeyType="send"
-                multiline={false}
                 maxLength={500}
               />
               <TouchableOpacity
                 onPress={handleTextSend}
                 activeOpacity={0.8}
                 disabled={!textInput.trim()}
-                style={[styles.textSendBtn, { opacity: textInput.trim() ? 1 : 0.35 }]}
+                style={{ opacity: textInput.trim() ? 1 : 0.3 }}
               >
-                <LinearGradient colors={['#1B4332', '#40916C']} style={styles.textSendGrad}>
+                <LinearGradient colors={['#1B4332', '#40916C']} style={styles.sendBtn}>
                   <Ionicons name="send" size={17} color="#fff" />
                 </LinearGradient>
               </TouchableOpacity>
             </View>
-          )}
-
-          {/* Hint text */}
-          {state === 'idle' && !agentReply && inputMode === 'voice' && (
-            <Text style={styles.hint}>
-              "I prayed Fajr"  ·  "Open Surah Yasin"  ·  "My streak this week?"
-            </Text>
-          )}
-          {state === 'listening' && (
-            <Text style={styles.hint}>Tap orb to stop early</Text>
-          )}
-          {state === 'speaking' && (
-            <Text style={styles.hint}>Tap orb to interrupt</Text>
-          )}
-          {state === 'needs_permission' && (
-            <Text style={styles.hint}>Tap orb to allow microphone access</Text>
-          )}
-          {state === 'blocked' && (
-            <Text style={styles.hint}>Tap orb to open Settings and allow microphone</Text>
           )}
         </KeyboardAvoidingView>
       </Animated.View>
@@ -572,9 +584,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  overlayDim: {
-    backgroundColor: 'rgba(5,15,10,0.6)',
   },
   closeBtn: {
     position: 'absolute',
@@ -591,87 +600,113 @@ const styles = StyleSheet.create({
     position: 'absolute',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 4,
     zIndex: 10,
   },
   modeBadgeText: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.45)',
+    color: 'rgba(255,255,255,0.4)',
     fontWeight: '500',
   },
   content: {
     alignItems: 'center',
     paddingHorizontal: 28,
     width: '100%',
-    gap: 22,
+    gap: 20,
+  },
+  appName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.35)',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  orbArea: {
+    width: ORB + 80,
+    height: ORB + 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ripple: {
+    position: 'absolute',
+    width: ORB,
+    height: ORB,
+    borderRadius: ORB / 2,
+    borderWidth: 1.5,
+  },
+  glowHalo: {
+    position: 'absolute',
+    width: ORB + 40,
+    height: ORB + 40,
+    borderRadius: (ORB + 40) / 2,
+  },
+  orb: {
+    width: ORB,
+    height: ORB,
+    borderRadius: ORB / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#2D6A4F',
+        shadowOffset: { width: 0, height: 16 },
+        shadowOpacity: 0.6,
+        shadowRadius: 36,
+      },
+      android: { elevation: 20 },
+    }),
+  },
+  waveform: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 52,
+  },
+  waveBar: {
+    width: 5,
+    height: 42,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+  },
+  status: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#fff',
+    letterSpacing: 0.1,
+    textAlign: 'center',
+    minHeight: 26,
   },
   transcript: {
     fontSize: 15,
-    color: 'rgba(255,255,255,0.55)',
+    color: 'rgba(255,255,255,0.5)',
     fontStyle: 'italic',
     textAlign: 'center',
     lineHeight: 22,
     maxWidth: width * 0.78,
   },
-  orb: {
-    width: ORB_SIZE,
-    height: ORB_SIZE,
-    borderRadius: ORB_SIZE / 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#40916C',
-        shadowOffset: { width: 0, height: 14 },
-        shadowOpacity: 0.55,
-        shadowRadius: 32,
-      },
-      android: { elevation: 18 },
-    }),
-  },
-  orbRing: {
-    position: 'absolute',
-    width: ORB_SIZE + 22,
-    height: ORB_SIZE + 22,
-    borderRadius: (ORB_SIZE + 22) / 2,
-    borderWidth: 1.5,
-    top: -11,
-    left: -11,
-  },
-  waveform: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    height: 48,
-  },
-  waveBar: {
-    width: 5,
-    height: 38,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-  },
-  statusLabel: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    letterSpacing: 0.2,
-    textAlign: 'center',
-    minHeight: 24,
-  },
   replyCard: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 20,
-    paddingHorizontal: 22,
-    paddingVertical: 18,
-    maxWidth: width * 0.86,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 22,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    maxWidth: width * 0.88,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   replyText: {
     fontSize: 16,
-    color: 'rgba(255,255,255,0.9)',
+    color: 'rgba(255,255,255,0.92)',
     lineHeight: 26,
     textAlign: 'center',
+    fontWeight: '400',
+  },
+  hint: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.28)',
+    textAlign: 'center',
+    lineHeight: 20,
+    fontStyle: 'italic',
   },
   textRow: {
     flexDirection: 'row',
@@ -681,28 +716,20 @@ const styles = StyleSheet.create({
   },
   textField: {
     flex: 1,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
     borderRadius: 22,
     paddingHorizontal: 18,
     paddingVertical: 11,
     fontSize: 15,
+    color: '#fff',
     backgroundColor: 'rgba(255,255,255,0.07)',
   },
-  textSendBtn: {
-    borderRadius: 22,
-    overflow: 'hidden',
-  },
-  textSendGrad: {
+  sendBtn: {
     width: 44,
     height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  hint: {
-    fontSize: 12.5,
-    color: 'rgba(255,255,255,0.32)',
-    textAlign: 'center',
-    lineHeight: 20,
-    maxWidth: width * 0.72,
   },
 });

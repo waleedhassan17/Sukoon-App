@@ -122,8 +122,8 @@ export default function HomeScreen() {
   const waveBar2 = useRef(new Animated.Value(0.5)).current;
   const waveBar3 = useRef(new Animated.Value(0.3)).current;
 
-  // 8 staggered sections
-  const sectionAnims = useStaggeredEntry(8, 90);
+  // 7 staggered sections
+  const sectionAnims = useStaggeredEntry(7, 90);
 
   // Recording animation lifecycle — pulse dot + waveform bars
   useEffect(() => {
@@ -376,14 +376,25 @@ export default function HomeScreen() {
             <View style={styles.heroTopBar}>
               <View>
                 <Text style={styles.heroDate}>
-                  {islamicDate 
+                  {islamicDate
                     ? `${islamicDate.hijri.day} ${islamicDate.hijri.month} ${islamicDate.hijri.year} AH`
                     : new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
                 </Text>
               </View>
               <View style={styles.heroTopRight}>
-                <TouchableOpacity style={styles.heroIconBtn} activeOpacity={0.7} onPress={() => router.push('/notifications' as any)}>
+                <TouchableOpacity
+                  style={styles.heroIconBtn}
+                  activeOpacity={0.7}
+                  onPress={() => router.push('/notifications' as any)}
+                >
                   <Ionicons name="notifications-outline" size={20} color="rgba(255,255,255,0.85)" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.heroIconBtn, styles.agentBtn]}
+                  activeOpacity={0.7}
+                  onPress={handleAgentOpen}
+                >
+                  <Ionicons name="mic" size={20} color="#fff" />
                 </TouchableOpacity>
               </View>
             </View>
@@ -744,22 +755,6 @@ export default function HomeScreen() {
           </Animated.View>
         </View>
       </ScrollView>
-
-      {/* ═══════════════ VOICE AGENT FAB ═══════════════ */}
-      <TouchableOpacity
-        onPress={handleAgentOpen}
-        activeOpacity={0.85}
-        style={[styles.fab, { bottom: insets.bottom + 76 }]}
-      >
-        <LinearGradient
-          colors={['#1B4332', '#2D6A4F', '#40916C']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.fabGradient}
-        >
-          <MaterialCommunityIcons name="robot-outline" size={28} color="#fff" />
-        </LinearGradient>
-      </TouchableOpacity>
 
       {/* ═══════════════ VOICE AGENT MODAL ═══════════════ */}
       <VoiceAgentModal
@@ -1261,26 +1256,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  /* ─── Voice Agent FAB ─── */
-  fab: {
-    position: 'absolute',
-    right: 20,
-    borderRadius: 32,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#1B4332',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.45,
-        shadowRadius: 20,
-      },
-      android: { elevation: 10 },
-    }),
-  },
-  fabGradient: {
-    width: 60,
-    height: 60,
-    alignItems: 'center',
-    justifyContent: 'center',
+  agentBtn: {
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
   },
 });
