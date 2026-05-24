@@ -292,19 +292,29 @@ export const UserProfileService = {
     }
 
     try {
-      // Write code to user profile
-      await db.collection('users').doc(user.uid).set({ inviteCode: code }, { merge: true });
+      // Revoke any existing active invites before creating a new one
+      const stale = await db.collection('invites')
+        .where('fromUid', '==', user.uid)
+        .where('status', '==', 'active')
+        .get();
+      if (!stale.empty) {
+        const batch = db.batch();
+        stale.docs.forEach(d => batch.update(d.ref, { status: 'revoked' }));
+        await batch.commit();
+      }
 
-      // Also create the invite document so acceptInvite can find it
+      // Create the new invite document
       await db.collection('invites').doc(code).set({
         code,
         fromUid: user.uid,
-        // Use Date so Firestore stores proper Timestamps (Cloud Functions expects Timestamp.toMillis())
         createdAt: new Date(),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         usedByUid: null,
         status: 'active',
       });
+
+      // Update user profile with new code
+      await db.collection('users').doc(user.uid).set({ inviteCode: code }, { merge: true });
 
       return code;
     } catch (e) {

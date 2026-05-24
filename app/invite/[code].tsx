@@ -156,10 +156,7 @@ export default function AcceptInviteScreen() {
           const existing = existingFriendship.data() ?? {};
           if (existing.status === 'active') {
             // Idempotent: mark invite used so it can't be reused.
-            await db.collection('invites').doc(code).set(
-              { status: 'used', usedByUid: myUid },
-              { merge: true },
-            );
+            await db.collection('invites').doc(code).update({ status: 'used', usedByUid: myUid });
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
             setState({ kind: 'accepted', alreadyFriends: true });
             setTimeout(() => router.replace('/tools/salah-friends' as any), 1200);
@@ -169,17 +166,15 @@ export default function AcceptInviteScreen() {
 
           // removed → reactivate
           const batch = db.batch();
-          batch.set(friendshipRef, {
+          batch.update(friendshipRef, {
             status: 'active',
             acceptedAt: new Date(),
-            users: usersSorted,
-            initiatedBy: inviterUid,
             currentStreak: 0,
             lastStreakDate: null,
             milestonesAchieved: [],
             lastUpdatedAt: new Date(),
-          }, { merge: true });
-          batch.set(db.collection('invites').doc(code), { status: 'used', usedByUid: myUid }, { merge: true });
+          });
+          batch.update(db.collection('invites').doc(code), { status: 'used', usedByUid: myUid });
           await batch.commit();
 
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -201,8 +196,23 @@ export default function AcceptInviteScreen() {
           milestonesAchieved: [],
           createdAt: new Date(),
         }, { merge: false });
-        batch.set(db.collection('invites').doc(code), { status: 'used', usedByUid: myUid }, { merge: true });
+        batch.update(db.collection('invites').doc(code), { status: 'used', usedByUid: myUid });
         await batch.commit();
+
+        // Auto-generate a fresh code for the inviter so they can invite the next friend.
+        // Runs after the batch so a failure here doesn't roll back the friendship.
+        try {
+          const ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
+          let newCode = '';
+          for (let i = 0; i < 6; i++) newCode += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+          await db.collection('invites').doc(newCode).set({
+            code: newCode, fromUid: inviterUid,
+            createdAt: new Date(),
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            usedByUid: null, status: 'active',
+          });
+          await db.collection('users').doc(inviterUid).set({ inviteCode: newCode }, { merge: true });
+        } catch { /* non-fatal — inviter's screen will lazy-refresh */ }
 
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         setState({ kind: 'accepted', alreadyFriends: false });
