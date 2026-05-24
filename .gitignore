@@ -40,3 +40,5 @@ expo-env.d.ts
 # @end expo-cli
 # Firebase Android client config (contains API key)
 google-services.json
+*.apk
+*.aab

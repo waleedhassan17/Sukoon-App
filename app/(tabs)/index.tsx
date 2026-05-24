@@ -26,6 +26,7 @@ import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { VoiceInputButton } from '@/components/VoiceInputButton';
+import { VoiceAgentModal } from '@/components/VoiceAgentModal';
 import { ReadingProgress } from '@/lib/readingProgress';
 import { QuranService } from '@/lib/quranService';
 import { PrayerTimesService, PrayerTimesData, HijriDate, IslamicCalendarData } from '@/lib/prayerTimes';
@@ -97,6 +98,7 @@ export default function HomeScreen() {
   const heroFade = useRef(new Animated.Value(0)).current;
   const heroSlide = useRef(new Animated.Value(30)).current;
 
+  const [voiceAgentVisible, setVoiceAgentVisible] = useState(false);
   const [emotionText, setEmotionText] = useState('');
   const [dailyAyah, setDailyAyah] = useState<any>(null);
   const [streak, setStreak] = useState(0);
@@ -290,6 +292,19 @@ export default function HomeScreen() {
       setIsSubmitting(false);
     }, 1000);
   }, [emotionText, isRecording, isSubmitting]);
+
+  const handleAgentOpen = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setVoiceAgentVisible(true);
+  }, []);
+
+  const handleAgentClose = useCallback(() => {
+    setVoiceAgentVisible(false);
+  }, []);
+
+  const handleAgentQuranNav = useCallback((surah: number, ayah: number) => {
+    router.push(`/quran/${surah}?startAyah=${ayah}` as any);
+  }, [router]);
 
   const handleEmotionQuick = useCallback((name: string) => {
     if (isNavigatingRef.current) return;
@@ -729,6 +744,29 @@ export default function HomeScreen() {
           </Animated.View>
         </View>
       </ScrollView>
+
+      {/* ═══════════════ VOICE AGENT FAB ═══════════════ */}
+      <TouchableOpacity
+        onPress={handleAgentOpen}
+        activeOpacity={0.85}
+        style={[styles.fab, { bottom: insets.bottom + 76 }]}
+      >
+        <LinearGradient
+          colors={['#1B4332', '#2D6A4F', '#40916C']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.fabGradient}
+        >
+          <MaterialCommunityIcons name="robot-outline" size={28} color="#fff" />
+        </LinearGradient>
+      </TouchableOpacity>
+
+      {/* ═══════════════ VOICE AGENT MODAL ═══════════════ */}
+      <VoiceAgentModal
+        visible={voiceAgentVisible}
+        onClose={handleAgentClose}
+        onNavigateQuran={handleAgentQuranNav}
+      />
     </View>
   );
 }
@@ -1221,5 +1259,28 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.5)',
     fontWeight: '500',
     letterSpacing: 0.5,
+  },
+
+  /* ─── Voice Agent FAB ─── */
+  fab: {
+    position: 'absolute',
+    right: 20,
+    borderRadius: 32,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#1B4332',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.45,
+        shadowRadius: 20,
+      },
+      android: { elevation: 10 },
+    }),
+  },
+  fabGradient: {
+    width: 60,
+    height: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

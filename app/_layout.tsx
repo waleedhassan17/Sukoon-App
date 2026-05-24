@@ -247,6 +247,15 @@ function RootLayoutInner() {
         {/* quran/ and tools/ have their own _layout.tsx — just declare the directory */}
         <Stack.Screen name="quran" options={{ headerShown: false }} />
         <Stack.Screen name="tools" options={{ headerShown: false }} />
+        {/* Sukoon AI Agent chat */}
+        <Stack.Screen
+          name="agent-chat"
+          options={{
+            headerShown: false,
+            animation: 'slide_from_bottom',
+            presentation: 'card',
+          }}
+        />
         {/* Salah Buddy: deep-link target + friend detail. Both have their own _layout.tsx. */}
         <Stack.Screen name="invite" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="friends" options={{ headerShown: false }} />
