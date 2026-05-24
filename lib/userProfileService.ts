@@ -247,6 +247,32 @@ export const UserProfileService = {
   },
 
   /**
+   * Returns true if the given invite code exists in Firestore and is still active/unexpired.
+   * Used by the invite screen to detect stale codes before displaying them.
+   */
+  async isInviteCodeActive(code: string): Promise<boolean> {
+    if (!code || !isFirebaseConfigured()) return false;
+    const db = await getFirestore();
+    if (!db) return false;
+    try {
+      const snap = await db.collection('invites').doc(code).get();
+      if (!snap.exists) return false;
+      const data = snap.data() ?? {};
+      if (data.status !== 'active') return false;
+      const expiresAt = data.expiresAt;
+      if (expiresAt) {
+        const expiryMs = typeof expiresAt.toMillis === 'function'
+          ? expiresAt.toMillis()
+          : expiresAt instanceof Date ? expiresAt.getTime() : Number(expiresAt);
+        if (expiryMs < Date.now()) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  /**
    * Generate a local invite code and write it directly to Firestore.
    * Fallback for when Cloud Functions are unavailable (dev builds).
    * Uses the same Crockford-style charset as the Cloud Function.

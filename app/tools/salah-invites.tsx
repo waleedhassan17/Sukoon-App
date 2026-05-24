@@ -51,31 +51,34 @@ export default function SalahInvitesScreen() {
       setNeedsName(mustSetName);
       let activeCode = profile?.inviteCode ?? null;
 
-      // If we have a code and not forcing regenerate, use it directly
+      // Verify stored code is still active — it may have been used by a friend
       if (activeCode && !forceRegenerate) {
-        setCode(activeCode);
-      } else {
+        const isActive = await UserProfileService.isInviteCodeActive(activeCode);
+        if (!isActive) activeCode = null; // stale; fall through to regeneration
+      }
+
+      if (!activeCode || forceRegenerate) {
         // Try Cloud Functions first
         try {
           const res = await FirebaseFunctions.createInvite();
           activeCode = res.code;
         } catch (fnErr) {
           const fnMsg = (fnErr as Error).message ?? '';
-          // Fallback to local logic for ANY function error (e.g. 'not found', 'FUNCTIONS_UNAVAILABLE', 'internal')
           console.warn('Cloud Function createInvite failed, falling back to local:', fnMsg);
-          
-          // Try getting existing code from Firestore
+
+          // Try getting existing code from Firestore and validate it
           const existingCode = await UserProfileService.getExistingInviteCode();
           if (existingCode && !forceRegenerate) {
-            activeCode = existingCode;
-          } else {
+            const isActive = await UserProfileService.isInviteCodeActive(existingCode);
+            activeCode = isActive ? existingCode : null;
+          }
+
+          if (!activeCode) {
             // Generate a code locally and write directly to Firestore
             const localCode = await UserProfileService.generateLocalInviteCode();
             if (localCode) {
               activeCode = localCode;
             } else {
-              // Foolproof fallback: if Firestore fails entirely, just generate a random string
-              // so the deep link can still be created and shared.
               const ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
               let code = '';
               for (let i = 0; i < 6; i++) {
@@ -85,8 +88,9 @@ export default function SalahInvitesScreen() {
             }
           }
         }
-        setCode(activeCode);
       }
+
+      setCode(activeCode);
 
       // Generate share URL
       const url = await BranchService.createInviteLink({
