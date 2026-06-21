@@ -26,6 +26,7 @@ import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { VoiceInputButton } from '@/components/VoiceInputButton';
+import QuranVoiceModal from '@/components/QuranVoiceModal';
 import { ReadingProgress } from '@/lib/readingProgress';
 import { QuranService } from '@/lib/quranService';
 import { PrayerTimesService, PrayerTimesData, HijriDate, IslamicCalendarData } from '@/lib/prayerTimes';
@@ -98,6 +99,7 @@ export default function HomeScreen() {
   const heroSlide = useRef(new Animated.Value(30)).current;
 
   const [emotionText, setEmotionText] = useState('');
+  const [voiceVisible, setVoiceVisible] = useState(false);
   const [dailyAyah, setDailyAyah] = useState<any>(null);
   const [streak, setStreak] = useState(0);
   const [lastSeen, setLastSeen] = useState<any>(null);
@@ -729,6 +731,31 @@ export default function HomeScreen() {
           </Animated.View>
         </View>
       </ScrollView>
+
+      {/* ═══════════════ QURAN VOICE ASSISTANT (mic, above tab bar) ═══════════════ */}
+      <View style={[styles.voiceDock, { bottom: insets.bottom + 68 }]}>
+        <TouchableOpacity
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+            setVoiceVisible(true);
+          }}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Quran voice assistant"
+          style={styles.voiceDockBtn}
+        >
+          <LinearGradient
+            colors={['#1B4332', '#2D6A4F', '#52B788']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.voiceDockGradient}
+          >
+            <Ionicons name="mic" size={26} color="#fff" />
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
+
+      <QuranVoiceModal visible={voiceVisible} onClose={() => setVoiceVisible(false)} />
     </View>
   );
 }
@@ -1221,5 +1248,33 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.5)',
     fontWeight: '500',
     letterSpacing: 0.5,
+  },
+
+  /* ─── Quran voice assistant mic dock ─── */
+  voiceDock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  voiceDockBtn: {
+    borderRadius: 34,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#1B4332',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.45,
+        shadowRadius: 18,
+      },
+      android: { elevation: 10 },
+    }),
+  },
+  voiceDockGradient: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
