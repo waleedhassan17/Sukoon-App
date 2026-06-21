@@ -770,6 +770,11 @@ export default function SurahScreen() {
   const isAudioChangingRef = useRef(false);
   const playingBismillahRef = useRef(false);
   const lastPlayedIndexRef = useRef<number>(0);
+  // Deep-link / voice-command target: the ayah (numberInSurah) to jump to once
+  // the surah loads, and whether to auto-play it. Consumed by an effect so it
+  // runs with fresh `ayahs`/`playIndex` closures (not loadSurah's stale ones).
+  const pendingStartAyahRef = useRef<number | null>(null);
+  const pendingAutoPlayRef = useRef<boolean>(false);
   const mountedRef = useRef(true);
   const currentIndexRef = useRef<number | null>(null);
   const currentPageRef = useRef(1);
@@ -1145,19 +1150,13 @@ export default function SurahScreen() {
       setError(null);
       Animated.timing(contentFade, { toValue: 1, duration: 500, delay: 200, useNativeDriver: true }).start();
       
+      // Record the deep-link / voice-command target. The actual scroll + optional
+      // auto-play happens in a dedicated effect once `ayahs` state is committed,
+      // so it uses fresh `scrollToAyah`/`playIndex` closures instead of the stale
+      // ones captured here at first render (the old bug where "play" never played).
       if (startAyahParam) {
-        const idx = a.findIndex((x) => x.numberInSurah === startAyahParam);
-        if (idx >= 0) {
-          // Set last played index so player bar starts from this verse
-          lastPlayedIndexRef.current = idx;
-          setTimeout(() => scrollToAyah(idx), 600);
-          
-          // Auto-play if requested
-          const autoPlayParam = params.autoPlay === 'true';
-          if (autoPlayParam && a[idx]?.audio) {
-            setTimeout(() => playIndex(idx), 1200);
-          }
-        }
+        pendingStartAyahRef.current = startAyahParam;
+        pendingAutoPlayRef.current = params.autoPlay === 'true';
       }
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : 'Failed to load Surah. Please check your internet connection.';
@@ -1256,6 +1255,29 @@ export default function SurahScreen() {
       unlock();
     }
   }, [ayahs, surahNumber, meta, scrollToIndex, trackAyahRead, bismillahAudio]);
+
+  // ─── Deep-link / voice command: jump to (and optionally play) a target ayah ───
+  // Runs once the surah's ayahs are loaded. "open" → scroll only; "play" → scroll
+  // and play that verse's recitation. Clamps so ANY verse number the user names
+  // resolves to a valid ayah (e.g. a number past the surah's end → its last ayah).
+  useEffect(() => {
+    if (ayahs.length === 0) return;
+    const target = pendingStartAyahRef.current;
+    if (target == null) return;
+    pendingStartAyahRef.current = null;
+    const shouldPlay = pendingAutoPlayRef.current;
+    pendingAutoPlayRef.current = false;
+
+    const clamped = Math.min(Math.max(Math.round(target), 1), ayahs.length);
+    let idx = ayahs.findIndex((x) => x.numberInSurah === clamped);
+    if (idx < 0) idx = clamped - 1;
+
+    lastPlayedIndexRef.current = idx;
+    setTimeout(() => scrollToAyah(idx), 500);
+    if (shouldPlay && ayahs[idx]?.audio) {
+      setTimeout(() => playIndex(idx), 900);
+    }
+  }, [ayahs, scrollToAyah, playIndex]);
 
   const togglePlayPause = useCallback(async () => {
     // Safety: always clear stale debounce so player is never stuck
