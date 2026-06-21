@@ -698,33 +698,18 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 32,
     overflow: 'hidden',
   },
-  headerPattern: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
-  },
-  patternCircle: {
-    position: 'absolute',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#fff',
-  },
-  headerIconRow: {
-    marginBottom: 14,
-  },
+  headerPattern: { ...StyleSheet.absoluteFillObject, overflow: 'hidden' },
+  patternCircle: { position: 'absolute', borderRadius: 999, borderWidth: 1, borderColor: '#fff' },
+
+  headerIconRow: { marginBottom: 14 },
   headerIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
+    width: 40, height: 40, borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: -0.5,
-    marginBottom: 6,
+    fontSize: 28, fontWeight: '700', color: '#fff',
+    letterSpacing: -0.5, marginBottom: 6,
   },
   headerSub: {
     fontSize: 15,

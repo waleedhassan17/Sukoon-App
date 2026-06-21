@@ -7,7 +7,7 @@ import React from 'react';
 
 const TAB_ITEMS = [
   { name: 'index', title: 'Home', icon: 'home' },
-  { name: 'quran', title: 'Quran', icon: 'book' },
+  { name: 'quran', title: 'Books', icon: 'library' },
   { name: 'saved', title: 'Saved', icon: 'bookmark' },
   { name: 'others', title: 'More', icon: 'grid' },
   { name: 'settings', title: 'Settings', icon: 'settings' },
