@@ -34,7 +34,7 @@ export default function ShareStreakSheet({ visible, streak, onClose }: { visible
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     
     try {
-      const message = t('invites.whatsAppMessage', { url: 'https://sukoon.app' });
+      const message = t('invites.whatsAppMessage', { url: 'https://play.google.com/store/apps/details?id=com.sukoon.app' });
       const extra = `\n\n${friendName ? `Hey ${friendName}, ` : ''}my current Salah streak is ${streak} 🔥 on Sukoon.`;
       await Share.share({ message: `${message}${extra}` });
 

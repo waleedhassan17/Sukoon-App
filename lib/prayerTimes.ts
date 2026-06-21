@@ -17,6 +17,9 @@ const ALADHAN_BASE = 'https://api.aladhan.com/v1';
 const CACHE_KEYS = {
   PRAYER_TIMES: 'sukoon_prayer_cache',       // { date, data, coords, locationName }
   LOCATION:     'sukoon_location_cache',      // { lat, lng, name, timestamp }
+  // Persistent (no TTL) last-known coords used purely for scheduling future
+  // notifications when the user hasn't opened the prayer screen recently.
+  SCHED_COORDS: 'sukoon_sched_coords',        // { lat, lng }
 };
 
 // ── Cache TTL ──
@@ -149,6 +152,102 @@ export const PrayerTimesService = {
         locationName,
       }));
     } catch {}
+  },
+
+  // ════════════════════════════════════════
+  // SCHEDULING COORDS (persistent, no TTL)
+  // Last-known coordinates kept solely so the notification scheduler can compute
+  // future prayer times even when the user hasn't opened the prayer screen.
+  // ════════════════════════════════════════
+
+  async cacheSchedulingCoords(lat: number, lng: number): Promise<void> {
+    try {
+      await AsyncStorage.setItem(CACHE_KEYS.SCHED_COORDS, JSON.stringify({ lat, lng }));
+    } catch {}
+  },
+
+  async getSchedulingCoords(): Promise<{ lat: number; lng: number } | null> {
+    try {
+      const raw = await AsyncStorage.getItem(CACHE_KEYS.SCHED_COORDS);
+      const c = this._safeParse<{ lat: number; lng: number }>(raw);
+      if (c && Number.isFinite(c.lat) && Number.isFinite(c.lng)) return { lat: c.lat, lng: c.lng };
+      return null;
+    } catch { return null; }
+  },
+
+  // ════════════════════════════════════════
+  // MULTI-DAY PRAYER TIMES (for rolling notification window)
+  // ════════════════════════════════════════
+
+  /**
+   * Fetch a whole month of prayer times in a single request via the Aladhan
+   * `calendar` endpoint. Returns a map of day-number → cleaned timings.
+   */
+  async getMonthCalendar(
+    lat: number, lng: number, year: number, month: number, method: number = 2,
+  ): Promise<Map<number, PrayerTimesData> | null> {
+    try {
+      const res = await fetch(
+        `${ALADHAN_BASE}/calendar?latitude=${lat}&longitude=${lng}&method=${method}&month=${month}&year=${year}`,
+        { headers: { 'Accept': 'application/json' } }
+      );
+      const json = await res.json();
+      if (json.code !== 200 || !Array.isArray(json.data)) return null;
+
+      const map = new Map<number, PrayerTimesData>();
+      for (const entry of json.data) {
+        const t = entry.timings;
+        const dayNum = Number(entry.date?.gregorian?.day);
+        if (!t || !Number.isFinite(dayNum)) continue;
+        map.set(dayNum, {
+          Fajr: this._cleanTime(t.Fajr),
+          Sunrise: this._cleanTime(t.Sunrise),
+          Dhuhr: this._cleanTime(t.Dhuhr),
+          Asr: this._cleanTime(t.Asr),
+          Maghrib: this._cleanTime(t.Maghrib),
+          Isha: this._cleanTime(t.Isha),
+          date: entry.date?.readable ?? '',
+        });
+      }
+      return map.size > 0 ? map : null;
+    } catch (e) {
+      if (__DEV__) console.warn('[PrayerTimes] getMonthCalendar error:', e);
+      return null;
+    }
+  },
+
+  /**
+   * Build the next `numDays` days of prayer times (starting today) so the
+   * notification scheduler can lay down a rolling multi-day window. Uses the
+   * monthly calendar endpoint and caches each month within the call, so a
+   * 7-day window crossing a month boundary costs at most 2 network requests.
+   */
+  async getUpcomingDays(
+    lat: number, lng: number, numDays: number, method: number = 2,
+  ): Promise<{ dateKey: string; date: Date; times: PrayerTimesData }[]> {
+    const out: { dateKey: string; date: Date; times: PrayerTimesData }[] = [];
+    const monthCache = new Map<string, Map<number, PrayerTimesData> | null>();
+
+    for (let i = 0; i < numDays; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() + i);
+      d.setHours(0, 0, 0, 0);
+      const year = d.getFullYear();
+      const month = d.getMonth() + 1;
+      const day = d.getDate();
+      const monthKey = `${year}-${month}`;
+
+      if (!monthCache.has(monthKey)) {
+        monthCache.set(monthKey, await this.getMonthCalendar(lat, lng, year, month, method));
+      }
+      const monthData = monthCache.get(monthKey);
+      const times = monthData?.get(day);
+      if (!times) continue;
+
+      const dateKey = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      out.push({ dateKey, date: d, times });
+    }
+    return out;
   },
 
   // ════════════════════════════════════════

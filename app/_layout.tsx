@@ -163,13 +163,16 @@ function RootLayoutInner() {
         // This ensures the Notifications screen shows all delivered notifications
         NotificationService.syncDeliveredNotifications().catch(() => {});
 
-        // Check if notifications need rescheduling (new day)
+        // Check if notifications need rescheduling (new day). Reschedule the
+        // rolling multi-day window right away using cached coords so we don't
+        // wait for the user to open the prayer screen.
         const prefs = await NotificationService.getPreferences();
         if (prefs.enabled) {
           const lastScheduled = await AsyncStorage.getItem('sukoon_notif_last_scheduled');
           const today = new Date().toDateString();
           if (lastScheduled !== today) {
-            if (__DEV__) console.log('[Sukoon] New day detected — notifications will reschedule on next prayer times fetch');
+            if (__DEV__) console.log('[Sukoon] New day detected — re-extending notification window');
+            NotificationService.rescheduleFromCache().catch(() => {});
           }
         }
       }
@@ -247,15 +250,6 @@ function RootLayoutInner() {
         {/* quran/ and tools/ have their own _layout.tsx — just declare the directory */}
         <Stack.Screen name="quran" options={{ headerShown: false }} />
         <Stack.Screen name="tools" options={{ headerShown: false }} />
-        {/* Sukoon AI Agent chat */}
-        <Stack.Screen
-          name="agent-chat"
-          options={{
-            headerShown: false,
-            animation: 'slide_from_bottom',
-            presentation: 'card',
-          }}
-        />
         {/* Salah Buddy: deep-link target + friend detail. Both have their own _layout.tsx. */}
         <Stack.Screen name="invite" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="friends" options={{ headerShown: false }} />

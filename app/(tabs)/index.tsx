@@ -26,7 +26,6 @@ import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { VoiceInputButton } from '@/components/VoiceInputButton';
-import { VoiceAgentModal } from '@/components/VoiceAgentModal';
 import { ReadingProgress } from '@/lib/readingProgress';
 import { QuranService } from '@/lib/quranService';
 import { PrayerTimesService, PrayerTimesData, HijriDate, IslamicCalendarData } from '@/lib/prayerTimes';
@@ -98,7 +97,6 @@ export default function HomeScreen() {
   const heroFade = useRef(new Animated.Value(0)).current;
   const heroSlide = useRef(new Animated.Value(30)).current;
 
-  const [voiceAgentVisible, setVoiceAgentVisible] = useState(false);
   const [emotionText, setEmotionText] = useState('');
   const [dailyAyah, setDailyAyah] = useState<any>(null);
   const [streak, setStreak] = useState(0);
@@ -263,7 +261,7 @@ export default function HomeScreen() {
               Maghrib: times.Maghrib?.split(' ')[0] || '18:00',
               Isha: times.Isha?.split(' ')[0] || '19:30',
             };
-            await scheduleFromPrayerTimes(rawTimes);
+            await scheduleFromPrayerTimes(rawTimes, { lat, lng });
           }
         } catch (notifErr) {
           if (__DEV__) console.warn('Failed to schedule prayer notifications:', notifErr);
@@ -292,19 +290,6 @@ export default function HomeScreen() {
       setIsSubmitting(false);
     }, 1000);
   }, [emotionText, isRecording, isSubmitting]);
-
-  const handleAgentOpen = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    setVoiceAgentVisible(true);
-  }, []);
-
-  const handleAgentClose = useCallback(() => {
-    setVoiceAgentVisible(false);
-  }, []);
-
-  const handleAgentQuranNav = useCallback((surah: number, ayah: number) => {
-    router.push(`/quran/${surah}?startAyah=${ayah}` as any);
-  }, [router]);
 
   const handleEmotionQuick = useCallback((name: string) => {
     if (isNavigatingRef.current) return;
@@ -744,27 +729,6 @@ export default function HomeScreen() {
           </Animated.View>
         </View>
       </ScrollView>
-
-      {/* ═══════════════ AGENT BUTTON (centered above tab bar) ═══════════════ */}
-      <View style={[styles.agentDock, { bottom: insets.bottom + 68 }]}>
-        <TouchableOpacity onPress={handleAgentOpen} activeOpacity={0.85} style={styles.agentDockBtn}>
-          <LinearGradient
-            colors={['#1B4332', '#2D6A4F', '#52B788']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.agentDockGradient}
-          >
-            <Ionicons name="mic" size={26} color="#fff" />
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
-
-      {/* ═══════════════ VOICE AGENT MODAL ═══════════════ */}
-      <VoiceAgentModal
-        visible={voiceAgentVisible}
-        onClose={handleAgentClose}
-        onNavigateQuran={handleAgentQuranNav}
-      />
     </View>
   );
 }
@@ -1257,33 +1221,5 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.5)',
     fontWeight: '500',
     letterSpacing: 0.5,
-  },
-
-  /* ─── Agent dock button ─── */
-  agentDock: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-  },
-  agentDockBtn: {
-    borderRadius: 34,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#1B4332',
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.45,
-        shadowRadius: 18,
-      },
-      android: { elevation: 10 },
-    }),
-  },
-  agentDockGradient: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

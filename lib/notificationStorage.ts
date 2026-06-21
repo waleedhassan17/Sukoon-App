@@ -37,6 +37,13 @@ export interface StoredNotification {
   read: boolean;
   /** Optional extra data (prayer name, action, etc.) */
   data?: Record<string, any>;
+  /**
+   * Stable identity for deduplication. Derived from the OS notification's
+   * scheduled identifier (which is unique per prayer per day) so that the same
+   * delivered notification, re-read every time the app is reopened, is only ever
+   * stored once — regardless of how much time has passed.
+   */
+  dedupeKey?: string;
 }
 
 // ══════════════════════════════════════════════
@@ -87,6 +94,45 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 }
 
+/** Calendar-day stamp (local) used to scope dedupe keys to a single day. */
+function dayStamp(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Build a stable dedupe key for a notification.
+ *
+ * When the OS notification carries a scheduled identifier (e.g.
+ * `prayer-fajr-2026-06-22`) we key off that — it's already unique per prayer per
+ * day, so re-reading the same delivered notification across app opens collapses
+ * to one entry. Otherwise we fall back to type+title+day, which still prevents a
+ * given reminder from being stored twice in the same day.
+ */
+function buildDedupeKey(
+  identifier: string | undefined,
+  title: string,
+  type: NotificationType,
+  when: Date,
+): string {
+  const id = (identifier ?? '').trim();
+  // Skip volatile test identifiers so test notifications aren't over-deduped.
+  if (id && !id.startsWith('test-azan-')) return `id:${id}`;
+  return `t:${type}:${title}:${dayStamp(when)}`;
+}
+
+/** True if `newItem` duplicates something already stored. */
+function isDuplicateOf(existing: StoredNotification[], newItem: StoredNotification, now: Date): boolean {
+  return existing.some((item) => {
+    if (item.dedupeKey && newItem.dedupeKey && item.dedupeKey === newItem.dedupeKey) return true;
+    // Legacy/no-key safety net: same title within a short window.
+    if (item.title === newItem.title) {
+      const timeDiff = Math.abs(now.getTime() - new Date(item.time).getTime());
+      if (timeDiff < DEDUP_WINDOW_MS) return true;
+    }
+    return false;
+  });
+}
+
 // ══════════════════════════════════════════════
 // NOTIFICATION STORAGE SERVICE
 // ══════════════════════════════════════════════
@@ -123,6 +169,7 @@ export const NotificationStorage = {
       const data = content.data as Record<string, any> | undefined;
       const type = resolveNotificationType(data);
       const now = new Date();
+      const identifier: string | undefined = notification?.request?.identifier;
 
       // Build the new item
       const newItem: StoredNotification = {
@@ -133,19 +180,14 @@ export const NotificationStorage = {
         time: now.toISOString(),
         read: false,
         data,
+        dedupeKey: buildDedupeKey(identifier, title, type, now),
       };
 
       // Load existing
       const existing = await this.getAll();
 
-      // Deduplicate: skip if same title arrived within DEDUP_WINDOW_MS
-      const isDuplicate = existing.some((item) => {
-        if (item.title !== newItem.title) return false;
-        const timeDiff = Math.abs(now.getTime() - new Date(item.time).getTime());
-        return timeDiff < DEDUP_WINDOW_MS;
-      });
-
-      if (isDuplicate) {
+      // Deduplicate by stable key (and a legacy title/time safety net).
+      if (isDuplicateOf(existing, newItem, now)) {
         console.log('[NotificationStorage] Duplicate notification skipped:', title);
         return null;
       }
@@ -182,18 +224,13 @@ export const NotificationStorage = {
         time: now.toISOString(),
         read: false,
         data: params.data,
+        dedupeKey: buildDedupeKey(undefined, params.title, params.type, now),
       };
 
       const existing = await this.getAll();
 
-      // Deduplicate
-      const isDuplicate = existing.some((item) => {
-        if (item.title !== newItem.title) return false;
-        const timeDiff = Math.abs(now.getTime() - new Date(item.time).getTime());
-        return timeDiff < DEDUP_WINDOW_MS;
-      });
-
-      if (isDuplicate) {
+      // Deduplicate by stable key (and a legacy title/time safety net).
+      if (isDuplicateOf(existing, newItem, now)) {
         console.log('[NotificationStorage] Duplicate manual notification skipped:', params.title);
         return null;
       }

@@ -299,7 +299,7 @@ export const UserProfileService = {
         .get();
       if (!stale.empty) {
         const batch = db.batch();
-        stale.docs.forEach(d => batch.update(d.ref, { status: 'revoked' }));
+        stale.docs.forEach((d: any) => batch.update(d.ref, { status: 'revoked' }));
         await batch.commit();
       }
 
@@ -308,7 +308,8 @@ export const UserProfileService = {
         code,
         fromUid: user.uid,
         createdAt: new Date(),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        // Multi-use shareable link — keep it alive for a year, not the old 7 days.
+        expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
         usedByUid: null,
         status: 'active',
       });

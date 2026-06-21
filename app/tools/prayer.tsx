@@ -177,8 +177,8 @@ export default function PrayerTimesScreen() {
       await PrayerTimesService.cachePrayerTimes(data, cityName);
       await PrayerTimesService.cacheLocation(lat, lng, cityName);
 
-      // Schedule notifications
-      scheduleFromPrayerTimes(data).catch(() => {});
+      // Schedule notifications (rolling multi-day window using these coords)
+      scheduleFromPrayerTimes(data, { lat, lng }).catch(() => {});
     } catch {}
   }, [resolveLocationName]);
 
@@ -241,8 +241,8 @@ export default function PrayerTimesScreen() {
     // Cache for instant load next time
     await PrayerTimesService.cachePrayerTimes(data, cityName);
 
-    // Schedule notifications (fire-and-forget)
-    scheduleFromPrayerTimes(data).catch(() => {});
+    // Schedule notifications (rolling multi-day window using these coords)
+    scheduleFromPrayerTimes(data, { lat, lng }).catch(() => {});
   }, [resolveLocationName]);
 
   // ── Manual refresh handler (pull or button) ──

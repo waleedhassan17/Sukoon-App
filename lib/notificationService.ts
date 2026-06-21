@@ -50,6 +50,7 @@ export interface NotificationPreferences {
 
 import { AzanPlayer } from './azanPlayer';
 import { NotificationStorage } from './notificationStorage';
+import { PrayerTimesService } from './prayerTimes';
 
 // ══════════════════════════════════════════════
 // STORAGE KEYS
@@ -66,6 +67,21 @@ const KEYS = {
 };
 
 const BACKGROUND_TASK_NAME = 'SUKOON_PRAYER_RESCHEDULE';
+
+// How many days ahead we schedule prayer notifications in one pass. Local
+// notifications only fire if they're scheduled, so a single-day schedule stops
+// the moment the user goes a day without opening the app. By laying down a
+// rolling multi-day window (re-extended on every app open / background run),
+// notifications keep firing even if the app isn't opened for several days.
+const WINDOW_DAYS = 7;
+
+/** Combine a calendar day (midnight) with an "HH:MM" string into an absolute Date. */
+function atTimeOnDate(base: Date, hhmm: string): Date {
+  const [h, m] = hhmm.split(':').map(Number);
+  const d = new Date(base);
+  d.setHours(h || 0, m || 0, 0, 0);
+  return d;
+}
 
 // ══════════════════════════════════════════════
 // DEFAULT PREFERENCES
@@ -546,13 +562,183 @@ export const NotificationService = {
     }
   },
 
+  // ══════════════════════════════════════════
+  // ROLLING MULTI-DAY WINDOW (primary scheduler)
+  // Lays down prayer/reminder notifications for the next WINDOW_DAYS days so
+  // alerts keep firing even if the app isn't opened for several days. Re-run on
+  // every app open, foreground (new day), prayer-times fetch, and background tick.
+  //
+  // Returns true if it successfully scheduled from multi-day data; false when it
+  // couldn't (no coords / offline) so callers can fall back to a single day.
+  // ══════════════════════════════════════════
+  async scheduleRollingWindow(coords?: { lat: number; lng: number }): Promise<boolean> {
+    if (!loadModules()) return false;
+    const prefs = await this.getPreferences();
+    if (!prefs.enabled) return false;
+
+    let lat: number;
+    let lng: number;
+    if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
+      lat = coords.lat;
+      lng = coords.lng;
+      // Remember coords so background/init can reschedule without the prayer screen.
+      await PrayerTimesService.cacheSchedulingCoords(lat, lng);
+    } else {
+      const c = await PrayerTimesService.getSchedulingCoords();
+      if (!c) return false;
+      lat = c.lat;
+      lng = c.lng;
+    }
+
+    const days = await PrayerTimesService.getUpcomingDays(lat, lng, WINDOW_DAYS);
+    if (!days.length) return false;
+
+    // Replace the whole window atomically-ish: clear then re-lay.
+    await this.cancelPrayerNotifications();
+
+    const now = new Date();
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    let total = 0;
+    for (const day of days) {
+      total += await this._scheduleDay(day, prefs, now, day.dateKey === todayKey);
+    }
+
+    await AsyncStorage.setItem(KEYS.LAST_SCHEDULED, now.toDateString());
+    console.log(`[Sukoon] Rolling window: scheduled ${total} notifications across ${days.length} days`);
+    return true;
+  },
+
+  /**
+   * Schedule one calendar day's prayer + reminder notifications. Identifiers are
+   * suffixed with the date so days never collide and re-scheduling is idempotent.
+   */
+  async _scheduleDay(
+    day: { dateKey: string; date: Date; times: any },
+    prefs: NotificationPreferences,
+    now: Date,
+    isToday: boolean,
+  ): Promise<number> {
+    if (!Notifications) return 0;
+    const { dateKey, date, times } = day;
+    let scheduled = 0;
+
+    const order: { name: PrayerName; label: string; raw: string }[] = [
+      { name: 'fajr',    label: 'Fajr',    raw: times.Fajr },
+      { name: 'dhuhr',   label: 'Dhuhr',   raw: times.Dhuhr },
+      { name: 'asr',     label: 'Asr',     raw: times.Asr },
+      { name: 'maghrib', label: 'Maghrib', raw: times.Maghrib },
+      { name: 'isha',    label: 'Isha',    raw: times.Isha },
+    ];
+
+    for (const p of order) {
+      if (!prefs.prayerAlerts[p.name]) continue;
+      if (!p.raw) continue;
+      const prayerTime = atTimeOnDate(date, p.raw);
+      if (prayerTime <= now) continue;
+
+      const isFajr = p.name === 'fajr';
+      const soundFile = isFajr && prefs.fajrSpecialSound
+        ? 'azan_fajr.wav'
+        : prefs.azanSound ? 'azan.wav' : undefined;
+      const channelId = isFajr ? 'prayer-fajr' : 'prayer-azan';
+
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: `${p.label} Prayer Time`,
+          body: this._getPrayerBody(p.name),
+          sound: soundFile || undefined,
+          data: { type: 'prayer', prayer: p.name, action: 'azan' },
+          ...(Platform.OS === 'android' && { channelId }),
+        },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: prayerTime },
+        identifier: `prayer-${p.name}-${dateKey}`,
+      });
+      scheduled++;
+
+      if (prefs.preAlertMinutes > 0) {
+        const preTime = new Date(prayerTime.getTime() - prefs.preAlertMinutes * 60000);
+        if (preTime > now) {
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: `${p.label} in ${prefs.preAlertMinutes} minutes`,
+              body: `Prepare for ${p.label} prayer`,
+              sound: 'reminder.wav',
+              data: { type: 'prayer-reminder', prayer: p.name, action: 'pre-alert' },
+              ...(Platform.OS === 'android' && { channelId: 'prayer-reminder' }),
+            },
+            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: preTime },
+            identifier: `prayer-pre-${p.name}-${dateKey}`,
+          });
+          scheduled++;
+        }
+      }
+    }
+
+    // Salah tracker reminder at 22:00. Today uses the smart (data-aware) message;
+    // future days use a generic nudge since we can't know their prayer counts yet.
+    if (prefs.salahTrackerReminder) {
+      const trackerTime = atTimeOnDate(date, '22:00');
+      if (trackerTime > now) {
+        const { title, body } = isToday
+          ? await this._getSmartTrackerNotification()
+          : this._getGenericTrackerNotification();
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title,
+            body,
+            sound: 'reminder.wav',
+            data: { type: 'tracker-reminder', action: 'open-tracker' },
+            ...(Platform.OS === 'android' && { channelId: 'daily-reminder' }),
+          },
+          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: trackerTime },
+          identifier: `salah-tracker-reminder-${dateKey}`,
+        });
+        scheduled++;
+      }
+    }
+
+    if (prefs.quranReminder) {
+      const quranTime = atTimeOnDate(date, prefs.quranReminderTime);
+      if (quranTime > now) {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: 'Daily Quran Reading 📖',
+            body: 'Take a moment to connect with the Quran today',
+            sound: 'reminder.wav',
+            data: { type: 'quran-reminder', action: 'open-quran' },
+            ...(Platform.OS === 'android' && { channelId: 'daily-reminder' }),
+          },
+          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: quranTime },
+          identifier: `quran-reading-reminder-${dateKey}`,
+        });
+        scheduled++;
+      }
+    }
+
+    return scheduled;
+  },
+
+  /** Generic tracker reminder used for future days (no prayer data yet). */
+  _getGenericTrackerNotification(): { title: string; body: string } {
+    return {
+      title: '🌙 Track Your Salah',
+      body: 'Have you logged all five prayers today? Open the tracker to keep your streak alive.',
+    };
+  },
+
   // ── Cancel helpers ──
   async cancelPrayerNotifications(): Promise<void> {
     if (!Notifications) return;
     const all = await Notifications.getAllScheduledNotificationsAsync();
     for (const notif of all) {
-      const id = notif.identifier;
-      if (id.startsWith('prayer-') || id === 'salah-tracker-reminder' || id === 'quran-reading-reminder') {
+      const id: string = notif.identifier ?? '';
+      // Matches both legacy ids (e.g. 'salah-tracker-reminder') and the new
+      // date-suffixed ids (e.g. 'salah-tracker-reminder-2026-06-22').
+      if (
+        id.startsWith('prayer-') ||
+        id.startsWith('salah-tracker-reminder') ||
+        id.startsWith('quran-reading-reminder')
+      ) {
         await Notifications.cancelScheduledNotificationAsync(id);
       }
     }
@@ -628,6 +814,15 @@ export const NotificationService = {
   // Reads last cached prayer times from AsyncStorage and schedules.
   // ══════════════════════════════════════════
   async rescheduleFromCache(): Promise<void> {
+    // Preferred path: lay down the full multi-day rolling window using the
+    // persistently-cached coordinates. Only if that fails (no coords / offline)
+    // do we fall back to scheduling just today from the cached prayer times.
+    try {
+      if (await this.scheduleRollingWindow()) return;
+    } catch (e) {
+      if (__DEV__) console.warn('[Sukoon] rolling window failed, falling back to single-day:', e);
+    }
+
     try {
       const raw = await AsyncStorage.getItem('sukoon_prayer_cache');
       if (!raw) return;

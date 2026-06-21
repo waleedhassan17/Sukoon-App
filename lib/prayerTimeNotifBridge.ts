@@ -34,8 +34,20 @@ export function convertToNotifFormat(raw: RawPrayerTimes): PrayerTimeEntry[] {
   }));
 }
 
-// Call this whenever prayer times are fetched
-export async function scheduleFromPrayerTimes(raw: RawPrayerTimes): Promise<void> {
+// Call this whenever prayer times are fetched.
+//
+// When coordinates are available we schedule a rolling multi-day window so
+// notifications keep firing even if the app isn't opened for several days. If
+// the window can't be built (offline / API down) we fall back to scheduling just
+// today from the times we already have in hand.
+export async function scheduleFromPrayerTimes(
+  raw: RawPrayerTimes,
+  coords?: { lat: number; lng: number },
+): Promise<void> {
+  if (coords) {
+    const ok = await NotificationService.scheduleRollingWindow(coords);
+    if (ok) return;
+  }
   const entries = convertToNotifFormat(raw);
   await NotificationService.schedulePrayerNotifications(entries);
 }
