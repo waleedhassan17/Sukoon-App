@@ -1250,11 +1250,10 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  /* ─── Quran voice assistant mic dock ─── */
+  /* ─── Quran voice assistant mic dock (bottom-right) ─── */
   voiceDock: {
     position: 'absolute',
-    left: 0,
-    right: 0,
+    right: 18,
     alignItems: 'center',
   },
   voiceDockBtn: {
