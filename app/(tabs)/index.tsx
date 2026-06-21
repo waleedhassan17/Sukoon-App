@@ -1092,7 +1092,7 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     marginBottom: 16,
     fontWeight: '500',
-    fontFamily: 'UthmanicHafs',
+    fontFamily: 'AlQalamQuran',
   },
   ayahDividerLine: {
     width: 40,
@@ -1113,7 +1113,8 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     color: 'rgba(255,255,255,0.7)',
     textAlign: 'right',
-    fontStyle: 'italic',
+    writingDirection: 'rtl',
+    fontFamily: 'JameelNooriNastaleeq',
     marginBottom: 16,
   },
   ayahFooter: {
@@ -1227,7 +1228,7 @@ const styles = StyleSheet.create({
     lineHeight: 40,
     marginBottom: 16,
     fontWeight: '500',
-    fontFamily: 'UthmanicHafs',
+    fontFamily: 'AlQalamQuran',
   },
   closingQuoteLine: {
     width: 32,

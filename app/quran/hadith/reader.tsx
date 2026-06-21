@@ -18,14 +18,30 @@ import {
   ActivityIndicator,
   FlatList,
   Animated,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
+import { useSavedHadiths } from '@/contexts/SavedHadithsContext';
 import { HadithService, MergedHadith, HadithSection } from '@/lib/hadithService';
+
+/** Build a nicely formatted share message for a hadith. */
+function buildHadithShareMessage(item: MergedHadith, bookName: string, sectionNumber: number): string {
+  let msg = `📖 ${bookName}\n\n`;
+  if (item.arabic) msg += `${item.arabic}\n\n`;
+  const translation = item.english || item.urdu;
+  if (translation) msg += `"${translation}"\n\n`;
+  msg += `━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+  msg += `📍 ${bookName} • Book ${item.reference?.book ?? sectionNumber}, Hadith ${item.reference?.hadith ?? item.hadithnumber}\n`;
+  if (item.grades?.length) msg += `✓ ${item.grades[0].grade}\n`;
+  msg += `\n🌙 Shared via Sukoon App`;
+  return msg;
+}
 
 type Translation = 'urdu' | 'english';
 
@@ -37,6 +53,7 @@ export default function HadithReaderScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const { sizes } = useFontSize();
+  const { saveHadith, removeHadith, isHadithSaved } = useSavedHadiths();
   const router = useRouter();
   const params = useLocalSearchParams();
 
@@ -108,9 +125,33 @@ export default function HadithReaderScreen() {
     load();
   }, [load]);
 
+  const handleShare = useCallback((item: MergedHadith) => {
+    Share.share({ message: buildHadithShareMessage(item, bookName, section.number) }).catch(() => {});
+  }, [bookName, section.number]);
+
+  const handleToggleSave = useCallback((item: MergedHadith) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    if (isHadithSaved(bookId, item.hadithnumber)) {
+      removeHadith(bookId, item.hadithnumber);
+    } else {
+      saveHadith({
+        book: bookId,
+        bookName,
+        hadithNumber: item.hadithnumber,
+        arabic: item.arabic,
+        english: item.english,
+        urdu: item.urdu,
+        grade: item.grades?.[0]?.grade,
+        refBook: item.reference?.book ?? section.number,
+        refHadith: item.reference?.hadith ?? item.hadithnumber,
+      });
+    }
+  }, [bookId, bookName, section.number, isHadithSaved, saveHadith, removeHadith]);
+
   const renderItem = useCallback(({ item }: { item: MergedHadith }) => {
     const showUrdu = translation === 'urdu' && !!item.urdu;
     const translationText = showUrdu ? item.urdu : item.english;
+    const saved = isHadithSaved(bookId, item.hadithnumber);
 
     return (
       <View style={[styles.card, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}>
@@ -143,7 +184,7 @@ export default function HadithReaderScreen() {
               style={[
                 styles.translation,
                 showUrdu
-                  ? { color: theme.textSecondary, fontSize: sizes.urdu, lineHeight: sizes.urduLine, textAlign: 'right', writingDirection: 'rtl' }
+                  ? { color: theme.textSecondary, fontSize: sizes.urdu, lineHeight: sizes.urduLine, textAlign: 'right', writingDirection: 'rtl', fontFamily: 'JameelNooriNastaleeq' }
                   : { color: theme.textSecondary, fontSize: sizes.english, lineHeight: sizes.englishLine },
               ]}
             >
@@ -152,12 +193,32 @@ export default function HadithReaderScreen() {
           </>
         )}
 
-        <Text style={[styles.reference, { color: theme.textTertiary }]}>
-          {bookName} • Book {item.reference?.book ?? section.number}, Hadith {item.reference?.hadith ?? item.hadithnumber}
-        </Text>
+        <View style={[styles.cardFooter, { borderTopColor: theme.border }]}>
+          <Text style={[styles.reference, { color: theme.textTertiary }]} numberOfLines={1}>
+            {bookName} • Book {item.reference?.book ?? section.number}, Hadith {item.reference?.hadith ?? item.hadithnumber}
+          </Text>
+          <View style={styles.cardActions}>
+            <TouchableOpacity
+              onPress={() => handleToggleSave(item)}
+              style={[styles.actionBtn, { backgroundColor: saved ? theme.primaryMuted + '18' : theme.surfaceMuted }]}
+              activeOpacity={0.7}
+              accessibilityLabel={saved ? 'Remove from saved' : 'Save hadith'}
+            >
+              <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={16} color={saved ? theme.primaryMuted : theme.textTertiary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => handleShare(item)}
+              style={[styles.actionBtn, { backgroundColor: theme.surfaceMuted }]}
+              activeOpacity={0.7}
+              accessibilityLabel="Share hadith"
+            >
+              <Ionicons name="share-outline" size={16} color={theme.textTertiary} />
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
     );
-  }, [theme, sizes, translation, arabicSize, arabicLine, bookName, section.number]);
+  }, [theme, sizes, translation, arabicSize, arabicLine, bookName, section.number, bookId, isHadithSaved, handleShare, handleToggleSave]);
 
   const listHeader = (
     <>
@@ -350,8 +411,25 @@ const styles = StyleSheet.create({
   gradeChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, maxWidth: 130 },
   gradeText: { fontSize: 11, fontWeight: '600' },
 
-  arabic: { fontWeight: '500', textAlign: 'right', writingDirection: 'rtl' },
+  arabic: { fontWeight: '500', textAlign: 'right', writingDirection: 'rtl', fontFamily: 'AlQalamQuran' },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 12 },
   translation: { fontWeight: '400' },
-  reference: { fontSize: 11, fontWeight: '500', marginTop: 12 },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  reference: { fontSize: 11, fontWeight: '500', flex: 1 },
+  cardActions: { flexDirection: 'row', gap: 8 },
+  actionBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

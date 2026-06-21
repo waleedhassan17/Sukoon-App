@@ -717,7 +717,7 @@ const s = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
     fontWeight: '500',
-    fontFamily: 'UthmanicHafs',
+    fontFamily: 'AlQalamQuran',
   },
 
   /* Gold divider */
@@ -738,7 +738,8 @@ const s = StyleSheet.create({
     fontSize: 16,
     lineHeight: 28,
     textAlign: 'right',
-    fontStyle: 'italic',
+    writingDirection: 'rtl',
+    fontFamily: 'JameelNooriNastaleeq',
     marginBottom: 8,
   },
 

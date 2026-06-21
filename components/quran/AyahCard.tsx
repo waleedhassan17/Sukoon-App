@@ -96,6 +96,7 @@ export default function AyahCard({
             writingDirection: 'rtl',
             fontWeight: '400',
             letterSpacing: 0,
+            fontFamily: 'AlQalamQuran',
           }}>{arabicText}</Text>
         </View>
 
@@ -127,6 +128,7 @@ export default function AyahCard({
               color: theme.textSecondary,
               textAlign: 'center',
               writingDirection: 'rtl',
+              fontFamily: 'JameelNooriNastaleeq',
             }}>{urduText}</Text>
           </View>
         )}

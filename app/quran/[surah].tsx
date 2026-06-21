@@ -1799,7 +1799,7 @@ const s = StyleSheet.create({
   headerBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   headerBtn: { width: 36, height: 36, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
   headerCenter: { alignItems: 'center' },
-  headerArabic: { fontSize: 30, color: '#fff', marginBottom: 4, fontWeight: '500', fontFamily: 'UthmanicHafs', textAlign: 'right', writingDirection: 'rtl' },
+  headerArabic: { fontSize: 30, color: '#fff', marginBottom: 4, fontWeight: '500', fontFamily: 'AlQalamQuran', textAlign: 'right', writingDirection: 'rtl' },
   headerEnglish: { fontSize: 17, fontWeight: '600', color: 'rgba(255,255,255,0.9)', letterSpacing: -0.2, marginBottom: 10 },
   headerMeta: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   metaPill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, paddingHorizontal: 11, paddingVertical: 5, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
@@ -1820,7 +1820,7 @@ const s = StyleSheet.create({
   bisCrTR: { top: 12, right: 12, borderTopWidth: 1.5, borderRightWidth: 1.5, borderTopRightRadius: 6 },
   bisCrBL: { bottom: 12, left: 12, borderBottomWidth: 1.5, borderLeftWidth: 1.5, borderBottomLeftRadius: 6 },
   bisCrBR: { bottom: 12, right: 12, borderBottomWidth: 1.5, borderRightWidth: 1.5, borderBottomRightRadius: 6 },
-  bisArabic: { fontSize: 28, color: 'rgba(255,255,255,0.95)', marginVertical: 12, fontWeight: '500', fontFamily: 'UthmanicHafs', textAlign: 'right', writingDirection: 'rtl' },
+  bisArabic: { fontSize: 28, color: 'rgba(255,255,255,0.95)', marginVertical: 12, fontWeight: '500', fontFamily: 'AlQalamQuran', textAlign: 'right', writingDirection: 'rtl' },
   bisDiv: { width: 32, height: 1.5, marginVertical: 8 },
   bisTrans: { fontSize: 13, color: 'rgba(255,255,255,0.65)', textAlign: 'center', lineHeight: 20, fontStyle: 'italic' },
 
@@ -1829,14 +1829,14 @@ const s = StyleSheet.create({
   bisPageLine: { width: 48, height: 1.5, borderRadius: 1 },
   bisPageDm: { width: 6, height: 6, borderRadius: 1, transform: [{ rotate: '45deg' }] },
   bisPageDotSmall: { width: 4, height: 4, borderRadius: 2 },
-  bisPageText: { fontSize: 28, textAlign: 'right', marginVertical: 12, fontWeight: '500', fontFamily: 'UthmanicHafs', writingDirection: 'rtl' },
-  bisPageBismillah: { fontSize: 30, textAlign: 'right', marginVertical: 14, fontWeight: '500', letterSpacing: 0.5, fontFamily: 'UthmanicHafs', writingDirection: 'rtl' },
+  bisPageText: { fontSize: 28, textAlign: 'right', marginVertical: 12, fontWeight: '500', fontFamily: 'AlQalamQuran', writingDirection: 'rtl' },
+  bisPageBismillah: { fontSize: 30, textAlign: 'right', marginVertical: 14, fontWeight: '500', letterSpacing: 0.5, fontFamily: 'AlQalamQuran', writingDirection: 'rtl' },
 
   /* Bismillah separator & styling */
   bisSeparator: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 14 },
   bisSepLine: { flex: 1, height: 1, borderRadius: 1 },
   bisSepDiamond: { width: 6, height: 6, borderRadius: 1, transform: [{ rotate: '45deg' }] },
-  bisBismillahText: { fontSize: 30, color: 'rgba(255,255,255,0.95)', textAlign: 'right', marginVertical: 8, fontWeight: '500', letterSpacing: 0.5, fontFamily: 'UthmanicHafs', writingDirection: 'rtl' },
+  bisBismillahText: { fontSize: 30, color: 'rgba(255,255,255,0.95)', textAlign: 'right', marginVertical: 8, fontWeight: '500', letterSpacing: 0.5, fontFamily: 'AlQalamQuran', writingDirection: 'rtl' },
 
   /* Page frame — FULL WIDTH */
   frameWrap: { paddingHorizontal: 12, marginBottom: 16 },
@@ -1849,7 +1849,7 @@ const s = StyleSheet.create({
   pageSep: { fontSize: 11, fontWeight: '500' },
   pageTotalNum: { fontSize: 11, fontWeight: '500', fontVariant: ['tabular-nums'] },
   pageBody: { paddingHorizontal: 20, paddingVertical: 18 },
-  pageFlow: { textAlign: 'center', writingDirection: 'rtl', fontWeight: '500', fontFamily: 'UthmanicHafs' },
+  pageFlow: { textAlign: 'center', writingDirection: 'rtl', fontWeight: '500', fontFamily: 'AlQalamQuran' },
 
   pageActBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 14, marginBottom: 10, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14, borderWidth: 1, ...Platform.select({ ios: { shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8 }, android: { elevation: 2 } }) },
   pageActLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -1870,7 +1870,7 @@ const s = StyleSheet.create({
   endWrap: { alignItems: 'center', paddingVertical: 28, gap: 6 },
   endLabel: { fontSize: 14, fontWeight: '600', letterSpacing: 0.3 },
   endDiv: { width: 40, height: 1, marginVertical: 8 },
-  endVerse: { fontSize: 20, opacity: 0.6, fontWeight: '500', fontFamily: 'UthmanicHafs' },
+  endVerse: { fontSize: 20, opacity: 0.6, fontWeight: '500', fontFamily: 'AlQalamQuran' },
   endTrans: { fontSize: 12, fontStyle: 'italic' },
 
   /* Verse card */
@@ -1882,14 +1882,14 @@ const s = StyleSheet.create({
   vBadgeT: { fontSize: 12, fontWeight: '700' },
   vActions: { flexDirection: 'row', gap: 2 },
   vActBtn: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  vArabic: { fontSize: 24, lineHeight: 48, textAlign: 'right', writingDirection: 'rtl', marginBottom: 4, fontWeight: '500', fontFamily: 'UthmanicHafs' },
+  vArabic: { fontSize: 24, lineHeight: 48, textAlign: 'right', writingDirection: 'rtl', marginBottom: 4, fontWeight: '500', fontFamily: 'AlQalamQuran' },
   vTransWrap: { marginTop: 8 },
   vGoldLine: { width: 28, height: 1.5, marginBottom: 12 },
   vTransBlock: { marginBottom: 10 },
   vTransLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, marginBottom: 4 },
   vEnglish: { fontSize: 14, lineHeight: 22, fontStyle: 'italic' },
-  vUrduLabel: { fontSize: 12, fontWeight: '600', textAlign: 'right', marginBottom: 4 },
-  vUrdu: { fontSize: 16, lineHeight: 28, textAlign: 'right', fontStyle: 'italic' },
+  vUrduLabel: { fontSize: 12, fontWeight: '600', textAlign: 'right', marginBottom: 4, fontFamily: 'JameelNooriNastaleeq' },
+  vUrdu: { fontSize: 16, lineHeight: 28, textAlign: 'right', writingDirection: 'rtl', fontFamily: 'JameelNooriNastaleeq' },
 
   /* Player */
   ppOuter: { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 20 },

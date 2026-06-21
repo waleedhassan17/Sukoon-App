@@ -769,7 +769,7 @@ const styles = StyleSheet.create({
 
   /* ─── List ─── */
   listContent: {
-    paddingTop: 4,
+    paddingTop: 0,
   },
 
   /* ─── Empty ─── */

@@ -3,7 +3,7 @@
  * Refined design matching Sukoon aesthetic system
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -21,12 +21,17 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { useSavedVerses } from '@/contexts/SavedVersesContext';
+import { useSavedHadiths } from '@/contexts/SavedHadithsContext';
+
+type Tab = 'verses' | 'hadees';
 
 export default function SavedScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const { sizes } = useFontSize();
   const { savedVerses, removeVerse, clearAllVerses } = useSavedVerses();
+  const { savedHadiths, removeHadith, clearAllHadiths } = useSavedHadiths();
+  const [tab, setTab] = useState<Tab>('verses');
 
   const headerFade = useRef(new Animated.Value(0)).current;
   const headerSlide = useRef(new Animated.Value(24)).current;
@@ -83,6 +88,34 @@ export default function SavedScreen() {
     ]);
   };
 
+  const handleShareHadith = async (hadith: any) => {
+    try {
+      let msg = `📖 ${hadith.bookName || 'Hadith'}\n\n`;
+      if (hadith.arabic) msg += `${hadith.arabic}\n\n`;
+      const translation = hadith.english || hadith.urdu;
+      if (translation) msg += `"${translation}"\n\n`;
+      msg += `━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+      msg += `📍 ${hadith.bookName || 'Hadith'} • Book ${hadith.refBook ?? ''}, Hadith ${hadith.refHadith ?? hadith.hadithNumber}\n`;
+      if (hadith.grade) msg += `✓ ${hadith.grade}\n`;
+      msg += `\n🌙 Shared via Sukoon App`;
+      await Share.share({ message: msg });
+    } catch {}
+  };
+
+  const handleRemoveHadith = (hadith: any) => {
+    Alert.alert('Remove Hadith', 'Remove this hadith from your collection?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => removeHadith(hadith.book, hadith.hadithNumber) },
+    ]);
+  };
+
+  const handleClearAllHadiths = () => {
+    Alert.alert('Clear All', 'Remove all saved hadees? This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear All', style: 'destructive', onPress: clearAllHadiths },
+    ]);
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: theme.surface }]}>
       <ScrollView
@@ -121,20 +154,42 @@ export default function SavedScreen() {
                 <Ionicons name="bookmark" size={18} color="#fff" />
               </View>
             </View>
-            <Text style={styles.headerTitle}>Saved Verses</Text>
-            <Text style={styles.headerSub}>Your personal Quranic collection</Text>
+            <Text style={styles.headerTitle}>Saved</Text>
+            <Text style={styles.headerSub}>Your personal Quran & Hadith collection</Text>
 
             {/* Stats pill */}
             <View style={styles.headerStats}>
               <View style={styles.statPill}>
                 <Ionicons name="layers-outline" size={14} color="rgba(255,255,255,0.8)" />
                 <Text style={styles.statPillText}>
-                  {savedVerses.length} {savedVerses.length === 1 ? 'verse' : 'verses'} saved
+                  {savedVerses.length} {savedVerses.length === 1 ? 'verse' : 'verses'} · {savedHadiths.length} {savedHadiths.length === 1 ? 'hadith' : 'hadees'}
                 </Text>
               </View>
             </View>
           </Animated.View>
         </LinearGradient>
+
+        {/* ═══════════════ TAB TOGGLE ═══════════════ */}
+        <View style={styles.tabRow}>
+          <View style={[styles.tabSegment, { backgroundColor: theme.surfaceMuted }]}>
+            <TouchableOpacity
+              onPress={() => setTab('verses')}
+              activeOpacity={0.85}
+              style={[styles.tabBtn, tab === 'verses' && { backgroundColor: theme.primary }]}
+            >
+              <Ionicons name="book-outline" size={15} color={tab === 'verses' ? '#fff' : theme.textSecondary} />
+              <Text style={[styles.tabText, { color: tab === 'verses' ? '#fff' : theme.textSecondary }]}>Verses</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setTab('hadees')}
+              activeOpacity={0.85}
+              style={[styles.tabBtn, tab === 'hadees' && { backgroundColor: theme.primary }]}
+            >
+              <Ionicons name="bookmarks-outline" size={15} color={tab === 'hadees' ? '#fff' : theme.textSecondary} />
+              <Text style={[styles.tabText, { color: tab === 'hadees' ? '#fff' : theme.textSecondary }]}>Hadees</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {/* ═══════════════ CONTENT ═══════════════ */}
         <Animated.View
@@ -143,7 +198,7 @@ export default function SavedScreen() {
             { opacity: contentFade, transform: [{ translateY: contentSlide }] },
           ]}
         >
-          {savedVerses.length === 0 ? (
+          {tab === 'verses' && (savedVerses.length === 0 ? (
             /* ─── Empty State ─── */
             <View style={styles.emptyWrap}>
               <View style={[styles.emptyIconWrap, { backgroundColor: theme.primaryMuted + '12' }]}>
@@ -274,7 +329,115 @@ export default function SavedScreen() {
                 </LinearGradient>
               </View>
             </>
-          )}
+          ))}
+
+          {/* ═══════════════ HADEES TAB ═══════════════ */}
+          {tab === 'hadees' && (savedHadiths.length === 0 ? (
+            /* ─── Empty State ─── */
+            <View style={styles.emptyWrap}>
+              <View style={[styles.emptyIconWrap, { backgroundColor: theme.primaryMuted + '12' }]}>
+                <Ionicons name="bookmarks-outline" size={32} color={theme.primaryMuted} />
+              </View>
+              <Text style={[styles.emptyTitle, { color: theme.text }]}>No Saved Hadees Yet</Text>
+              <Text style={[styles.emptySub, { color: theme.textSecondary }]}>
+                Tap the bookmark icon on any hadith{'\n'}to add it to your collection
+              </Text>
+
+              <View style={[styles.emptyHintCard, { backgroundColor: theme.surfaceWarm }]}>
+                <View style={styles.emptyHintIcon}>
+                  <Ionicons name="bulb-outline" size={16} color={theme.gold} />
+                </View>
+                <Text style={[styles.emptyHintText, { color: theme.textSecondary }]}>
+                  Save the sayings of the Prophet ﷺ that inspire you so you can revisit them anytime.
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <>
+              {/* ─── Action Bar ─── */}
+              <View style={styles.actionBar}>
+                <Text style={[styles.actionBarLabel, { color: theme.textTertiary }]}>
+                  {savedHadiths.length} {savedHadiths.length === 1 ? 'HADITH' : 'HADEES'}
+                </Text>
+                <TouchableOpacity
+                  onPress={handleClearAllHadiths}
+                  style={[styles.clearAllBtn, { backgroundColor: theme.error + '14' }]}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="trash-outline" size={14} color={theme.error} />
+                  <Text style={[styles.clearAllText, { color: theme.error }]}>Clear All</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* ─── Hadith Cards ─── */}
+              {savedHadiths.map((hadith) => (
+                <View
+                  key={`${hadith.book}-${hadith.hadithNumber}`}
+                  style={[styles.verseCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}
+                >
+                  {/* Card Header */}
+                  <View style={styles.verseHeader}>
+                    <View style={styles.verseRefRow}>
+                      <LinearGradient
+                        colors={[theme.primaryLight, theme.primary]}
+                        style={styles.verseRefBadge}
+                      >
+                        <Text style={styles.verseRefBadgeText}>#{hadith.hadithNumber}</Text>
+                      </LinearGradient>
+                      <Text style={[styles.verseRefName, { color: theme.text }]} numberOfLines={1}>
+                        {hadith.bookName || 'Hadith'}
+                      </Text>
+                    </View>
+                    <View style={styles.verseActions}>
+                      <TouchableOpacity
+                        onPress={() => handleShareHadith(hadith)}
+                        style={[styles.verseActionBtn, { backgroundColor: theme.surfaceMuted }]}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="share-outline" size={16} color={theme.textTertiary} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => handleRemoveHadith(hadith)}
+                        style={[styles.verseActionBtn, { backgroundColor: theme.error + '14' }]}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="trash-outline" size={15} color={theme.error} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Arabic Text */}
+                  {!!hadith.arabic && (
+                    <View style={[styles.arabicWrap, { backgroundColor: theme.primaryMuted + '08' }]}>
+                      <Text style={[styles.arabicText, { color: theme.arabicText, fontSize: sizes.arabic, lineHeight: sizes.arabicLine }]}>{hadith.arabic}</Text>
+                    </View>
+                  )}
+
+                  {/* Divider accent */}
+                  <View style={[styles.verseDivider, { backgroundColor: theme.gold + '30' }]} />
+
+                  {/* English */}
+                  {!!hadith.english && (
+                    <Text style={[styles.englishText, { color: theme.text, fontSize: sizes.english, lineHeight: sizes.englishLine }]}>{hadith.english}</Text>
+                  )}
+
+                  {/* Urdu */}
+                  {!!hadith.urdu && (
+                    <Text style={[styles.urduText, { color: theme.textSecondary, fontSize: sizes.urdu, lineHeight: sizes.urduLine }]}>{hadith.urdu}</Text>
+                  )}
+
+                  {/* Footer */}
+                  <View style={[styles.verseFooter, { borderTopColor: theme.border }]}>
+                    <Ionicons name="time-outline" size={12} color={theme.textTertiary} />
+                    <Text style={[styles.verseDate, { color: theme.textTertiary }]}>
+                      Saved {new Date(hadith.savedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {hadith.grade ? `  ·  ${hadith.grade}` : ''}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </>
+          ))}
         </Animated.View>
       </ScrollView>
     </View>
@@ -345,6 +508,28 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.8)',
     fontWeight: '500',
   },
+
+  /* ─── Tab toggle ─── */
+  tabRow: {
+    paddingHorizontal: 20,
+    marginTop: 16,
+  },
+  tabSegment: {
+    flexDirection: 'row',
+    borderRadius: 14,
+    padding: 4,
+    gap: 4,
+  },
+  tabBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 11,
+  },
+  tabText: { fontSize: 14, fontWeight: '700' },
 
   /* ─── Body ─── */
   body: {
@@ -492,7 +677,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     writingDirection: 'rtl',
     fontWeight: '500',
-    fontFamily: 'UthmanicHafs',
+    fontFamily: 'AlQalamQuran',
   },
 
   /* ─── Divider ─── */
@@ -513,7 +698,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 28,
     textAlign: 'right',
-    fontStyle: 'italic',
+    writingDirection: 'rtl',
+    fontFamily: 'JameelNooriNastaleeq',
     marginBottom: 6,
   },
 
@@ -556,7 +742,7 @@ const styles = StyleSheet.create({
     lineHeight: 40,
     marginBottom: 14,
     fontWeight: '500',
-    fontFamily: 'UthmanicHafs',
+    fontFamily: 'AlQalamQuran',
   },
   bottomDividerLine: {
     width: 32,

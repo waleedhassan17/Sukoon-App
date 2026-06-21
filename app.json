@@ -2,7 +2,7 @@
   "expo": {
     "name": "Sukoon",
     "slug": "sukoon-app",
-    "version": "1.2.4",
+    "version": "1.2.5",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "sukoon",
@@ -28,7 +28,7 @@
         "backgroundColor": "#0D3B2E"
       },
       "package": "com.sukoon.app",
-      "versionCode": 17,
+      "versionCode": 18,
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "ACCESS_FINE_LOCATION",

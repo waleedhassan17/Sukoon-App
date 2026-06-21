@@ -51,6 +51,7 @@ const SYNC_KEYS = {
 const SYNC_DOMAINS = {
   SALAH_TRACKER: 'salahTracker',
   SAVED_AYAHS: 'savedAyahs',
+  SAVED_HADITHS: 'savedHadiths',
   READING_PROGRESS: 'readingProgress',
   AUDIO_PROGRESS: 'audioProgress',
   PREFERENCES: 'preferences',
@@ -496,6 +497,16 @@ export const DataSyncService = {
     await AsyncStorage.setItem(storageKey, JSON.stringify(verses));
     // Background cloud sync
     this.pushToCloud(SYNC_DOMAINS.SAVED_AYAHS, 'all', { verses, count: verses.length }).catch(() => {});
+  },
+
+  /**
+   * Save and sync saved hadiths
+   */
+  async saveSavedHadiths(hadiths: any[]): Promise<void> {
+    const storageKey = 'sukoon_saved_hadiths';
+    await AsyncStorage.setItem(storageKey, JSON.stringify(hadiths));
+    // Background cloud sync
+    this.pushToCloud(SYNC_DOMAINS.SAVED_HADITHS, 'all', { hadiths, count: hadiths.length }).catch(() => {});
   },
 
   /**

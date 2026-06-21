@@ -417,7 +417,7 @@ const st = StyleSheet.create({
 
   /* Quote */
   quoteCard: { marginHorizontal: 16, marginTop: 20, marginBottom: 20, borderRadius: 18, padding: 20, ...Platform.select({ ios: { shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 12 }, android: { elevation: 4 } }) },
-  quoteArabic: { fontSize: 18, fontWeight: '700', color: '#fff', marginBottom: 12, textAlign: 'right', writingDirection: 'rtl', lineHeight: 32, fontFamily: 'UthmanicHafs' },
+  quoteArabic: { fontSize: 18, fontWeight: '700', color: '#fff', marginBottom: 12, textAlign: 'right', writingDirection: 'rtl', lineHeight: 32, fontFamily: 'AlQalamQuran' },
   quoteEnglish: { fontSize: 13, color: 'rgba(255,255,255,0.85)', marginBottom: 12, textAlign: 'center', lineHeight: 20 },
   quoteRef: { fontSize: 11, color: 'rgba(255,255,255,0.6)', textAlign: 'center', fontWeight: '600' },
 });

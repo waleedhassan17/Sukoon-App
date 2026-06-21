@@ -827,6 +827,8 @@ const styles = StyleSheet.create({
   },
   previewArabic: {
     textAlign: 'right',
+    writingDirection: 'rtl',
+    fontFamily: 'AlQalamQuran',
   },
   previewDivider: {
     width: 24,
@@ -928,6 +930,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 40,
     marginBottom: 14,
+    fontFamily: 'AlQalamQuran',
+    writingDirection: 'rtl',
   },
   closingDivider: {
     width: 32,

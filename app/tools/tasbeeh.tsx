@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: '700' },
   resetBtn: { padding: 8 },
   dhikrWrap: { alignItems: 'center', paddingVertical: 16 },
-  dhikrArabic: { fontSize: 28, lineHeight: 44, marginBottom: 4 },
+  dhikrArabic: { fontSize: 28, lineHeight: 44, marginBottom: 4, fontFamily: 'AlQalamQuran', writingDirection: 'rtl' },
   dhikrEng: { fontSize: 14 },
   statsRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
   statPill: {
@@ -315,7 +315,7 @@ const styles = StyleSheet.create({
   presetsWrap: { paddingHorizontal: 20 },
   presetsTitle: { fontSize: 16, fontWeight: '700', marginBottom: 12 },
   presetCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, borderRadius: RADIUS.md, borderWidth: 1.5, marginBottom: 8 },
-  presetArabic: { fontSize: 18, flex: 1 },
+  presetArabic: { fontSize: 18, flex: 1, fontFamily: 'AlQalamQuran', writingDirection: 'rtl' },
   presetInfo: { alignItems: 'flex-end' },
   presetEng: { fontSize: 12, marginBottom: 2 },
   presetTarget: { fontSize: 13, fontWeight: '700' },

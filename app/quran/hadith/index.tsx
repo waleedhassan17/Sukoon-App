@@ -15,7 +15,8 @@ import {
   ActivityIndicator,
   Animated,
   Platform,
-  ScrollView,
+  FlatList,
+  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -23,6 +24,24 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { HadithService, HadithBook } from '@/lib/hadithService';
+
+const { width } = Dimensions.get('window');
+
+const ARABIC_NAMES: Record<string, string> = {
+  'bukhari': 'صَحِيحُ البُخَارِي',
+  'muslim': 'صَحِيحُ مُسْلِم',
+  'tirmidzi': 'جَامِعُ التِّرْمِذِي',
+  'tirmizi': 'جَامِعُ التِّرْمِذِي',
+  'abudawud': 'سُنَنُ أَبِي دَاوُد',
+  'nasai': 'سُنَنُ النَّسَائِي',
+  'ibnmajah': 'سُنَنُ ابْنِ مَاجَه',
+  'malik': 'مُوَطَّأ مَالِك',
+  'ahmed': 'مُسْنَد أَحْمَد',
+  'musnadahmed': 'مُسْنَد أَحْمَد',
+  'silsila': 'السِّلْسِلَةُ الصَّحِيحَة',
+  'mishkat': 'مِشْكَاةُ المَصَابِيح',
+  'dehlawi': 'مُسْنَدُ الدِّهْلَوِي',
+};
 
 export default function HadithBooksScreen() {
   const insets = useSafeAreaInsets();
@@ -61,88 +80,101 @@ export default function HadithBooksScreen() {
     router.push(`/quran/hadith/${book.id}?name=${encodeURIComponent(book.name)}` as any);
   }, [router]);
 
+  const renderItem = useCallback(({ item: book }: { item: HadithBook }) => {
+    const arabicName = ARABIC_NAMES[book.id] || book.name;
+    return (
+      <TouchableOpacity
+        style={[styles.bookCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}
+        activeOpacity={0.7}
+        onPress={() => openBook(book)}
+      >
+        {/* Decorative corner accents */}
+        <View style={[styles.corner, styles.topLeft, { borderTopColor: theme.textTertiary, borderLeftColor: theme.textTertiary }]} />
+        <View style={[styles.corner, styles.topRight, { borderTopColor: theme.textTertiary, borderRightColor: theme.textTertiary }]} />
+        <View style={[styles.corner, styles.bottomLeft, { borderBottomColor: theme.textTertiary, borderLeftColor: theme.textTertiary }]} />
+        <View style={[styles.corner, styles.bottomRight, { borderBottomColor: theme.textTertiary, borderRightColor: theme.textTertiary }]} />
+
+        <View style={styles.bookInfo}>
+          <Text style={[styles.bookArabic, { color: theme.text }]} numberOfLines={2}>
+            {arabicName}
+          </Text>
+          <Text style={[styles.bookName, { color: theme.textSecondary }]} numberOfLines={1}>
+            {book.name}
+          </Text>
+          <Text style={[styles.bookStatus, { color: theme.primaryMuted }]}>
+            Open Collection
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }, [theme, openBook]);
+
+  const listHeader = (
+    <LinearGradient
+      colors={theme.headerGradient}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={[styles.header, { paddingTop: insets.top + 16 }]}
+    >
+      <View style={styles.headerPattern}>
+        {[...Array(5)].map((_, i) => (
+          <View
+            key={i}
+            style={[
+              styles.patternCircle,
+              { width: 100 + i * 50, height: 100 + i * 50, top: -10 + i * 8, right: -30 + i * 12, opacity: 0.03 + i * 0.008 },
+            ]}
+          />
+        ))}
+      </View>
+      <Animated.View style={{ opacity: headerFade, transform: [{ translateY: headerSlide }] }}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7} accessibilityLabel="Back">
+          <Ionicons name="chevron-back" size={20} color="#fff" />
+        </TouchableOpacity>
+
+        <View style={styles.headerIconRow}>
+          <View style={styles.headerIconWrap}>
+            <Ionicons name="book-outline" size={18} color="#fff" />
+          </View>
+        </View>
+
+        <Text style={styles.headerTitle}>Ahadees</Text>
+        <Text style={styles.headerSub}>Authentic Hadith collections</Text>
+      </Animated.View>
+    </LinearGradient>
+  );
+
+  const emptyBody = loading ? (
+    <View style={styles.center}>
+      <ActivityIndicator size="large" color={theme.primaryMuted} />
+      <Text style={[styles.centerText, { color: theme.textSecondary }]}>Loading collections…</Text>
+    </View>
+  ) : error ? (
+    <View style={styles.center}>
+      <View style={[styles.emptyIconWrap, { backgroundColor: theme.surfaceMuted }]}>
+        <Ionicons name="cloud-offline-outline" size={26} color={theme.textTertiary} />
+      </View>
+      <Text style={[styles.emptyTitle, { color: theme.text }]}>Couldn't load collections</Text>
+      <Text style={[styles.centerText, { color: theme.textSecondary }]}>Check your connection and try again.</Text>
+      <TouchableOpacity onPress={load} style={[styles.retryBtn, { backgroundColor: theme.primary }]} activeOpacity={0.85}>
+        <Text style={styles.retryText}>Retry</Text>
+      </TouchableOpacity>
+    </View>
+  ) : null;
+
   return (
     <View style={[styles.container, { backgroundColor: theme.surface }]}>
-      {/* ═══════════════ HEADER — matches Settings / More Tools ═══════════════ */}
-      <LinearGradient
-        colors={theme.headerGradient}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.header, { paddingTop: insets.top + 16 }]}
-      >
-        <View style={styles.headerPattern}>
-          {[...Array(5)].map((_, i) => (
-            <View
-              key={i}
-              style={[
-                styles.patternCircle,
-                { width: 100 + i * 50, height: 100 + i * 50, top: -10 + i * 8, right: -30 + i * 12, opacity: 0.03 + i * 0.008 },
-              ]}
-            />
-          ))}
-        </View>
-        <Animated.View style={{ opacity: headerFade, transform: [{ translateY: headerSlide }] }}>
-          {/* Back button */}
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7} accessibilityLabel="Back">
-            <Ionicons name="chevron-back" size={20} color="#fff" />
-          </TouchableOpacity>
-
-          {/* Icon badge */}
-          <View style={styles.headerIconRow}>
-            <View style={styles.headerIconWrap}>
-              <Ionicons name="book-outline" size={18} color="#fff" />
-            </View>
-          </View>
-
-          {/* Title & subtitle */}
-          <Text style={styles.headerTitle}>Ahadees</Text>
-          <Text style={styles.headerSub}>Authentic Hadith collections</Text>
-        </Animated.View>
-      </LinearGradient>
-
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={theme.primaryMuted} />
-          <Text style={[styles.centerText, { color: theme.textSecondary }]}>Loading collections…</Text>
-        </View>
-      ) : error ? (
-        <View style={styles.center}>
-          <View style={[styles.emptyIconWrap, { backgroundColor: theme.surfaceMuted }]}>
-            <Ionicons name="cloud-offline-outline" size={26} color={theme.textTertiary} />
-          </View>
-          <Text style={[styles.emptyTitle, { color: theme.text }]}>Couldn't load collections</Text>
-          <Text style={[styles.centerText, { color: theme.textSecondary }]}>Check your connection and try again.</Text>
-          <TouchableOpacity onPress={load} style={[styles.retryBtn, { backgroundColor: theme.primary }]} activeOpacity={0.85}>
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
-        >
-          <Text style={[styles.countText, { color: theme.textTertiary }]}>{books.length} Collections</Text>
-          {books.map((book, idx) => (
-            <TouchableOpacity
-              key={book.id}
-              style={[styles.bookCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}
-              activeOpacity={0.7}
-              onPress={() => openBook(book)}
-            >
-              <LinearGradient colors={theme.headerGradient} style={styles.bookBadge}>
-                <Text style={styles.bookBadgeText}>{idx + 1}</Text>
-              </LinearGradient>
-              <View style={styles.bookInfo}>
-                <Text style={[styles.bookName, { color: theme.text }]} numberOfLines={1}>{book.name}</Text>
-                <Text style={[styles.bookSub, { color: theme.textSecondary }]}>{book.language} • Hadith collection</Text>
-              </View>
-              <View style={[styles.bookArrow, { backgroundColor: theme.surfaceMuted }]}>
-                <Ionicons name="chevron-forward" size={14} color={theme.textTertiary} />
-              </View>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
+      <FlatList
+        data={(!loading && !error) ? books : []}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        numColumns={2}
+        ListHeaderComponent={listHeader}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={emptyBody}
+        columnWrapperStyle={styles.rowWrapper}
+      />
     </View>
   );
 }
@@ -150,13 +182,14 @@ export default function HadithBooksScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
 
-  /* ─── Header — consistent with Settings / More Tools ─── */
+  /* ─── Header ─── */
   header: {
     paddingHorizontal: 22,
     paddingBottom: 28,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
     overflow: 'hidden',
+    marginBottom: 16,
   },
   headerPattern: { ...StyleSheet.absoluteFillObject, overflow: 'hidden' },
   patternCircle: { position: 'absolute', borderRadius: 999, borderWidth: 1, borderColor: '#fff' },
@@ -181,37 +214,71 @@ const styles = StyleSheet.create({
     fontWeight: '400', letterSpacing: 0.2,
   },
 
-  /* ─── Content ─── */
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 40 },
+  /* ─── Grid ─── */
+  rowWrapper: {
+    paddingHorizontal: 12,
+    justifyContent: 'space-between',
+  },
+  
+  /* ─── Cards ─── */
+  bookCard: {
+    flex: 1,
+    margin: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 140,
+    ...Platform.select({
+      ios: { shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
+      android: { elevation: 2 },
+    }),
+  },
+  corner: {
+    position: 'absolute',
+    width: 16,
+    height: 16,
+    borderWidth: 0,
+    opacity: 0.3,
+  },
+  topLeft: { top: 8, left: 8, borderTopWidth: 2, borderLeftWidth: 2, borderTopLeftRadius: 6 },
+  topRight: { top: 8, right: 8, borderTopWidth: 2, borderRightWidth: 2, borderTopRightRadius: 6 },
+  bottomLeft: { bottom: 8, left: 8, borderBottomWidth: 2, borderLeftWidth: 2, borderBottomLeftRadius: 6 },
+  bottomRight: { bottom: 8, right: 8, borderBottomWidth: 2, borderRightWidth: 2, borderBottomRightRadius: 6 },
+
+  bookInfo: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bookArabic: {
+    fontSize: 26,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginBottom: 10,
+    lineHeight: 40,
+    fontFamily: 'AlQalamQuran',
+  },
+  bookName: {
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 8,
+    letterSpacing: -0.2,
+  },
+  bookStatus: {
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+
+  /* ─── States ─── */
+  center: { alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 40, marginTop: 60 },
   centerText: { fontSize: 14, textAlign: 'center' },
   emptyIconWrap: { width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   emptyTitle: { fontSize: 16, fontWeight: '700' },
   retryBtn: { paddingHorizontal: 22, paddingVertical: 11, borderRadius: 12, marginTop: 4 },
   retryText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-
-  listContent: { paddingTop: 20, paddingHorizontal: 16 },
-  countText: { fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 12, marginLeft: 4 },
-
-  /* ─── Book cards — elevated with border ─── */
-  bookCard: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 14, paddingHorizontal: 14,
-    marginBottom: 10, borderRadius: 16, borderWidth: 1,
-    ...Platform.select({
-      ios: { shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8 },
-      android: { elevation: 1 },
-    }),
-  },
-  bookBadge: {
-    width: 44, height: 44, borderRadius: 14,
-    alignItems: 'center', justifyContent: 'center', marginRight: 14,
-  },
-  bookBadgeText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  bookInfo: { flex: 1 },
-  bookName: { fontSize: 15, fontWeight: '600', letterSpacing: -0.2, marginBottom: 3 },
-  bookSub: { fontSize: 12 },
-  bookArrow: {
-    width: 28, height: 28, borderRadius: 10,
-    alignItems: 'center', justifyContent: 'center', marginLeft: 10,
-  },
 });

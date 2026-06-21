@@ -13,6 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { FontSizeProvider } from '@/contexts/FontSizeContext';
 import { SavedVersesProvider } from '@/contexts/SavedVersesContext';
+import { SavedHadithsProvider } from '@/contexts/SavedHadithsContext';
 import SukoonSplash from '@/components/SukoonSplash';
 import { QuranService } from '@/lib/quranService';
 import { NotificationService } from '@/lib/notificationService';
@@ -70,9 +71,14 @@ function RootLayoutInner() {
           } catch {}
         }
 
-        // Load Uthmanic Hafs font for Quranic Arabic text (KFGQPC — same as quran.com)
+        // Load fonts:
+        //  - UthmanicHafs: legacy KFGQPC Arabic (kept for backward compat)
+        //  - AlQalamQuran: Indo-Pak Arabic script — used for all Arabic/Quranic text
+        //  - JameelNooriNastaleeq: Urdu Nastaleeq — used for all Urdu translation text
         await Font.loadAsync({
           'UthmanicHafs': require('@/assets/fonts/UthmanicHafs.ttf'),
+          'AlQalamQuran': require('@/assets/fonts/AlQalamQuran.ttf'),
+          'JameelNooriNastaleeq': require('@/assets/fonts/JameelNooriNastaleeq.ttf'),
         });
 
         // Initialize Notification Service (channels, handlers, etc.)
@@ -215,7 +221,7 @@ function RootLayoutInner() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <StatusBar style="light" />
+      <StatusBar style="light" backgroundColor="transparent" translucent />
 
       {/* Main app navigation */}
       <Stack
@@ -266,7 +272,9 @@ export default function RootLayout() {
     <ThemeProvider>
       <FontSizeProvider>
         <SavedVersesProvider>
-          <RootLayoutInner />
+          <SavedHadithsProvider>
+            <RootLayoutInner />
+          </SavedHadithsProvider>
         </SavedVersesProvider>
       </FontSizeProvider>
     </ThemeProvider>
