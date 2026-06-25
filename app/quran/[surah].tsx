@@ -31,6 +31,7 @@ import QuranService, { Ayah, SurahData } from '@/lib/quranService';
 import audioPlayer, { PlayerState, RepeatMode } from '@/lib/audioPlayer';
 import { ReadingProgress } from '@/lib/readingProgress';
 import TafseerService, { TafseerSource } from '@/lib/tafseerService';
+import { buildAyahShareMessage } from '@/lib/shareFormat';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -267,11 +268,11 @@ const SurahIntro = React.memo(function SurahIntro({ isPageMode, bismillahText }:
    Full width, no sidebar stealing space.
    ═══════════════════════════════════════════════ */
 const PageFrame = React.memo(function PageFrame({
-  ayahs, globalOffset, currentIndex, surahNumber, pageNumber, totalPages,
+  ayahs, globalOffset, currentIndex, surahNumber, surahName, pageNumber, totalPages,
   isVerseSaved, onBookmark, onSelectVerse,
 }: {
   ayahs: Ayah[]; globalOffset: number;
-  currentIndex: number | null; surahNumber: number;
+  currentIndex: number | null; surahNumber: number; surahName?: string;
   pageNumber: number; totalPages: number;
   isVerseSaved: (s: number, a: number) => boolean;
   onBookmark: (ay: Ayah) => void;
@@ -358,7 +359,7 @@ const PageFrame = React.memo(function PageFrame({
               <TouchableOpacity style={[s.pageActBtn, { backgroundColor: `${theme.gold}12` }]} onPress={() => onBookmark(ayahs[selected])} activeOpacity={0.7}>
                 <Ionicons name={isVerseSaved(surahNumber, ayahs[selected].numberInSurah) ? 'bookmark' : 'bookmark-outline'} size={14} color={isVerseSaved(surahNumber, ayahs[selected].numberInSurah) ? theme.gold : theme.textTertiary} />
               </TouchableOpacity>
-              <TouchableOpacity style={[s.pageActBtn, { backgroundColor: theme.surfaceMuted }]} onPress={() => Share.share({ message: `${ayahs[selected].text}\n— Ayah ${ayahs[selected].numberInSurah}` }).catch(() => {})} activeOpacity={0.7}>
+              <TouchableOpacity style={[s.pageActBtn, { backgroundColor: theme.surfaceMuted }]} onPress={() => Share.share({ message: buildAyahShareMessage({ surahName, surahNumber, ayahNumber: ayahs[selected].numberInSurah, arabic: ayahs[selected].text, english: ayahs[selected].translation, urdu: ayahs[selected].urduTranslation }) }).catch(() => {})} activeOpacity={0.7}>
                 <Ionicons name="share-outline" size={14} color={theme.textTertiary} />
               </TouchableOpacity>
               <TouchableOpacity style={[s.pageActBtn, { backgroundColor: theme.surfaceMuted }]} onPress={() => setSelected(null)} activeOpacity={0.7}>
@@ -1322,35 +1323,20 @@ export default function SurahScreen() {
     else saveVerse({ surah: surahNumber, surahName: meta?.englishName, ayah: ay.numberInSurah, arabic: ay.text, english: ay.translation || '', urdu: ay.urduTranslation });
   }, [surahNumber, meta, isVerseSaved, saveVerse, removeVerse]);
 
-  // UPDATED: Share verse with improved formatting - clean card-style layout
+  // Share verse using the shared, WhatsApp-friendly formatter.
   // ay.numberInSurah is now guaranteed to be correct (1-based) from QuranService
   const shareVerse = useCallback(async (ay: Ayah, displayNumber: number) => {
     try {
-      // Build beautifully formatted share card
-      let shareMessage = `┌─────────────────────────┐\n`;
-      shareMessage += `│  📖 ${meta?.englishName || 'Quran'}  │\n`;
-      shareMessage += `│  Ayah ${displayNumber}  │\n`;
-      shareMessage += `└─────────────────────────┘\n\n`;
-      
-      // Arabic text - properly aligned
-      shareMessage += `﴿ ${ay.text} ﴾\n\n`;
-      
-      // English translation if available
-      if (ay.translation) {
-        shareMessage += `"${ay.translation}"\n\n`;
-      }
-      
-      // Urdu translation if available
-      if (ay.urduTranslation) {
-        shareMessage += `『 ${ay.urduTranslation} 』\n\n`;
-      }
-      
-      // Reference footer - use displayNumber for consistency
-      shareMessage += `─────────────────────────\n`;
-      shareMessage += `📍 Surah ${meta?.englishName} (${surahNumber}:${displayNumber})\n`;
-      shareMessage += `📲 Shared via Sukoon App\n`;
-      
-      await Share.share({ message: shareMessage });
+      await Share.share({
+        message: buildAyahShareMessage({
+          surahName: meta?.englishName,
+          surahNumber,
+          ayahNumber: displayNumber,
+          arabic: ay.text,
+          english: ay.translation,
+          urdu: ay.urduTranslation,
+        }),
+      });
     } catch {}
   }, [meta, surahNumber]);
 
@@ -1490,6 +1476,7 @@ export default function SurahScreen() {
                     globalOffset={pageGlobalOffset(pages, pIdx)}
                     currentIndex={currentIndex}
                     surahNumber={surahNumber}
+                    surahName={meta?.englishName}
                     pageNumber={pIdx + 1}
                     totalPages={pages.length}
                     isVerseSaved={isVerseSaved}

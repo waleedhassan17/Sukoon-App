@@ -27,6 +27,7 @@ import { useSavedVerses } from '@/contexts/SavedVersesContext';
 import { EmotionService } from '@/lib/emotionService';
 import type { EmotionResult, VerseRecommendation, AnalysisResult } from '@/lib/emotionService';
 import { getStaticEmotionData } from '@/lib/staticVerses';
+import { buildAyahShareMessage } from '@/lib/shareFormat';
 import { EMOTION_MAP } from '@/constants/theme';
 
 const { width: SW } = Dimensions.get('window');
@@ -139,7 +140,14 @@ export default function EmotionResultScreen() {
   const handleShare = async (verse: VerseRecommendation) => {
     try {
       await Share.share({
-        message: `📖 ${verse.surahName} (${verse.surah}:${verse.ayah})\n\n${verse.arabic}\n\n"${verse.english}"\n\n— Sukoon App`,
+        message: buildAyahShareMessage({
+          surahName: verse.surahName,
+          surahNumber: verse.surah,
+          ayahNumber: verse.ayah,
+          arabic: verse.arabic,
+          english: verse.english,
+          urdu: verse.urdu,
+        }),
       });
     } catch {}
   };

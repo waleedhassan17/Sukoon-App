@@ -22,6 +22,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { useSavedVerses } from '@/contexts/SavedVersesContext';
 import { useSavedHadiths } from '@/contexts/SavedHadithsContext';
+import { buildAyahShareMessage, buildHadithShareMessage } from '@/lib/shareFormat';
 
 type Tab = 'verses' | 'hadees';
 
@@ -52,25 +53,16 @@ export default function SavedScreen() {
 
   const handleShare = async (verse: any) => {
     try {
-      // Build beautifully formatted share card
-      let shareMessage = `┌─────────────────────────┐\n`;
-      shareMessage += `│  📖 ${verse.surahName || 'Quran'}  │\n`;
-      shareMessage += `└─────────────────────────┘\n\n`;
-      
-      // Arabic text with proper alignment indicator
-      shareMessage += `﴿ ${verse.arabic} ﴾\n\n`;
-      
-      // English translation
-      if (verse.english) {
-        shareMessage += `"${verse.english}"\n\n`;
-      }
-      
-      // Reference footer
-      shareMessage += `━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-      shareMessage += `📍 Surah ${verse.surahName || verse.surah} • Ayah ${verse.ayah}\n`;
-      shareMessage += `\n🌙 Shared via Sukoon App`;
-      
-      await Share.share({ message: shareMessage });
+      await Share.share({
+        message: buildAyahShareMessage({
+          surahName: verse.surahName || verse.surah,
+          surahNumber: verse.surah,
+          ayahNumber: verse.ayah,
+          arabic: verse.arabic,
+          english: verse.english,
+          urdu: verse.urdu,
+        }),
+      });
     } catch {}
   };
 
@@ -90,15 +82,17 @@ export default function SavedScreen() {
 
   const handleShareHadith = async (hadith: any) => {
     try {
-      let msg = `📖 ${hadith.bookName || 'Hadith'}\n\n`;
-      if (hadith.arabic) msg += `${hadith.arabic}\n\n`;
-      const translation = hadith.english || hadith.urdu;
-      if (translation) msg += `"${translation}"\n\n`;
-      msg += `━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-      msg += `📍 ${hadith.bookName || 'Hadith'} • Book ${hadith.refBook ?? ''}, Hadith ${hadith.refHadith ?? hadith.hadithNumber}\n`;
-      if (hadith.grade) msg += `✓ ${hadith.grade}\n`;
-      msg += `\n🌙 Shared via Sukoon App`;
-      await Share.share({ message: msg });
+      await Share.share({
+        message: buildHadithShareMessage({
+          bookName: hadith.bookName,
+          arabic: hadith.arabic,
+          english: hadith.english,
+          urdu: hadith.urdu,
+          book: hadith.refBook,
+          hadith: hadith.refHadith ?? hadith.hadithNumber,
+          grade: hadith.grade,
+        }),
+      });
     } catch {}
   };
 

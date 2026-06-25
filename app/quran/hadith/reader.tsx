@@ -29,18 +29,19 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { useSavedHadiths } from '@/contexts/SavedHadithsContext';
 import { HadithService, MergedHadith, HadithSection } from '@/lib/hadithService';
+import { buildHadithShareMessage as buildHadithShare } from '@/lib/shareFormat';
 
 /** Build a nicely formatted share message for a hadith. */
 function buildHadithShareMessage(item: MergedHadith, bookName: string, sectionNumber: number): string {
-  let msg = `📖 ${bookName}\n\n`;
-  if (item.arabic) msg += `${item.arabic}\n\n`;
-  const translation = item.english || item.urdu;
-  if (translation) msg += `"${translation}"\n\n`;
-  msg += `━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-  msg += `📍 ${bookName} • Book ${item.reference?.book ?? sectionNumber}, Hadith ${item.reference?.hadith ?? item.hadithnumber}\n`;
-  if (item.grades?.length) msg += `✓ ${item.grades[0].grade}\n`;
-  msg += `\n🌙 Shared via Sukoon App`;
-  return msg;
+  return buildHadithShare({
+    bookName,
+    arabic: item.arabic,
+    english: item.english,
+    urdu: item.urdu,
+    book: item.reference?.book ?? sectionNumber,
+    hadith: item.reference?.hadith ?? item.hadithnumber,
+    grade: item.grades?.length ? item.grades[0].grade : undefined,
+  });
 }
 
 type Translation = 'urdu' | 'english';
