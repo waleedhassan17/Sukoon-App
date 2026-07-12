@@ -50,11 +50,13 @@ carries the catalog metadata; MP3s live in object storage. One-time setup:
    `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `PUBLIC_BASE_URL` in
    `tools/tts_agent/.env`. (Firebase Storage also works via its S3-compatible
    endpoint but requires the Blaze plan.)
-2. **Firestore publish** — Firebase Console → Project settings → Service
-   accounts → *Generate new private key*; save the JSON and set
-   `GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json` in the same `.env`.
-3. **Rules** — `firebase deploy --only firestore:rules` (adds read-only
-   `audiobooksCatalog`).
+2. **Firestore publish** — `python3 tools/tts_agent/publish_firestore.py`
+   publishes every ready seed book to `audiobooksCatalog/{bookId}` using the
+   developer's existing `firebase login` session (no service-account file
+   needed). First publish + rules deploy done 2026-07-12; re-run after every
+   agent batch.
+3. **Rules** — `firebase deploy --only firestore:rules` (read-only
+   `audiobooksCatalog`; deployed 2026-07-12).
 
 Then run `bash tools/tts_agent/run_remaining.sh` (or with
 `nohup … & disown` for overnight runs). It is **fully resumable**: chapters
