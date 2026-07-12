@@ -1,3 +1,49 @@
+# Sukoon v1.3.0 — Release Notes
+
+## Release Name
+**Sukoon v1.3.0 — سکون** *(Listen)*
+
+---
+
+## 📋 Google Play Console — Release Notes (draft)
+
+### English (en-US)
+```
+NEW: Listen — an Islamic audiobook library 🎧
+
+• Audiobooks: Qur'an translations, Sirah, Hadith, spirituality, history & kids stories
+• Full player with sleep timer, playback speed and 15s/30s skips
+• Mini-player follows you across the whole app
+• Download chapters for offline listening (where the license permits)
+• Continue exactly where you left off — synced across your devices
+• Listening streaks and badges in Spiritual Progress
+• Every book is clearly labelled: human narration, AI narration or recitation
+• Full English + Urdu support
+
+May Allah accept this effort.
+```
+
+### Internal changelog
+- New Listen tab (audiobooks): home shelves, categories, search, book detail,
+  full player, global mini-player, kids section.
+- Playback: expo-av chapter-playlist engine with resume (saved every 10s +
+  on pause, cloud-synced), 0.75x–2x speed, sleep timer (minutes or
+  end-of-chapter), auto-advance, offline downloads.
+- Audio focus: Quran recitation, Azan and audiobooks can never play over each
+  other (lib/audioFocus.ts).
+- Catalog: bundled seed (legally-free launch titles with recorded licenses) +
+  optional Firestore `audiobooksCatalog` overrides; additive security rule.
+- TTS agent (tools/tts_agent, repo root): generate-once pipeline — Kokoro
+  default, edge-tts for Urdu, Piper fallback; pronunciation dictionary;
+  −16 LUFS; 64kbps mono MP3; idempotent R2 uploads; catalog upserts.
+- Tests: 38 app unit tests (streaks, progress, catalog, resolvers) +
+  20 agent tests (cleaner, pronunciation, chunker). `npm test`.
+- versionCode 19. Known follow-up: lock-screen/media-notification controls
+  need react-native-track-player (owner decision — see
+  docs/audiobooks-implementation-plan.md).
+
+---
+
 # Sukoon v1.0.0 — Release Notes
 
 ## Release Name
