@@ -23,6 +23,9 @@ import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSavedVerses } from '@/contexts/SavedVersesContext';
 import { ReadingProgress, LastPosition } from '@/lib/readingProgress';
+import { ListenStats } from '@/lib/audiobooks/stats';
+import { ListenStatsSummary } from '@/lib/audiobooks/types';
+import { t } from '@/lib/i18n';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -180,6 +183,7 @@ export default function InsightsScreen() {
   const [lastSeen, setLastSeen] = useState<LastPosition | null>(null);
   const [lastAudio, setLastAudio] = useState<LastPosition | null>(null);
   const [weeklyData, setWeeklyData] = useState<{ date: string; count: number }[]>([]);
+  const [listenStats, setListenStats] = useState<ListenStatsSummary | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -191,6 +195,7 @@ export default function InsightsScreen() {
         setLastSeen(await ReadingProgress.getLastSeen());
         setLastAudio(await ReadingProgress.getLastAudio());
         setWeeklyData(await ReadingProgress.getDailyReadCounts(7));
+        setListenStats(await ListenStats.getSummary().catch(() => null));
       };
       load();
     }, [])
@@ -334,6 +339,43 @@ export default function InsightsScreen() {
               </View>
             </View>
 
+            {/* ═══ LISTENING (audiobooks) ═══ */}
+            {listenStats && (listenStats.totalSeconds > 0 || listenStats.booksCompleted > 0) && (
+              <View style={[st.totalCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}>
+                <Text style={[st.totalTitle, { color: theme.text }]}>{t('listen.insights.title')}</Text>
+                <View style={st.totalRow}>
+                  <View>
+                    <Text style={[st.totalNum, { color: theme.primary }]}>
+                      {(listenStats.totalSeconds / 3600).toFixed(1)}
+                    </Text>
+                    <Text style={[st.totalLabel, { color: theme.textTertiary }]}>{t('listen.insights.hours')}</Text>
+                  </View>
+                  <View style={[st.totalDiv, { backgroundColor: theme.border }]} />
+                  <View>
+                    <Text style={[st.totalNum, { color: '#F09846' }]}>{listenStats.streak.current}</Text>
+                    <Text style={[st.totalLabel, { color: theme.textTertiary }]}>{t('listen.insights.streak')}</Text>
+                  </View>
+                  <View style={[st.totalDiv, { backgroundColor: theme.border }]} />
+                  <View>
+                    <Text style={[st.totalNum, { color: theme.gold }]}>{listenStats.booksCompleted}</Text>
+                    <Text style={[st.totalLabel, { color: theme.textTertiary }]}>{t('listen.insights.books')}</Text>
+                  </View>
+                </View>
+                {listenStats.badges.length > 0 && (
+                  <View style={st.badgeRow}>
+                    {listenStats.badges.map((b) => (
+                      <View key={b} style={[st.badgeChip, { backgroundColor: `${theme.gold}1A` }]}>
+                        <Ionicons name="ribbon-outline" size={12} color={theme.gold} />
+                        <Text style={[st.badgeChipText, { color: theme.gold }]}>
+                          {t(`listen.badgeName.${b}`)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
+
             {/* ═══ MOTIVATIONAL QUOTE ═══ */}
             <QuoteCard />
           </>
@@ -414,6 +456,11 @@ const st = StyleSheet.create({
   totalNum: { fontSize: 24, fontWeight: '800', marginBottom: 4 },
   totalLabel: { fontSize: 11, fontWeight: '600' },
   totalDiv: { width: 1, height: 40 },
+
+  /* Listening badges */
+  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
+  badgeChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+  badgeChipText: { fontSize: 11, fontWeight: '700' },
 
   /* Quote */
   quoteCard: { marginHorizontal: 16, marginTop: 20, marginBottom: 20, borderRadius: 18, padding: 20, ...Platform.select({ ios: { shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 12 }, android: { elevation: 4 } }) },

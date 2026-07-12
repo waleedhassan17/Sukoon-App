@@ -14,6 +14,9 @@ import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { FontSizeProvider } from '@/contexts/FontSizeContext';
 import { SavedVersesProvider } from '@/contexts/SavedVersesContext';
 import { SavedHadithsProvider } from '@/contexts/SavedHadithsContext';
+import { AudiobookPlayerProvider } from '@/contexts/AudiobookPlayerContext';
+import MiniPlayer from '@/components/listen/MiniPlayer';
+import { ListenProgress } from '@/lib/audiobooks/progress';
 import SukoonSplash from '@/components/SukoonSplash';
 import { QuranService } from '@/lib/quranService';
 import { NotificationService } from '@/lib/notificationService';
@@ -99,6 +102,9 @@ function RootLayoutInner() {
 
         // Initialize DataSync (anonymous auth + cloud sync readiness)
         await DataSyncService.init();
+
+        // Merge audiobook listening positions from the cloud (fire-and-forget)
+        ListenProgress.syncFromCloud().catch(() => {});
 
         // Salah Buddy: ensure the public profile doc exists with timezone, displayName,
         // photoURL and (after migration) fcmTokens array. Idempotent.
@@ -253,13 +259,17 @@ function RootLayoutInner() {
             animation: 'slide_from_right',
           }}
         />
-        {/* quran/ and tools/ have their own _layout.tsx — just declare the directory */}
+        {/* quran/, tools/ and listen/ have their own _layout.tsx — just declare the directory */}
         <Stack.Screen name="quran" options={{ headerShown: false }} />
         <Stack.Screen name="tools" options={{ headerShown: false }} />
+        <Stack.Screen name="listen" options={{ headerShown: false }} />
         {/* Salah Buddy: deep-link target + friend detail. Both have their own _layout.tsx. */}
         <Stack.Screen name="invite" options={{ headerShown: false, presentation: 'modal' }} />
         <Stack.Screen name="friends" options={{ headerShown: false }} />
       </Stack>
+
+      {/* Global audiobook mini-player — docked above the bottom nav app-wide */}
+      <MiniPlayer />
 
       {/* Custom animated splash overlay — renders on top, self-removes */}
       {!splashDone && <SukoonSplash onFinish={handleSplashFinish} />}
@@ -273,7 +283,9 @@ export default function RootLayout() {
       <FontSizeProvider>
         <SavedVersesProvider>
           <SavedHadithsProvider>
-            <RootLayoutInner />
+            <AudiobookPlayerProvider>
+              <RootLayoutInner />
+            </AudiobookPlayerProvider>
           </SavedHadithsProvider>
         </SavedVersesProvider>
       </FontSizeProvider>
