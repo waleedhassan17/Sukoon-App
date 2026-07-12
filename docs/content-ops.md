@@ -40,6 +40,30 @@ Public-domain texts converted by `tools/tts_agent` (repo root):
 Voice upgrades: pick a better voice, run with `--regenerate` — every user gets
 the improved audio with no app update (chapter URLs are stable).
 
+### 2a. Full-catalog generation → storage → Firestore (the production flow)
+
+Audio bytes **cannot live in Firestore** (1 MB/document limit) — Firestore
+carries the catalog metadata; MP3s live in object storage. One-time setup:
+
+1. **Storage** — create a Cloudflare R2 bucket (free 10 GB, zero egress; the
+   whole catalog ≈ 3 GB at 64 kbps) and put `R2_ENDPOINT`, `R2_BUCKET`,
+   `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `PUBLIC_BASE_URL` in
+   `tools/tts_agent/.env`. (Firebase Storage also works via its S3-compatible
+   endpoint but requires the Blaze plan.)
+2. **Firestore publish** — Firebase Console → Project settings → Service
+   accounts → *Generate new private key*; save the JSON and set
+   `GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json` in the same `.env`.
+3. **Rules** — `firebase deploy --only firestore:rules` (adds read-only
+   `audiobooksCatalog`).
+
+Then run `bash tools/tts_agent/run_remaining.sh` (or with
+`nohup … & disown` for overnight runs). It is **fully resumable**: chapters
+already in `out/` or in the bucket are reused, never re-TTSed — so audio can
+be generated offline first and uploaded later just by re-running the script
+after adding credentials. Each finished book is upserted into
+`audiobooksCatalog/{bookId}`; live apps pick it up within the catalog cache
+TTL (≤12 h) or on pull-to-refresh — no app release needed.
+
 ### 2b. Bundled in-app audio (ships with the Play Store install)
 
 A small set of compact, high-value titles ships **inside the app binary** so
