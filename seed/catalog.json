@@ -1,0 +1,489 @@
+{
+  "version": 1,
+  "updatedAt": "2026-07-12",
+  "books": [
+    {
+      "id": "pickthall-meaning-glorious-koran",
+      "title": "The Meaning of the Glorious Koran",
+      "author": "Marmaduke Pickthall (translator)",
+      "narrator": "LibriVox volunteers",
+      "description": "Pickthall's celebrated 1930 English rendering of the Qur'an — 'the glorious Koran, that inimitable symphony' — read by LibriVox volunteers. A complete English audio Qur'an in the public domain.",
+      "coverUrl": "https://archive.org/services/img/meaning_glorious_koran_0810_librivox",
+      "category": "quran",
+      "language": "en",
+      "source": "librivox",
+      "license": "public_domain",
+      "narrationType": "human",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "ready",
+      "featured": true,
+      "attribution": "Recording courtesy of LibriVox.org (public domain). Streamed from archive.org.",
+      "textSourceUrl": "https://archive.org/details/meaning_glorious_koran_0810_librivox",
+      "chapterSource": {
+        "kind": "archive",
+        "identifier": "meaning_glorious_koran_0810_librivox"
+      }
+    },
+    {
+      "id": "shakir-holy-koran",
+      "title": "The Holy Koran (Shakir Translation)",
+      "author": "M. H. Shakir (translator)",
+      "narrator": "LibriVox volunteers",
+      "description": "A complete English audio Qur'an in the widely-read Shakir translation, recorded by LibriVox volunteers and preserved on the Internet Archive.",
+      "coverUrl": "https://archive.org/services/img/holy_koran_1907_librivox",
+      "category": "quran",
+      "language": "en",
+      "source": "librivox",
+      "license": "public_domain",
+      "narrationType": "human",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "ready",
+      "attribution": "Recording courtesy of LibriVox.org (public domain). Streamed from archive.org.",
+      "textSourceUrl": "https://archive.org/details/holy_koran_1907_librivox",
+      "chapterSource": {
+        "kind": "archive",
+        "identifier": "holy_koran_1907_librivox"
+      }
+    },
+    {
+      "id": "recitation-alafasy",
+      "title": "Quran Recitation — Mishary Alafasy",
+      "author": "The Holy Qur'an",
+      "narrator": "Mishary Rashid Alafasy",
+      "description": "Complete murattal recitation of the Holy Qur'an by Sheikh Mishary Rashid Alafasy, streamed from mp3quran.net. All 114 surahs.",
+      "category": "quran",
+      "language": "ar",
+      "source": "quran",
+      "license": "permission",
+      "narrationType": "recitation",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "ready",
+      "featured": true,
+      "attribution": "Audio streamed from mp3quran.net.",
+      "chapterSource": {
+        "kind": "mp3quran",
+        "reciterId": 123,
+        "moshafId": 123
+      }
+    },
+    {
+      "id": "recitation-husary",
+      "title": "Quran Recitation — Mahmoud Al-Husary",
+      "author": "The Holy Qur'an",
+      "narrator": "Mahmoud Khalil Al-Husary",
+      "description": "The classic murattal recitation of Sheikh Mahmoud Khalil Al-Husary — renowned for precise tajweed — streamed from mp3quran.net.",
+      "category": "quran",
+      "language": "ar",
+      "source": "quran",
+      "license": "permission",
+      "narrationType": "recitation",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "ready",
+      "attribution": "Audio streamed from mp3quran.net.",
+      "chapterSource": {
+        "kind": "mp3quran",
+        "reciterId": 118,
+        "moshafId": 118
+      }
+    },
+    {
+      "id": "podcast-seerah-yasir-qadhi",
+      "title": "Seerah of Prophet Muhammad ﷺ",
+      "author": "Yasir Qadhi",
+      "narrator": "Yasir Qadhi",
+      "description": "An in-depth lecture series on the life of the Prophet Muhammad ﷺ. Streamed directly from the original podcast feed with the creator's attribution.",
+      "category": "sirah",
+      "language": "en",
+      "source": "podcast",
+      "license": "permission",
+      "narrationType": "human",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "ready",
+      "featured": true,
+      "attribution": "Podcast by Yasir Qadhi. Streamed from the original public feed — all rights remain with the creator.",
+      "chapterSource": {
+        "kind": "rss",
+        "itunesCollectionId": 1504509247
+      }
+    },
+    {
+      "id": "podcast-stories-of-the-prophets",
+      "title": "Stories of the Prophets",
+      "author": "General Iq",
+      "narrator": "General Iq",
+      "description": "Narrations of the lives of the Prophets (peace be upon them), streamed from the original podcast feed.",
+      "category": "sirah",
+      "language": "en",
+      "source": "podcast",
+      "license": "permission",
+      "narrationType": "human",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "ready",
+      "attribution": "Streamed from the original public podcast feed — all rights remain with the creator.",
+      "chapterSource": {
+        "kind": "rss",
+        "itunesCollectionId": 1551860812
+      }
+    },
+    {
+      "id": "podcast-once-upon-a-crescent",
+      "title": "Once Upon A Crescent",
+      "author": "Mrs. Hashimi",
+      "narrator": "Mrs. Hashimi",
+      "description": "A beloved Muslim kids podcast with wholesome bedtime stories. Streamed from the original feed.",
+      "category": "kids",
+      "language": "en",
+      "source": "podcast",
+      "license": "permission",
+      "narrationType": "human",
+      "isKids": true,
+      "totalDurationSec": 0,
+      "status": "ready",
+      "attribution": "Podcast by Mrs. Hashimi. Streamed from the original public feed — all rights remain with the creator.",
+      "chapterSource": {
+        "kind": "rss",
+        "itunesCollectionId": 1522412155
+      }
+    },
+    {
+      "id": "sayings-of-muhammad",
+      "title": "The Sayings of Muhammad ﷺ",
+      "author": "Abdullah Al-Suhrawardy (compiler)",
+      "narrator": "Sukoon AI narration",
+      "description": "Al-Suhrawardy's 1905 collection of the sayings of the Prophet ﷺ — a classic public-domain compilation admired by Tolstoy and Gandhi.",
+      "category": "hadith",
+      "language": "en",
+      "source": "own",
+      "license": "public_domain",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "textSourceUrl": "https://archive.org/details/the-sayings-of-muhammad_202401",
+      "ttsVoice": "af_heart",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "alchemy-of-happiness",
+      "title": "The Alchemy of Happiness",
+      "author": "Imam Al-Ghazali (tr. Claud Field)",
+      "narrator": "Sukoon AI narration",
+      "description": "Al-Ghazali's timeless guide to the purification of the heart and the path to true happiness, in Claud Field's public-domain translation.",
+      "category": "spirituality",
+      "language": "en",
+      "source": "own",
+      "license": "public_domain",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "featured": true,
+      "textSourceUrl": "https://archive.org/details/in.ernet.dli.2015.536237",
+      "ttsVoice": "af_heart",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "deliverance-from-error",
+      "title": "Deliverance from Error",
+      "author": "Imam Al-Ghazali (tr. Claud Field)",
+      "narrator": "Sukoon AI narration",
+      "description": "Al-Ghazali's spiritual autobiography — his journey through doubt to certainty — in Claud Field's public-domain translation.",
+      "category": "aqidah",
+      "language": "en",
+      "source": "own",
+      "license": "public_domain",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "textSourceUrl": "https://www.gutenberg.org/ebooks/58977",
+      "ttsVoice": "am_michael",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "kashf-al-mahjub",
+      "title": "Kashf al-Mahjub (The Revelation of the Veiled)",
+      "author": "Ali Hujwiri — Data Ganj Bakhsh (tr. R. A. Nicholson)",
+      "narrator": "Sukoon AI narration",
+      "description": "The oldest Persian treatise on Sufism, by the saint of Lahore, in Nicholson's 1911 public-domain translation.",
+      "category": "spirituality",
+      "language": "en",
+      "source": "own",
+      "license": "public_domain",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "textSourceUrl": "https://archive.org/details/kashfalmahjub00usmauoft",
+      "ttsVoice": "am_michael",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "gulistan-of-sadi",
+      "title": "The Gulistan (Rose Garden)",
+      "author": "Sheikh Sa'di (tr. Edward Eastwick, 1865)",
+      "narrator": "Sukoon AI narration",
+      "description": "Sa'di's beloved classic of moral tales and maxims — one of the most influential works of Persian literature, in public-domain translation.",
+      "category": "fiction",
+      "language": "en",
+      "source": "own",
+      "license": "public_domain",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "textSourceUrl": "https://archive.org/details/gulistanorrosega00sadi",
+      "ttsVoice": "bm_george",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "bustan-of-sadi",
+      "title": "The Bustan (Orchard)",
+      "author": "Sheikh Sa'di",
+      "narrator": "Sukoon AI narration",
+      "description": "Sa'di's poetic companion to the Gulistan — stories and wisdom on justice, generosity and humility, in public-domain translation.",
+      "category": "fiction",
+      "language": "en",
+      "source": "own",
+      "license": "public_domain",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "textSourceUrl": "https://archive.org/details/bstnbyshaikh00sadiuoft",
+      "ttsVoice": "bm_george",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "kalila-and-dimna",
+      "title": "Kalila and Dimna",
+      "author": "Ibn al-Muqaffa (tr. Wyndham Knatchbull, 1819)",
+      "narrator": "Sukoon AI narration",
+      "description": "The famous animal fables of wisdom and statecraft that travelled from India through the Islamic world, in Knatchbull's 1819 public-domain translation.",
+      "category": "fiction",
+      "language": "en",
+      "source": "own",
+      "license": "public_domain",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "textSourceUrl": "https://archive.org/details/kalilaanddimnao00almgoog",
+      "ttsVoice": "bm_george",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "travels-of-ibn-battuta",
+      "title": "The Travels of Ibn Battuta",
+      "author": "Ibn Battuta (tr. Samuel Lee, 1829)",
+      "narrator": "Sukoon AI narration",
+      "description": "The greatest traveller of the medieval world — 29 years and 75,000 miles across Dar al-Islam — in Lee's 1829 public-domain translation.",
+      "category": "geography",
+      "language": "en",
+      "source": "own",
+      "license": "public_domain",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "textSourceUrl": "https://archive.org/details/bub_gb_22IbAQAAMAAJ",
+      "ttsVoice": "bm_george",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "short-history-saracens",
+      "title": "A Short History of the Saracens",
+      "author": "Syed Ameer Ali (1899)",
+      "narrator": "Sukoon AI narration",
+      "description": "Ameer Ali's sweeping 1899 history of Muslim civilisation from the rise of Islam to the fall of Granada. Public domain.",
+      "category": "history",
+      "language": "en",
+      "source": "own",
+      "license": "public_domain",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "textSourceUrl": "https://archive.org/details/shorthistoryofsa00alis",
+      "ttsVoice": "am_michael",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "hayy-ibn-yaqzan",
+      "title": "Hayy ibn Yaqzan",
+      "author": "Ibn Tufail (tr. Simon Ockley)",
+      "narrator": "Sukoon AI narration",
+      "description": "The philosophical tale of a self-taught man on a desert island — a medieval Islamic classic that influenced Robinson Crusoe. Ockley's public-domain translation.",
+      "category": "fiction",
+      "language": "en",
+      "source": "own",
+      "license": "public_domain",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "textSourceUrl": "https://archive.org/details/cu31924028974479",
+      "ttsVoice": "bm_george",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "forty-hadith-nawawi",
+      "title": "40 Hadith of Imam Nawawi",
+      "author": "Imam Nawawi",
+      "narrator": "Sukoon AI narration",
+      "description": "The forty foundational hadith gathered by Imam Nawawi — the essentials of Islam in forty sayings. Text from the open hadith-api.",
+      "category": "hadith",
+      "language": "en",
+      "source": "own",
+      "license": "public_domain",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "textSourceUrl": "https://github.com/fawazahmed0/hadith-api",
+      "ttsVoice": "am_michael",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "forty-hadith-qudsi",
+      "title": "40 Hadith Qudsi",
+      "author": "Compilation",
+      "narrator": "Sukoon AI narration",
+      "description": "Forty sacred hadith in which the Prophet ﷺ relates the words of Allah. Text from the open hadith-api.",
+      "category": "hadith",
+      "language": "en",
+      "source": "own",
+      "license": "public_domain",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "textSourceUrl": "https://github.com/fawazahmed0/hadith-api",
+      "ttsVoice": "am_michael",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "riyad-us-saliheen-selections",
+      "title": "Riyad us-Saliheen — Selections",
+      "author": "Imam Nawawi",
+      "narrator": "Sukoon AI narration",
+      "description": "Selected chapters from the Gardens of the Righteous — Imam Nawawi's beloved collection on sincerity, patience and good character. Text from the open hadith-api.",
+      "category": "hadith",
+      "language": "en",
+      "source": "own",
+      "license": "public_domain",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "textSourceUrl": "https://github.com/fawazahmed0/hadith-api",
+      "ttsVoice": "am_michael",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "sukoon-stories-prophets-kids",
+      "title": "Stories of the Prophets for Kids",
+      "author": "Sukoon Originals",
+      "narrator": "Sukoon AI narration",
+      "description": "Gentle retellings of the stories of the Prophets (peace be upon them) written for young listeners. A Sukoon Original — script under human review.",
+      "category": "kids",
+      "language": "en",
+      "source": "own",
+      "license": "own",
+      "narrationType": "ai",
+      "isKids": true,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "ttsVoice": "af_heart",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "sukoon-40-hadith-little-muslims",
+      "title": "40 Hadith for Little Muslims",
+      "author": "Sukoon Originals",
+      "narrator": "Sukoon AI narration",
+      "description": "Forty short sayings of the Prophet ﷺ explained simply for children. A Sukoon Original — script under human review.",
+      "category": "kids",
+      "language": "en",
+      "source": "own",
+      "license": "own",
+      "narrationType": "ai",
+      "isKids": true,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "ttsVoice": "af_heart",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    },
+    {
+      "id": "sukoon-productivity-sunnah",
+      "title": "Productivity from the Sunnah",
+      "author": "Sukoon Originals",
+      "narrator": "Sukoon AI narration",
+      "description": "Practical habits for focus, energy and barakah in your day, drawn from the Sunnah. A Sukoon Original — script under human review.",
+      "category": "selfhelp",
+      "language": "en",
+      "source": "own",
+      "license": "own",
+      "narrationType": "ai",
+      "isKids": false,
+      "totalDurationSec": 0,
+      "status": "pending",
+      "ttsVoice": "am_michael",
+      "chapterSource": {
+        "kind": "static"
+      },
+      "chapters": []
+    }
+  ]
+}

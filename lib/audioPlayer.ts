@@ -5,6 +5,7 @@
  */
 
 import { Audio, AVPlaybackStatus, AVPlaybackStatusSuccess } from 'expo-av';
+import { AudioFocus } from './audioFocus';
 
 /* ─── Types ─── */
 export type RepeatMode = 'none' | 'one' | 'all';
@@ -69,6 +70,11 @@ class AudioPlayer {
 
   constructor() {
     this.init();
+    // App-wide single-audio-source rule: pause Quran audio when the Azan or
+    // an audiobook starts (see lib/audioFocus.ts).
+    AudioFocus.register('quran', () => {
+      this.pause().catch(() => {});
+    });
   }
 
   /* ═══════════════════════════════════════════
@@ -183,6 +189,7 @@ class AudioPlayer {
   async play(uri: string): Promise<void> {
     if (!uri) return;
     await this.init();
+    AudioFocus.request('quran');
 
     try {
       // Wait for any in-progress unload
@@ -344,6 +351,7 @@ class AudioPlayer {
   async resume(): Promise<void> {
     try {
       if (this.sound && this.state.isLoaded && !this.state.isPlaying) {
+        AudioFocus.request('quran');
         // Re-claim audio focus on Android (lost after phone calls / other apps)
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,

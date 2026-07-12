@@ -19,6 +19,7 @@
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import { AppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AudioFocus } from './audioFocus';
 
 // ══════════════════════════════════════════════
 // AZAN SOUND ASSETS (bundled locally for offline use)
@@ -122,6 +123,9 @@ class AzanPlayerService {
 
       // Cleanup any previous sound instance before creating a new one
       await this.cleanup();
+
+      // Silence Quran recitation / audiobooks — the Azan takes precedence
+      AudioFocus.request('azan');
 
       // Configure audio session for loud, uninterrupted playback
       await this.configureAudio();

@@ -55,6 +55,7 @@ const SYNC_DOMAINS = {
   READING_PROGRESS: 'readingProgress',
   AUDIO_PROGRESS: 'audioProgress',
   PREFERENCES: 'preferences',
+  AUDIOBOOKS: 'audiobooks',
 } as const;
 
 type SyncDomain = typeof SYNC_DOMAINS[keyof typeof SYNC_DOMAINS];
