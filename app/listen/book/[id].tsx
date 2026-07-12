@@ -21,6 +21,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { RADIUS, SPACING } from '@/constants/theme';
 import { t, useLocale } from '@/lib/i18n';
 import { Book, Chapter, isDownloadable } from '@/lib/audiobooks/types';
+import { getBundledSource } from '@/lib/audiobooks/bundledAudio';
 import { CatalogService } from '@/lib/audiobooks/catalog';
 import { ChapterResolver } from '@/lib/audiobooks/chapterResolver';
 import { ListenProgress } from '@/lib/audiobooks/progress';
@@ -297,6 +298,7 @@ export default function BookDetailScreen() {
         const isCurrent = isCurrentBook && playerState.chapterIndex === index;
         const isResume = item.id === resumeChapterId;
         const dlProgress = downloading[item.id];
+        const isOnDevice = downloaded.has(item.id) || getBundledSource(item.id) !== null;
         return (
           <TouchableOpacity
             onPress={() => playFrom(index)}
@@ -328,7 +330,7 @@ export default function BookDetailScreen() {
                 <Text style={[styles.dlProgress, { color: theme.primaryMuted }]}>
                   {Math.round(dlProgress * 100)}%
                 </Text>
-              ) : downloaded.has(item.id) ? (
+              ) : isOnDevice ? (
                 <Ionicons name="checkmark-circle" size={20} color={theme.success} />
               ) : (
                 <TouchableOpacity

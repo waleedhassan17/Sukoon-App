@@ -109,7 +109,8 @@
       "chapterSource": {
         "kind": "rss",
         "itunesCollectionId": 1504509247
-      }
+      },
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts125/v4/44/f7/07/44f70729-504b-3b48-411d-a9c91c101628/mza_1766332207170724056.jpg/600x600bb.jpg"
     },
     {
       "id": "podcast-stories-of-the-prophets",
@@ -129,7 +130,8 @@
       "chapterSource": {
         "kind": "rss",
         "itunesCollectionId": 1551860812
-      }
+      },
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/8a/4d/54/8a4d54df-f1b8-3cad-f7ab-2b432e47bdd0/mza_18076352841418311731.jpg/600x600bb.jpg"
     },
     {
       "id": "podcast-once-upon-a-crescent",
@@ -149,7 +151,8 @@
       "chapterSource": {
         "kind": "rss",
         "itunesCollectionId": 1522412155
-      }
+      },
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts115/v4/07/db/b7/07dbb7f7-36f3-d2fc-f9e3-8f8fb5f1b7c0/mza_16360226720000965399.png/600x600bb.jpg"
     },
     {
       "id": "sayings-of-muhammad",
@@ -170,7 +173,8 @@
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": []
+      "chapters": [],
+      "coverUrl": "https://archive.org/services/img/the-sayings-of-muhammad_202401"
     },
     {
       "id": "alchemy-of-happiness",
@@ -192,7 +196,8 @@
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": []
+      "chapters": [],
+      "coverUrl": "https://archive.org/services/img/in.ernet.dli.2015.536237"
     },
     {
       "id": "deliverance-from-error",
@@ -213,7 +218,8 @@
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": []
+      "chapters": [],
+      "coverUrl": "https://www.gutenberg.org/cache/epub/58977/pg58977.cover.medium.jpg"
     },
     {
       "id": "kashf-al-mahjub",
@@ -234,7 +240,8 @@
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": []
+      "chapters": [],
+      "coverUrl": "https://archive.org/services/img/kashfalmahjub00usmauoft"
     },
     {
       "id": "gulistan-of-sadi",
@@ -255,7 +262,8 @@
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": []
+      "chapters": [],
+      "coverUrl": "https://archive.org/services/img/gulistanorrosega00sadi"
     },
     {
       "id": "bustan-of-sadi",
@@ -276,7 +284,8 @@
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": []
+      "chapters": [],
+      "coverUrl": "https://archive.org/services/img/bstnbyshaikh00sadiuoft"
     },
     {
       "id": "kalila-and-dimna",
@@ -297,7 +306,8 @@
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": []
+      "chapters": [],
+      "coverUrl": "https://archive.org/services/img/kalilaanddimnao00almgoog"
     },
     {
       "id": "travels-of-ibn-battuta",
@@ -318,7 +328,8 @@
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": []
+      "chapters": [],
+      "coverUrl": "https://archive.org/services/img/bub_gb_22IbAQAAMAAJ"
     },
     {
       "id": "short-history-saracens",
@@ -339,7 +350,8 @@
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": []
+      "chapters": [],
+      "coverUrl": "https://archive.org/services/img/shorthistoryofsa00alis"
     },
     {
       "id": "hayy-ibn-yaqzan",
@@ -360,7 +372,8 @@
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": []
+      "chapters": [],
+      "coverUrl": "https://archive.org/services/img/cu31924028974479"
     },
     {
       "id": "forty-hadith-nawawi",
@@ -374,14 +387,51 @@
       "license": "public_domain",
       "narrationType": "ai",
       "isKids": false,
-      "totalDurationSec": 0,
-      "status": "pending",
+      "totalDurationSec": 1950,
+      "status": "ready",
       "textSourceUrl": "https://github.com/fawazahmed0/hadith-api",
-      "ttsVoice": "am_michael",
+      "ttsVoice": "en-US-ChristopherNeural",
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": []
+      "chapters": [
+        {
+          "id": "forty-hadith-nawawi_0",
+          "bookId": "forty-hadith-nawawi",
+          "index": 0,
+          "title": "Part 1",
+          "audioUrl": "bundled://forty-hadith-nawawi/000",
+          "durationSec": 724,
+          "fileSizeBytes": 5795884,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T15:59:30.967505+00:00"
+        },
+        {
+          "id": "forty-hadith-nawawi_1",
+          "bookId": "forty-hadith-nawawi",
+          "index": 1,
+          "title": "Part 2",
+          "audioUrl": "bundled://forty-hadith-nawawi/001",
+          "durationSec": 733,
+          "fileSizeBytes": 5867146,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T15:59:30.967517+00:00"
+        },
+        {
+          "id": "forty-hadith-nawawi_2",
+          "bookId": "forty-hadith-nawawi",
+          "index": 2,
+          "title": "Part 3",
+          "audioUrl": "bundled://forty-hadith-nawawi/002",
+          "durationSec": 493,
+          "fileSizeBytes": 3944115,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T15:59:30.967520+00:00"
+        }
+      ]
     },
     {
       "id": "forty-hadith-qudsi",
@@ -395,14 +445,63 @@
       "license": "public_domain",
       "narrationType": "ai",
       "isKids": false,
-      "totalDurationSec": 0,
-      "status": "pending",
+      "totalDurationSec": 2388,
+      "status": "ready",
       "textSourceUrl": "https://github.com/fawazahmed0/hadith-api",
-      "ttsVoice": "am_michael",
+      "ttsVoice": "en-US-ChristopherNeural",
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": []
+      "chapters": [
+        {
+          "id": "forty-hadith-qudsi_0",
+          "bookId": "forty-hadith-qudsi",
+          "index": 0,
+          "title": "Part 1",
+          "audioUrl": "bundled://forty-hadith-qudsi/000",
+          "durationSec": 733,
+          "fileSizeBytes": 5860876,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T16:26:37.760049+00:00"
+        },
+        {
+          "id": "forty-hadith-qudsi_1",
+          "bookId": "forty-hadith-qudsi",
+          "index": 1,
+          "title": "Part 2",
+          "audioUrl": "bundled://forty-hadith-qudsi/001",
+          "durationSec": 801,
+          "fileSizeBytes": 6405268,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T16:26:37.760061+00:00"
+        },
+        {
+          "id": "forty-hadith-qudsi_2",
+          "bookId": "forty-hadith-qudsi",
+          "index": 2,
+          "title": "Part 3",
+          "audioUrl": "bundled://forty-hadith-qudsi/002",
+          "durationSec": 759,
+          "fileSizeBytes": 6071946,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T16:26:37.760064+00:00"
+        },
+        {
+          "id": "forty-hadith-qudsi_3",
+          "bookId": "forty-hadith-qudsi",
+          "index": 3,
+          "title": "Part 4",
+          "audioUrl": "bundled://forty-hadith-qudsi/003",
+          "durationSec": 95,
+          "fileSizeBytes": 759893,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T16:26:37.760066+00:00"
+        }
+      ]
     },
     {
       "id": "riyad-us-saliheen-selections",

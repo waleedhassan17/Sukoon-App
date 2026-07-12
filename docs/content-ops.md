@@ -40,6 +40,22 @@ Public-domain texts converted by `tools/tts_agent` (repo root):
 Voice upgrades: pick a better voice, run with `--regenerate` — every user gets
 the improved audio with no app update (chapter URLs are stable).
 
+### 2b. Bundled in-app audio (ships with the Play Store install)
+
+A small set of compact, high-value titles ships **inside the app binary** so
+they play offline from first launch with no download step:
+
+1. Generate with the agent locally: `python agent.py --book <id> --engine edge --no-upload`.
+2. Copy the MP3s to `assets/audiobooks/<bookId>/` in the app.
+3. Add each chapter to the require-map in `lib/audiobooks/bundledAudio.ts`
+   and set the catalog chapters' `audioUrl` to `bundled://<bookId>/<index>`.
+
+**Size budget is the hard constraint:** 64 kbps mono ≈ 0.5 MB per audio-minute,
+and the base APK is already ~129 MB (Play's AAB base limit is 200 MB). Only the
+40-hadith collections are bundled (~35 MB total). Long books (Alchemy of
+Happiness ≈ 5h ≈ 140 MB) must go to the CDN — bundling them is not possible
+within Play Store limits.
+
 ### 3. Sukoon Originals
 
 Scripts live in `tools/tts_agent/scripts/*.md` and carry

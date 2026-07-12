@@ -10,6 +10,7 @@
 
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getBundledSource } from './bundledAudio';
 import { Book, Chapter, isDownloadable } from './types';
 
 const KEY_INDEX = 'sukoon_listen_downloads'; // map chapterId → { bookId, path, bytes }
@@ -90,6 +91,11 @@ export const DownloadManager = {
   ): Promise<string> {
     if (!isDownloadable(book)) {
       throw new Error('DOWNLOAD_NOT_PERMITTED');
+    }
+    // Chapters bundled into the APK are already on-device — nothing to fetch.
+    if (getBundledSource(chapter.id) !== null) {
+      onProgress?.(1);
+      return chapter.audioUrl;
     }
     const existing = await this.getLocalUri(chapter.id);
     if (existing) return existing;

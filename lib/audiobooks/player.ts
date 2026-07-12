@@ -20,6 +20,7 @@
 import { Audio, AVPlaybackStatus, AVPlaybackStatusSuccess, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import { AudioFocus } from '../audioFocus';
 import { ListenAnalytics } from './analytics';
+import { getBundledSource } from './bundledAudio';
 import { DownloadManager } from './downloads';
 import { ListenProgress } from './progress';
 import { ListenStats } from './stats';
@@ -165,11 +166,13 @@ class AudiobookPlayerService {
     });
 
     try {
-      // Prefer the downloaded file — instant start and works offline.
-      const localUri = await DownloadManager.getLocalUri(chapter.id);
-      const uri = localUri ?? chapter.audioUrl;
+      // Source priority: bundled asset (ships in the APK) → downloaded file →
+      // stream URL. Bundled/downloaded work fully offline.
+      const bundled = getBundledSource(chapter.id);
+      const localUri = bundled === null ? await DownloadManager.getLocalUri(chapter.id) : null;
+      const source = bundled !== null ? bundled : { uri: localUri ?? chapter.audioUrl };
       const { sound } = await Audio.Sound.createAsync(
-        { uri },
+        source,
         {
           shouldPlay: autoPlay,
           positionMillis: positionMs,
