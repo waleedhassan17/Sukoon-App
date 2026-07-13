@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-07-12",
+  "updatedAt": "2026-07-13",
   "books": [
     {
       "id": "pickthall-meaning-glorious-koran",
@@ -166,14 +166,183 @@
       "license": "public_domain",
       "narrationType": "ai",
       "isKids": false,
-      "totalDurationSec": 0,
-      "status": "pending",
+      "totalDurationSec": 13550,
+      "status": "ready",
       "textSourceUrl": "https://archive.org/details/the-sayings-of-muhammad_202401",
-      "ttsVoice": "af_heart",
+      "ttsVoice": "en-US-AriaNeural",
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": [],
+      "chapters": [
+        {
+          "id": "sayings-of-muhammad_0",
+          "bookId": "sayings-of-muhammad",
+          "index": 0,
+          "title": "Part 1",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/000.mp3",
+          "durationSec": 1076,
+          "fileSizeBytes": 8609376,
+          "status": "ready",
+          "ttsModel": null,
+          "generatedAt": "2026-07-13T05:07:12.681070+00:00"
+        },
+        {
+          "id": "sayings-of-muhammad_1",
+          "bookId": "sayings-of-muhammad",
+          "index": 1,
+          "title": "Part 2",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/001.mp3",
+          "durationSec": 880,
+          "fileSizeBytes": 7038267,
+          "status": "ready",
+          "ttsModel": null,
+          "generatedAt": "2026-07-13T05:07:12.681096+00:00"
+        },
+        {
+          "id": "sayings-of-muhammad_2",
+          "bookId": "sayings-of-muhammad",
+          "index": 2,
+          "title": "Part 3",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/002.mp3",
+          "durationSec": 920,
+          "fileSizeBytes": 7363439,
+          "status": "ready",
+          "ttsModel": null,
+          "generatedAt": "2026-07-13T05:07:12.681105+00:00"
+        },
+        {
+          "id": "sayings-of-muhammad_3",
+          "bookId": "sayings-of-muhammad",
+          "index": 3,
+          "title": "Part 4",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/003.mp3",
+          "durationSec": 930,
+          "fileSizeBytes": 7437836,
+          "status": "ready",
+          "ttsModel": null,
+          "generatedAt": "2026-07-13T05:07:12.681111+00:00"
+        },
+        {
+          "id": "sayings-of-muhammad_4",
+          "bookId": "sayings-of-muhammad",
+          "index": 4,
+          "title": "Part 5",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/004.mp3",
+          "durationSec": 906,
+          "fileSizeBytes": 7251844,
+          "status": "ready",
+          "ttsModel": null,
+          "generatedAt": "2026-07-13T05:07:12.681116+00:00"
+        },
+        {
+          "id": "sayings-of-muhammad_5",
+          "bookId": "sayings-of-muhammad",
+          "index": 5,
+          "title": "Part 6",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/005.mp3",
+          "durationSec": 1017,
+          "fileSizeBytes": 8134365,
+          "status": "ready",
+          "ttsModel": null,
+          "generatedAt": "2026-07-13T05:07:12.681122+00:00"
+        },
+        {
+          "id": "sayings-of-muhammad_6",
+          "bookId": "sayings-of-muhammad",
+          "index": 6,
+          "title": "Part 7",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/006.mp3",
+          "durationSec": 979,
+          "fileSizeBytes": 7828837,
+          "status": "ready",
+          "ttsModel": null,
+          "generatedAt": "2026-07-13T05:07:12.681127+00:00"
+        },
+        {
+          "id": "sayings-of-muhammad_7",
+          "bookId": "sayings-of-muhammad",
+          "index": 7,
+          "title": "Part 8",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/007.mp3",
+          "durationSec": 988,
+          "fileSizeBytes": 7902607,
+          "status": "ready",
+          "ttsModel": null,
+          "generatedAt": "2026-07-13T05:07:12.681132+00:00"
+        },
+        {
+          "id": "sayings-of-muhammad_8",
+          "bookId": "sayings-of-muhammad",
+          "index": 8,
+          "title": "Part 9",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/008.mp3",
+          "durationSec": 988,
+          "fileSizeBytes": 7901771,
+          "status": "ready",
+          "ttsModel": null,
+          "generatedAt": "2026-07-13T05:07:12.681137+00:00"
+        },
+        {
+          "id": "sayings-of-muhammad_9",
+          "bookId": "sayings-of-muhammad",
+          "index": 9,
+          "title": "Part 10",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/009.mp3",
+          "durationSec": 1021,
+          "fileSizeBytes": 8169683,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-13T05:07:12.681142+00:00"
+        },
+        {
+          "id": "sayings-of-muhammad_10",
+          "bookId": "sayings-of-muhammad",
+          "index": 10,
+          "title": "Part 11",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/010.mp3",
+          "durationSec": 997,
+          "fileSizeBytes": 7977004,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-13T05:07:12.681147+00:00"
+        },
+        {
+          "id": "sayings-of-muhammad_11",
+          "bookId": "sayings-of-muhammad",
+          "index": 11,
+          "title": "Part 12",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/011.mp3",
+          "durationSec": 1023,
+          "fileSizeBytes": 8180341,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-13T05:07:12.681152+00:00"
+        },
+        {
+          "id": "sayings-of-muhammad_12",
+          "bookId": "sayings-of-muhammad",
+          "index": 12,
+          "title": "Part 13",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/012.mp3",
+          "durationSec": 909,
+          "fileSizeBytes": 7269190,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-13T05:07:12.681157+00:00"
+        },
+        {
+          "id": "sayings-of-muhammad_13",
+          "bookId": "sayings-of-muhammad",
+          "index": 13,
+          "title": "Part 14",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/sayings-of-muhammad/013.mp3",
+          "durationSec": 916,
+          "fileSizeBytes": 7326032,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-13T05:07:12.681162+00:00"
+        }
+      ],
       "coverUrl": "https://archive.org/services/img/the-sayings-of-muhammad_202401"
     },
     {
@@ -188,15 +357,172 @@
       "license": "public_domain",
       "narrationType": "ai",
       "isKids": false,
-      "totalDurationSec": 0,
-      "status": "pending",
+      "totalDurationSec": 12154,
+      "status": "ready",
       "featured": true,
       "textSourceUrl": "https://archive.org/details/in.ernet.dli.2015.536237",
-      "ttsVoice": "af_heart",
+      "ttsVoice": "en-US-AriaNeural",
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": [],
+      "chapters": [
+        {
+          "id": "alchemy-of-happiness_0",
+          "bookId": "alchemy-of-happiness",
+          "index": 0,
+          "title": "II. The Knowledge op God ,",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/alchemy-of-happiness/000.mp3",
+          "durationSec": 115,
+          "fileSizeBytes": 921435,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T18:42:39.006692+00:00"
+        },
+        {
+          "id": "alchemy-of-happiness_1",
+          "bookId": "alchemy-of-happiness",
+          "index": 1,
+          "title": "L. Cranmbr-Byng",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/alchemy-of-happiness/001.mp3",
+          "durationSec": 1054,
+          "fileSizeBytes": 8429026,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T18:42:39.006707+00:00"
+        },
+        {
+          "id": "alchemy-of-happiness_2",
+          "bookId": "alchemy-of-happiness",
+          "index": 2,
+          "title": "Chapter I",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/alchemy-of-happiness/002.mp3",
+          "durationSec": 1287,
+          "fileSizeBytes": 10297722,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T18:42:39.006711+00:00"
+        },
+        {
+          "id": "alchemy-of-happiness_3",
+          "bookId": "alchemy-of-happiness",
+          "index": 3,
+          "title": "Chapter Ii",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/alchemy-of-happiness/003.mp3",
+          "durationSec": 1322,
+          "fileSizeBytes": 10573157,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T18:42:39.006714+00:00"
+        },
+        {
+          "id": "alchemy-of-happiness_4",
+          "bookId": "alchemy-of-happiness",
+          "index": 4,
+          "title": "Chapter Iii",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/alchemy-of-happiness/004.mp3",
+          "durationSec": 795,
+          "fileSizeBytes": 6359501,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T18:42:39.006729+00:00"
+        },
+        {
+          "id": "alchemy-of-happiness_5",
+          "bookId": "alchemy-of-happiness",
+          "index": 5,
+          "title": "Chapter Iv",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/alchemy-of-happiness/005.mp3",
+          "durationSec": 1433,
+          "fileSizeBytes": 11461529,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T18:42:39.006731+00:00"
+        },
+        {
+          "id": "alchemy-of-happiness_6",
+          "bookId": "alchemy-of-happiness",
+          "index": 6,
+          "title": "Chapter V — Part 1",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/alchemy-of-happiness/006.mp3",
+          "durationSec": 946,
+          "fileSizeBytes": 7569284,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T18:42:39.006734+00:00"
+        },
+        {
+          "id": "alchemy-of-happiness_7",
+          "bookId": "alchemy-of-happiness",
+          "index": 7,
+          "title": "Chapter V — Part 2",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/alchemy-of-happiness/007.mp3",
+          "durationSec": 973,
+          "fileSizeBytes": 7782444,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T18:42:39.006736+00:00"
+        },
+        {
+          "id": "alchemy-of-happiness_8",
+          "bookId": "alchemy-of-happiness",
+          "index": 8,
+          "title": "Chapter V — Part 3",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/alchemy-of-happiness/008.mp3",
+          "durationSec": 560,
+          "fileSizeBytes": 4476804,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T18:42:39.006739+00:00"
+        },
+        {
+          "id": "alchemy-of-happiness_9",
+          "bookId": "alchemy-of-happiness",
+          "index": 9,
+          "title": "Chapter Vii — Part 1",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/alchemy-of-happiness/009.mp3",
+          "durationSec": 974,
+          "fileSizeBytes": 7791221,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T18:42:39.006741+00:00"
+        },
+        {
+          "id": "alchemy-of-happiness_10",
+          "bookId": "alchemy-of-happiness",
+          "index": 10,
+          "title": "Chapter Vii — Part 2",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/alchemy-of-happiness/010.mp3",
+          "durationSec": 964,
+          "fileSizeBytes": 7711599,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T18:42:39.006743+00:00"
+        },
+        {
+          "id": "alchemy-of-happiness_11",
+          "bookId": "alchemy-of-happiness",
+          "index": 11,
+          "title": "Chapter Vii — Part 3",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/alchemy-of-happiness/011.mp3",
+          "durationSec": 966,
+          "fileSizeBytes": 7724765,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T18:42:39.006746+00:00"
+        },
+        {
+          "id": "alchemy-of-happiness_12",
+          "bookId": "alchemy-of-happiness",
+          "index": 12,
+          "title": "Chapter Vii — Part 4",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/alchemy-of-happiness/012.mp3",
+          "durationSec": 765,
+          "fileSizeBytes": 6122728,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T18:42:39.006748+00:00"
+        }
+      ],
       "coverUrl": "https://archive.org/services/img/in.ernet.dli.2015.536237"
     },
     {
@@ -229,7 +555,7 @@
           "fileSizeBytes": 1124354,
           "status": "ready",
           "ttsModel": null,
-          "generatedAt": "2026-07-12T17:45:54.995976+00:00"
+          "generatedAt": "2026-07-13T05:06:59.137868+00:00"
         },
         {
           "id": "deliverance-from-error_1",
@@ -241,7 +567,7 @@
           "fileSizeBytes": 1106381,
           "status": "ready",
           "ttsModel": null,
-          "generatedAt": "2026-07-12T17:45:54.995994+00:00"
+          "generatedAt": "2026-07-13T05:06:59.137892+00:00"
         },
         {
           "id": "deliverance-from-error_2",
@@ -253,7 +579,7 @@
           "fileSizeBytes": 1248070,
           "status": "ready",
           "ttsModel": null,
-          "generatedAt": "2026-07-12T17:45:54.995998+00:00"
+          "generatedAt": "2026-07-13T05:06:59.137900+00:00"
         },
         {
           "id": "deliverance-from-error_3",
@@ -265,7 +591,7 @@
           "fileSizeBytes": 6857082,
           "status": "ready",
           "ttsModel": null,
-          "generatedAt": "2026-07-12T17:45:54.996001+00:00"
+          "generatedAt": "2026-07-13T05:06:59.137905+00:00"
         },
         {
           "id": "deliverance-from-error_4",
@@ -277,7 +603,7 @@
           "fileSizeBytes": 6257728,
           "status": "ready",
           "ttsModel": null,
-          "generatedAt": "2026-07-12T17:45:54.996004+00:00"
+          "generatedAt": "2026-07-13T05:06:59.137911+00:00"
         },
         {
           "id": "deliverance-from-error_5",
@@ -289,7 +615,7 @@
           "fileSizeBytes": 6763877,
           "status": "ready",
           "ttsModel": null,
-          "generatedAt": "2026-07-12T17:45:54.996007+00:00"
+          "generatedAt": "2026-07-13T05:06:59.137917+00:00"
         },
         {
           "id": "deliverance-from-error_6",
@@ -301,7 +627,7 @@
           "fileSizeBytes": 6147178,
           "status": "ready",
           "ttsModel": null,
-          "generatedAt": "2026-07-12T17:45:54.996010+00:00"
+          "generatedAt": "2026-07-13T05:06:59.137922+00:00"
         },
         {
           "id": "deliverance-from-error_7",
@@ -313,7 +639,7 @@
           "fileSizeBytes": 6682584,
           "status": "ready",
           "ttsModel": null,
-          "generatedAt": "2026-07-12T17:45:54.996012+00:00"
+          "generatedAt": "2026-07-13T05:06:59.137927+00:00"
         },
         {
           "id": "deliverance-from-error_8",
@@ -325,7 +651,7 @@
           "fileSizeBytes": 7101170,
           "status": "ready",
           "ttsModel": null,
-          "generatedAt": "2026-07-12T17:45:54.996014+00:00"
+          "generatedAt": "2026-07-13T05:06:59.137932+00:00"
         },
         {
           "id": "deliverance-from-error_9",
@@ -337,7 +663,7 @@
           "fileSizeBytes": 1000638,
           "status": "ready",
           "ttsModel": null,
-          "generatedAt": "2026-07-12T17:45:54.996017+00:00"
+          "generatedAt": "2026-07-13T05:06:59.137937+00:00"
         },
         {
           "id": "deliverance-from-error_10",
@@ -349,7 +675,7 @@
           "fileSizeBytes": 1869575,
           "status": "ready",
           "ttsModel": null,
-          "generatedAt": "2026-07-12T17:45:54.996019+00:00"
+          "generatedAt": "2026-07-13T05:06:59.137942+00:00"
         }
       ],
       "coverUrl": "https://www.gutenberg.org/cache/epub/58977/pg58977.cover.medium.jpg"
@@ -498,14 +824,291 @@
       "license": "public_domain",
       "narrationType": "ai",
       "isKids": false,
-      "totalDurationSec": 0,
-      "status": "pending",
+      "totalDurationSec": 18079,
+      "status": "ready",
       "textSourceUrl": "https://archive.org/details/cu31924028974479",
-      "ttsVoice": "bm_george",
+      "ttsVoice": "en-GB-RyanNeural",
       "chapterSource": {
         "kind": "static"
       },
-      "chapters": [],
+      "chapters": [
+        {
+          "id": "hayy-ibn-yaqzan_0",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 0,
+          "title": "Part 1",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/000.mp3",
+          "durationSec": 927,
+          "fileSizeBytes": 7418819,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.523948+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_1",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 1,
+          "title": "Part 2",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/001.mp3",
+          "durationSec": 815,
+          "fileSizeBytes": 6517699,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.523978+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_2",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 2,
+          "title": "Part 3",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/002.mp3",
+          "durationSec": 818,
+          "fileSizeBytes": 6545284,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.523987+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_3",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 3,
+          "title": "Part 4",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/003.mp3",
+          "durationSec": 804,
+          "fileSizeBytes": 6430764,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.523993+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_4",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 4,
+          "title": "Part 5",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/004.mp3",
+          "durationSec": 774,
+          "fileSizeBytes": 6194199,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.523999+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_5",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 5,
+          "title": "Part 6",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/005.mp3",
+          "durationSec": 779,
+          "fileSizeBytes": 6234114,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524009+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_6",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 6,
+          "title": "Part 7",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/006.mp3",
+          "durationSec": 823,
+          "fileSizeBytes": 6584573,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524019+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_7",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 7,
+          "title": "Part 8",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/007.mp3",
+          "durationSec": 764,
+          "fileSizeBytes": 6115413,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524027+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_8",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 8,
+          "title": "Part 9",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/008.mp3",
+          "durationSec": 834,
+          "fileSizeBytes": 6669209,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524035+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_9",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 9,
+          "title": "Part 10",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/009.mp3",
+          "durationSec": 813,
+          "fileSizeBytes": 6505578,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524044+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_10",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 10,
+          "title": "Part 11",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/010.mp3",
+          "durationSec": 820,
+          "fileSizeBytes": 6558032,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524052+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_11",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 11,
+          "title": "Part 12",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/011.mp3",
+          "durationSec": 777,
+          "fileSizeBytes": 6214679,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524061+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_12",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 12,
+          "title": "Part 13",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/012.mp3",
+          "durationSec": 803,
+          "fileSizeBytes": 6425121,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524071+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_13",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 13,
+          "title": "Part 14",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/013.mp3",
+          "durationSec": 770,
+          "fileSizeBytes": 6163897,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524080+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_14",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 14,
+          "title": "Part 15",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/014.mp3",
+          "durationSec": 833,
+          "fileSizeBytes": 6660850,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524088+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_15",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 15,
+          "title": "Part 16",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/015.mp3",
+          "durationSec": 770,
+          "fileSizeBytes": 6162852,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524097+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_16",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 16,
+          "title": "Part 17",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/016.mp3",
+          "durationSec": 834,
+          "fileSizeBytes": 6669836,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524106+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_17",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 17,
+          "title": "Part 18",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/017.mp3",
+          "durationSec": 836,
+          "fileSizeBytes": 6687390,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524111+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_18",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 18,
+          "title": "Part 19",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/018.mp3",
+          "durationSec": 867,
+          "fileSizeBytes": 6938793,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524117+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_19",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 19,
+          "title": "Part 20",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/019.mp3",
+          "durationSec": 819,
+          "fileSizeBytes": 6550718,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524122+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_20",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 20,
+          "title": "Part 21",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/020.mp3",
+          "durationSec": 759,
+          "fileSizeBytes": 6071319,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524139+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_21",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 21,
+          "title": "Part 22",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/021.mp3",
+          "durationSec": 707,
+          "fileSizeBytes": 5658166,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524145+00:00"
+        },
+        {
+          "id": "hayy-ibn-yaqzan_22",
+          "bookId": "hayy-ibn-yaqzan",
+          "index": 22,
+          "title": "Part 23",
+          "audioUrl": "https://pub-b2ca47bc689e4dc08a50f693cf126602.r2.dev/audiobooks/hayy-ibn-yaqzan/022.mp3",
+          "durationSec": 333,
+          "fileSizeBytes": 2660981,
+          "status": "ready",
+          "ttsModel": "edge-tts",
+          "generatedAt": "2026-07-12T19:48:52.524150+00:00"
+        }
+      ],
       "coverUrl": "https://archive.org/services/img/cu31924028974479"
     },
     {
