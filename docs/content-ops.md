@@ -96,7 +96,10 @@ age-appropriateness for kids) and changes the line to `STATUS: APPROVED`.
 - [ ] Translation date checked — a public-domain *original* can have a
       **copyrighted modern translation** (e.g. Gibb's Ibn Battuta). Use only
       pre-1930 translations unless licensed. This is why "Maxims of Ali" is not
-      in the launch catalog: no verified PD translation was found.
+      in the launch catalog: no verified PD translation was found. Same for
+      "Riyad us-Saliheen selections" (catalog entry stays `pending`): the open
+      hadith-api does not carry it and English translations are modern —
+      needs a licensed/PD source before generation.
 - [ ] Never rip content from Chaptrs, Audible, YouTube or any commercial app.
 - [ ] Never TTS-convert a copyrighted book or translation.
 - [ ] Podcast items: attribution string set; stream-from-origin; not downloadable.
