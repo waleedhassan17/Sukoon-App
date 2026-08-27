@@ -1,0 +1,19 @@
+{
+  "name": "sukoon-rules-tests",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Security-rules test suite. On the Spark plan these rules are the only thing standing between a malicious client and forged streak data, so this suite is the primary security gate.",
+  "scripts": {
+    "test": "jest --runInBand"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": ["<rootDir>/*.test.js"],
+    "testTimeout": 20000
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^11.0.0",
+    "jest": "^29.7.0"
+  }
+}

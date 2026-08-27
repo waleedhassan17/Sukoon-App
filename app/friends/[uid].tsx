@@ -22,9 +22,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { t, useLocale } from '@/lib/i18n';
-import { getFirestore, getAuth } from '@/lib/firebaseConfig';
-import { UserProfileService, PublicUserProfile } from '@/lib/userProfileService';
-import { FirebaseFunctions } from '@/lib/firebaseFunctions';
+import { PublicUserProfile } from '@/lib/userProfileService';
+import { FriendsService, FriendDetail } from '@/lib/friendsService';
+import { InviteService } from '@/lib/inviteService';
+import { toFriendsError } from '@/lib/salah/errors';
 
 interface Detail {
   partner: PublicUserProfile;
@@ -35,25 +36,8 @@ interface Detail {
   selfDays: Record<string, number>;
   partnerDays: Record<string, number>;
   todayKeys: string[]; // last 14 date keys (oldest → newest)
-}
-
-function pairIdOf(a: string, b: string): string {
-  return a < b ? `${a}_${b}` : `${b}_${a}`;
-}
-
-function lastNDays(n: number): string[] {
-  const out: string[] = [];
-  const d = new Date();
-  for (let i = n - 1; i >= 0; i--) {
-    const x = new Date(d);
-    x.setDate(d.getDate() - i);
-    out.push([
-      x.getFullYear(),
-      String(x.getMonth() + 1).padStart(2, '0'),
-      String(x.getDate()).padStart(2, '0'),
-    ].join('-'));
-  }
-  return out;
+  /** Some day reads failed; the calendar below is incomplete. */
+  partial: boolean;
 }
 
 export default function FriendDetailScreen() {
@@ -68,49 +52,29 @@ export default function FriendDetailScreen() {
   const [busy, setBusy] = useState<'load' | 'remove' | 'block' | null>('load');
   const [error, setError] = useState<string | null>(null);
 
+  // The 28 day-document reads now live in FriendsService.getFriendDetail(), which
+  // settles them individually. They used to run under a bare Promise.all here, so
+  // one denied partner read rejected the batch and blanked the whole screen.
   const load = useCallback(async () => {
     setBusy('load');
     setError(null);
     try {
-      const auth = await getAuth();
-      const db = await getFirestore();
-      const selfUid = auth?.currentUser?.uid;
-      if (!selfUid || !db) throw new Error(t('common.signedOut'));
-
-      const pid = pairIdOf(selfUid, partnerUid);
-      const todayKeys = lastNDays(14);
-
-      const [partner, friendshipSnap, selfDocs, partnerDocs] = await Promise.all([
-        UserProfileService.readPublicProfile(partnerUid),
-        db.collection('friendships').doc(pid).get(),
-        Promise.all(todayKeys.map(k =>
-          db.collection('prayers').doc(selfUid).collection('days').doc(k).get())),
-        Promise.all(todayKeys.map(k =>
-          db.collection('prayers').doc(partnerUid).collection('days').doc(k).get())),
-      ]);
-
-      if (!partner) throw new Error(t('common.error'));
-
-      const friendship = friendshipSnap.exists ? friendshipSnap.data() ?? {} : {};
-      const selfDays: Record<string, number> = {};
-      const partnerDays: Record<string, number> = {};
-      todayKeys.forEach((k, i) => {
-        selfDays[k] = Number(selfDocs[i].get('prayerCount') ?? 0);
-        partnerDays[k] = Number(partnerDocs[i].get('prayerCount') ?? 0);
-      });
+      const d: FriendDetail | null = await FriendsService.getFriendDetail(partnerUid);
+      if (!d) throw new Error(t('common.error'));
 
       setDetail({
-        partner,
-        currentStreak: Number(friendship.currentStreak ?? 0),
-        longestStreak: Number(friendship.longestStreak ?? 0),
-        acceptedAt: friendship.acceptedAt?.toMillis ? friendship.acceptedAt.toMillis() : null,
-        milestones: Array.isArray(friendship.milestonesAchieved) ? friendship.milestonesAchieved : [],
-        selfDays,
-        partnerDays,
-        todayKeys,
+        todayKeys: d.dateKeys,
+        partner: d.partner,
+        currentStreak: d.currentStreak,
+        longestStreak: d.longestStreak,
+        acceptedAt: d.acceptedAt,
+        milestones: d.milestonesAchieved,
+        selfDays: d.selfDays,
+        partnerDays: d.partnerDays,
+        partial: d.partial,
       });
     } catch (e) {
-      setError((e as Error).message ?? t('common.error'));
+      setError(toFriendsError(e).message);
     } finally {
       setBusy(null);
     }
@@ -130,11 +94,11 @@ export default function FriendDetailScreen() {
           onPress: async () => {
             setBusy('remove');
             try {
-              await FirebaseFunctions.removeFriend(partnerUid);
+              await InviteService.removeFriend(partnerUid);
               router.back();
             } catch (e) {
               setBusy(null);
-              Alert.alert(t('common.error'), (e as Error).message);
+              Alert.alert(t('common.error'), toFriendsError(e).message);
             }
           },
         },
@@ -154,11 +118,11 @@ export default function FriendDetailScreen() {
           onPress: async () => {
             setBusy('block');
             try {
-              await FirebaseFunctions.blockFriend(partnerUid);
+              await InviteService.blockFriend(partnerUid);
               router.back();
             } catch (e) {
               setBusy(null);
-              Alert.alert(t('common.error'), (e as Error).message);
+              Alert.alert(t('common.error'), toFriendsError(e).message);
             }
           },
         },
@@ -249,6 +213,13 @@ export default function FriendDetailScreen() {
 
       <View style={[st.calendar, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}>
         <Text style={[st.sectionTitle, { color: theme.textSecondary }]}>{t('friends.detail.last14')}</Text>
+        {/* Say so when the calendar is incomplete rather than rendering gaps as
+            missed days — a failed read and a skipped prayer look identical here. */}
+        {detail.partial && (
+          <Text style={[st.sectionTitle, { color: theme.textTertiary }]}>
+            {t('friends.detail.partialData')}
+          </Text>
+        )}
         <View style={st.calRow}>
           {detail.todayKeys.map(k => {
             const day = Number(k.split('-')[2]);
@@ -265,7 +236,7 @@ export default function FriendDetailScreen() {
         </View>
         <View style={st.calLegend}>
           <View style={[st.calDot, { backgroundColor: theme.primary }]} />
-          <Text style={[st.calLegendTxt, { color: theme.textSecondary }]}>You</Text>
+          <Text style={[st.calLegendTxt, { color: theme.textSecondary }]}>{t('friends.detail.you')}</Text>
           <View style={[st.calDot, { backgroundColor: theme.gold, marginLeft: 14 }]} />
           <Text style={[st.calLegendTxt, { color: theme.textSecondary }]}>{detail.partner.displayName}</Text>
         </View>

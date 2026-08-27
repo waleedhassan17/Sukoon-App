@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Join Sukoon</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      background-color: #0B1914; /* Sukoon background color */
+      color: #fff;
+      text-align: center;
+      padding: 20px;
+    }
+    .logo {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, #1A4D36 0%, #2D6A4F 100%);
+      border-radius: 20px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .logo-text {
+      font-size: 32px;
+      color: #fff;
+    }
+    h1 {
+      font-size: 24px;
+      margin: 0 0 12px 0;
+      font-weight: 700;
+    }
+    p {
+      color: #A0B2A9;
+      font-size: 16px;
+      margin: 0 0 32px 0;
+      max-width: 300px;
+      line-height: 1.5;
+    }
+    .loader {
+      border: 3px solid rgba(255,255,255,0.1);
+      border-top: 3px solid #EADCA6; /* Sukoon gold */
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 24px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .button {
+      background: #EADCA6;
+      color: #0B1914;
+      border: none;
+      padding: 14px 24px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-block;
+      margin-top: 20px;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+  </style>
+</head>
+<body>
+  <div class="logo">
+    <span class="logo-text">☪</span>
+  </div>
+  <h1>You've been invited!</h1>
+  <p>Opening Sukoon to accept your friend's invite...</p>
+  <div class="loader"></div>
+  <a id="store-link" class="button" href="https://play.google.com/store/apps/details?id=com.sukoon.app">
+    Get Sukoon
+  </a>
+
+  <script>
+    // Get the invite code from the URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+
+    // The deep link to open the app directly
+    const deepLink = code ? 'sukoon://invite?code=' + encodeURIComponent(code) : 'sukoon://invite';
+    const storeLink = 'https://play.google.com/store/apps/details?id=com.sukoon.app';
+
+    // Try to open the app via the custom URL scheme
+    window.location.href = deepLink;
+
+    // Show the store button after a slight delay
+    setTimeout(() => {
+      document.getElementById('store-link').style.opacity = '1';
+    }, 2000);
+
+    // If the app is not installed, the deep link will fail.
+    // We wait 3 seconds, and if the user is still on this page, redirect to the Play Store.
+    setTimeout(() => {
+      // document.hidden checks if the tab is no longer visible (meaning the app opened)
+      if (!document.hidden) {
+        window.location.href = storeLink;
+      }
+    }, 3000);
+  </script>
+</body>
+</html>

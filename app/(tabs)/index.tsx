@@ -339,6 +339,10 @@ export default function HomeScreen() {
     setInterimText(text);
   }, []);
 
+  // Stable identity matters: QuranVoiceModal restarts its mic session whenever
+  // this prop changes, and an inline arrow changes on every Home-screen render.
+  const handleVoiceModalClose = useCallback(() => setVoiceVisible(false), []);
+
   const handleInputFocus = useCallback(() => setInputFocused(true), []);
   const handleInputBlur = useCallback(() => setInputFocused(false), []);
 
@@ -755,7 +759,7 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      <QuranVoiceModal visible={voiceVisible} onClose={() => setVoiceVisible(false)} />
+      <QuranVoiceModal visible={voiceVisible} onClose={handleVoiceModalClose} />
     </View>
   );
 }

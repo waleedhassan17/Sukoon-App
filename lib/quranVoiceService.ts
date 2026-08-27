@@ -27,6 +27,12 @@ const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODE
 
 const MAX_RETRIES = 4; // for HTTP 429 (rate limit) only
 
+/**
+ * Hard ceiling on a single Gemini call. Without it a stalled socket leaves the
+ * voice modal spinning on "Thinking…" indefinitely.
+ */
+const REQUEST_TIMEOUT_MS = 12000;
+
 const SYSTEM_INSTRUCTION = `You convert a transcribed Quran voice command into structured JSON telling the app which ayah to play or open.
 
 Rules:
@@ -62,6 +68,20 @@ function getApiKey(): string | null {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** fetch() with an abort-based timeout. Throws Error('TIMEOUT') when it expires. */
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw new Error('TIMEOUT');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Validate the model output. Throws on anything outside the allowed ranges. */
@@ -109,7 +129,7 @@ export const QuranVoiceService = {
     };
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      const res = await fetch(`${ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
+      const res = await fetchWithTimeout(`${ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

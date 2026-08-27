@@ -5,6 +5,16 @@
  *
  * We keep this in a tiny module so the rest of the client doesn't need to know
  * the SDK shape — it just calls FirebaseFunctions.callX(args) and gets typed results.
+ *
+ * ⚠ DORMANT — nothing calls this module today.
+ *
+ * The Firebase project is on the Spark plan, where Cloud Functions cannot be
+ * deployed, so every callable below would fail with FUNCTIONS_UNAVAILABLE. The
+ * invite and friendship lifecycle lives in ./inviteService.ts instead, writing
+ * directly to Firestore under validation by firestore.rules.
+ *
+ * Kept — along with functions/ — so that a Blaze upgrade is a swap rather than a
+ * rewrite. See "Moving to Blaze" in SALAH_BUDDY.md for the cutover steps.
  */
 
 import { isFirebaseConfigured, hasNativeFirebaseModules } from './firebaseConfig';

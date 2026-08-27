@@ -9,7 +9,12 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/__tests__'],
   testMatch: ['**/*.test.ts'],
+  globals: {
+    // React Native's compile-time flag, referenced by lib/ modules.
+    __DEV__: false,
+  },
   moduleNameMapper: {
+    '^react-native$': '<rootDir>/__tests__/stubs/react-native.ts',
     '^@react-native-async-storage/async-storage$':
       '<rootDir>/node_modules/@react-native-async-storage/async-storage/jest/async-storage-mock',
     '^\\.\\./firebaseConfig$': '<rootDir>/__tests__/stubs/firebaseConfig.ts',

@@ -136,5 +136,22 @@
   "listen.badgeName.first_book_finished": "پہلی کتاب مکمل",
   "listen.badgeName.ten_hours": "10 گھنٹے کی سماعت",
   "listen.badgeName.streak_7": "7 دن کا سلسلہ",
-  "listen.badgeName.streak_30": "30 دن کا سلسلہ"
+  "listen.badgeName.streak_30": "30 دن کا سلسلہ",
+  "friends.errors.permissionDenied": "دوستوں کی فہرست لوڈ نہیں ہو سکی۔ براہ کرم سکون کو تازہ ترین ورژن پر اپ ڈیٹ کریں۔",
+  "friends.errors.offline": "آپ آف لائن ہیں۔ آپ کی نمازیں اس ڈیوائس پر محفوظ ہو رہی ہیں۔",
+  "friends.errors.missingIndex": "ہماری طرف سے کوئی مسئلہ ہے۔ براہ کرم بعد میں دوبارہ کوشش کریں۔",
+  "friends.errors.unauthenticated": "سائن ان کیا جا رہا ہے — تھوڑا انتظار کریں۔",
+  "friends.errors.notFound": "یہ دوست اب دستیاب نہیں ہے۔",
+  "friends.detail.partialData": "کچھ دن لوڈ نہیں ہو سکے۔",
+  "friends.detail.you": "آپ",
+  "invites.errorCreate": "دعوت لنک نہیں بن سکا۔ دوبارہ کوشش کریں۔",
+  "invites.shareCta": "دعوت لنک شیئر کریں",
+  "invites.setNameTitle": "پہلے اپنا نام لکھیں",
+  "invites.setNameBody": "آپ کا نام وہی ہے جو آپ کا دوست دعوت اور اپنی فہرست میں دیکھے گا۔",
+  "invites.setNameWarning": "اپنا نام لکھیں تاکہ دوستوں کو بے ترتیب نام نہ دکھائی دیں۔",
+  "accept.setNameTitle": "اپنا نام لکھیں",
+  "accept.setNameBody": "آپ کا دوست یہ اپنی فہرست میں دیکھے گا۔",
+  "accept.namePlaceholder": "آپ کا نام",
+  "accept.continueCta": "جاری رکھیں",
+  "accept.savingCta": "محفوظ ہو رہا ہے…"
 }

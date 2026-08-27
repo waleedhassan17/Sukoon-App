@@ -4,16 +4,13 @@
  * Modes:
  *   🎤 Mic   (input empty, idle)       → Start voice recording
  *   ❌ Clear (input has text, idle)     → Clear input instantly
- *   ⏹ Stop  (listening/processing)     → Stop and finalize
+ *   ⏹ Stop  (listening)                → Stop and finalize
+ *   ⋯ Busy  (processing)               → Finalizing; tap to cancel
  *
- * Features:
- *   - Live interim transcript forwarding via onInterimText
- *   - Stale-closure-proof via refs (every callback + state)
- *   - Smooth animated icon swap (scale-down → spring-up)
- *   - Haptic feedback on every action
- *   - Single-tap guarantee — no double-tap issues
- *   - Recording + processing both keep recording UI alive
- *   - Debounced press to prevent accidental double-tap
+ * State rule: this component NEVER invents a status. Every transition comes
+ * from a speech-service callback, plus one local watchdog as a last resort.
+ * Optimistically setting "processing" before the service replies is exactly
+ * what used to wedge the UI when the service had already finished.
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -40,6 +37,13 @@ import {
 // ──────────────────────────────────────────────
 
 type IconMode = 'mic' | 'clear' | 'stop' | 'processing';
+
+/**
+ * Absolute cap on how long the button may show a busy state. The service has
+ * its own watchdog; this is the belt-and-braces layer so a dropped callback
+ * can never strand the parent screen with a disabled submit button.
+ */
+const UI_WATCHDOG_MS = 35000;
 
 export interface VoiceInputButtonProps {
   /** Current text in the input — determines mic vs clear icon */
@@ -85,7 +89,6 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
 }) => {
   const { theme } = useTheme();
   const [status, setStatus] = useState<SpeechRecognitionStatus>('idle');
-  const [permissionGranted, setPermissionGranted] = useState(false);
 
   // Animation
   const iconScale = useRef(new Animated.Value(1)).current;
@@ -96,17 +99,55 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
   const onTextAppendedRef = useRef(onTextAppended);
   const onInterimTextRef = useRef(onInterimText);
   const onErrorRef = useRef(onError);
+  const onRecordingChangeRef = useRef(onRecordingChange);
+  const onStatusChangeRef = useRef(onStatusChange);
   const statusRef = useRef(status);
-  const pressLockRef = useRef(false); // Debounce rapid taps
+  const mountedRef = useRef(true);
+  const pressLockRef = useRef(false);          // Debounce rapid taps
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { searchTextRef.current = searchText; }, [searchText]);
   useEffect(() => { onTextAppendedRef.current = onTextAppended; }, [onTextAppended]);
   useEffect(() => { onInterimTextRef.current = onInterimText; }, [onInterimText]);
   useEffect(() => { onErrorRef.current = onError; }, [onError]);
+  useEffect(() => { onRecordingChangeRef.current = onRecordingChange; }, [onRecordingChange]);
+  useEffect(() => { onStatusChangeRef.current = onStatusChange; }, [onStatusChange]);
   useEffect(() => { statusRef.current = status; }, [status]);
 
   const resolvedIconColor = iconColor || theme.textTertiary;
   const resolvedActiveColor = activeColor || theme.accent;
+
+  // ── Single place that changes status, so parents stay in sync ──
+  const applyStatus = useCallback((next: SpeechRecognitionStatus) => {
+    if (!mountedRef.current) return;
+    if (statusRef.current === next) return;
+    statusRef.current = next;
+    setStatus(next);
+
+    const recording = next === 'listening' || next === 'processing';
+    onRecordingChangeRef.current?.(recording);
+    onStatusChangeRef.current?.(next);
+
+    // Arm/disarm the anti-stuck watchdog alongside the busy state.
+    if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
+    if (recording) {
+      watchdogRef.current = setTimeout(() => {
+        if (!mountedRef.current) return;
+        speechRecognitionService.cancelListening().catch(() => {});
+        applyStatus('idle');
+      }, UI_WATCHDOG_MS);
+    }
+  }, []);
+
+  /** Return to idle after a short beat so success/error reads as deliberate. */
+  const scheduleIdle = useCallback((delay: number) => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = setTimeout(() => {
+      idleTimerRef.current = null;
+      applyStatus('idle');
+    }, delay);
+  }, [applyStatus]);
 
   // ── Icon mode derivation ──
   const iconMode: IconMode = (() => {
@@ -134,65 +175,15 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
     }
   }, [iconMode]);
 
-  // ── Permission on mount + cleanup ──
+  // ── Mount / unmount ──
   useEffect(() => {
-    speechRecognitionService.checkPermission().then(setPermissionGranted).catch(() => {});
+    mountedRef.current = true;
     return () => {
-      if (statusRef.current === 'listening' || statusRef.current === 'processing') {
-        speechRecognitionService.cancelListening().catch(() => {});
-      }
+      mountedRef.current = false;
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (watchdogRef.current) clearTimeout(watchdogRef.current);
+      speechRecognitionService.cancelListening().catch(() => {});
     };
-  }, []);
-
-  // ── Notify parent: recording = listening OR processing ──
-  useEffect(() => {
-    onRecordingChange?.(status === 'listening' || status === 'processing');
-  }, [status, onRecordingChange]);
-
-  // ── Notify parent: status ──
-  useEffect(() => {
-    onStatusChange?.(status);
-  }, [status, onStatusChange]);
-
-  // ── Speech result handler (stable — uses refs) ──
-  const handleSpeechResult = useCallback((result: SpeechRecognitionResult) => {
-    setStatus(result.status);
-
-    if (result.status === 'unavailable') {
-      onErrorRef.current?.(result.error || 'Voice input not available.');
-      setTimeout(() => setStatus('idle'), 200);
-      return;
-    }
-
-    // Interim text — forward for live preview
-    if (result.status === 'listening' && !result.isFinal && result.text) {
-      onInterimTextRef.current?.(result.text);
-    }
-
-    // Processing — forward interim text if available
-    if (result.status === 'processing' && result.text) {
-      onInterimTextRef.current?.(result.text);
-    }
-
-    // Final success
-    if (result.status === 'success' && result.isFinal) {
-      if (result.text.trim()) {
-        const current = searchTextRef.current.trim();
-        const appended = current ? `${current} ${result.text.trim()}` : result.text.trim();
-        onTextAppendedRef.current(appended);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      }
-      // Brief delay before hiding recording UI so the success feels deliberate
-      setTimeout(() => setStatus('idle'), 250);
-      return;
-    }
-
-    // Error
-    if (result.status === 'error') {
-      onErrorRef.current?.(result.error || 'Speech recognition failed');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-      setTimeout(() => setStatus('idle'), 250);
-    }
   }, []);
 
   // ── Permission denied dialog ──
@@ -207,63 +198,110 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
     );
   }, []);
 
-  // ── Start recording ──
-  const startRecording = useCallback(async () => {
-    try {
-      let hasPermission = permissionGranted;
-      if (!hasPermission) {
-        try {
-          hasPermission = await speechRecognitionService.requestPermission();
-        } catch (e: unknown) {
-          const err = e as { message?: string };
-          if (err?.message === 'PERMISSION_DENIED_PERMANENTLY') { openAppSettings(); return; }
-          hasPermission = false;
+  // ── Speech result handler (stable — uses refs) ──
+  const handleSpeechResult = useCallback((result: SpeechRecognitionResult) => {
+    if (!mountedRef.current) return;
+
+    switch (result.status) {
+      // ── Live transcription ──
+      case 'listening':
+        applyStatus('listening');
+        if (result.text) onInterimTextRef.current?.(result.text);
+        return;
+
+      case 'processing':
+        applyStatus('processing');
+        if (result.text) onInterimTextRef.current?.(result.text);
+        return;
+
+      // ── Terminal: got the text ──
+      case 'success': {
+        const spoken = result.text.trim();
+        if (spoken) {
+          const current = searchTextRef.current.trim();
+          onTextAppendedRef.current(current ? `${current} ${spoken}` : spoken);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         }
-      }
-      if (!hasPermission) {
-        onErrorRef.current?.('Microphone permission required for voice input.');
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+        scheduleIdle(250);
         return;
       }
-      setPermissionGranted(true);
-      setStatus('listening');
+
+      // ── Terminal: failed ──
+      case 'error':
+        if (result.errorCode === 'permission-blocked') {
+          openAppSettings();
+        } else {
+          onErrorRef.current?.(result.error || 'Speech recognition failed');
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+        }
+        scheduleIdle(200);
+        return;
+
+      case 'unavailable':
+        onErrorRef.current?.(result.error || 'Voice input not available.');
+        scheduleIdle(200);
+        return;
+
+      // ── Terminal: nothing was running ──
+      case 'idle':
+        applyStatus('idle');
+        return;
+    }
+  }, [applyStatus, scheduleIdle, openAppSettings]);
+
+  // ── Start recording ──
+  // Permission, availability and cooldown are all handled inside the service,
+  // which always answers through handleSpeechResult — including on failure.
+  const startRecording = useCallback(async () => {
+    if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+    onInterimTextRef.current?.('');
+    applyStatus('listening');
+    try {
       await speechRecognitionService.startListening(handleSpeechResult);
     } catch (err) {
-      setStatus('idle');
+      applyStatus('idle');
       onErrorRef.current?.(err instanceof Error ? err.message : 'Failed to start recording');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
     }
-  }, [permissionGranted, handleSpeechResult, openAppSettings]);
+  }, [applyStatus, handleSpeechResult]);
 
   // ── Stop recording ──
   const stopRecording = useCallback(async () => {
     try {
-      setStatus('processing');
+      // No optimistic 'processing' here — the service emits it, and it also
+      // replies with 'idle' when there is nothing left to stop.
       await speechRecognitionService.stopListening(handleSpeechResult);
     } catch (err) {
-      setStatus('idle');
+      applyStatus('idle');
       onErrorRef.current?.(err instanceof Error ? err.message : 'Recording error');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
     }
-  }, [handleSpeechResult]);
+  }, [applyStatus, handleSpeechResult]);
+
+  // ── Cancel outright (tap during processing) ──
+  const cancelRecording = useCallback(async () => {
+    await speechRecognitionService.cancelListening().catch(() => {});
+    onInterimTextRef.current?.('');
+    applyStatus('idle');
+  }, [applyStatus]);
 
   // ── Press handler with debounce lock ──
   const handlePress = useCallback(() => {
     if (disabled || pressLockRef.current) return;
 
-    // Lock for 400ms to prevent accidental double-tap
+    // Lock briefly to prevent accidental double-tap
     pressLockRef.current = true;
-    setTimeout(() => { pressLockRef.current = false; }, 400);
+    setTimeout(() => { pressLockRef.current = false; }, 350);
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 
     switch (iconMode) {
-      case 'mic':       startRecording(); break;
-      case 'clear':     onClear(); break;
-      case 'stop':      stopRecording(); break;
-      case 'processing': stopRecording(); break; // Allow tapping again during processing to force stop
+      case 'mic':        startRecording(); break;
+      case 'clear':      onClear(); break;
+      case 'stop':       stopRecording(); break;
+      case 'processing': cancelRecording(); break; // Tap while finalizing = bail out
     }
-  }, [disabled, iconMode, startRecording, stopRecording, onClear]);
+  }, [disabled, iconMode, startRecording, stopRecording, cancelRecording, onClear]);
 
   // ── Icon ──
   const iconName = (() => {

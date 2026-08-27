@@ -316,6 +316,48 @@ You now have:
 
 ---
 
+## 🔥 Firebase / Salah Buddy
+
+This document covers the **native build system**. The Firebase backend for the Salah
+Buddy streak feature is documented separately in
+[`SALAH_BUDDY.md`](SALAH_BUDDY.md) — read that before touching
+`firestore.rules`, the friends screens, or `lib/salah/`.
+
+The short version:
+
+- The project is on the **Spark** plan, so **Cloud Functions cannot be deployed**.
+  `firestore.rules` carries the security model instead: it re-derives every streak
+  transition from both members' prayer documents and rejects writes that disagree.
+  `functions/` is kept in the repo as a dormant Blaze path.
+- **Deploying is rules + indexes only** — there is nothing else to push:
+  ```bash
+  firebase login
+  npm run deploy:firestore    # indexes first, then rules
+  ```
+- **Local development** runs against the Firebase emulators:
+  ```bash
+  npm run emu                                     # Firestore :8090, Auth :9099
+  EXPO_PUBLIC_USE_FIREBASE_EMULATOR=1 npx expo start --dev-client
+  ```
+  The emulator needs **JDK 21**, while this repo pins **Java 17** for Gradle. Don't
+  change the system default — `npm run emu` scopes `JAVA_HOME` itself via
+  `tools/emulator-env.js`.
+- **Before shipping a rules change**, run the security suite:
+  ```bash
+  npm run test:rules     # 79 tests; boots the emulator itself
+  ```
+- **Migration warning**: the current rules reject `fcmToken` / `fcmTokens` on
+  `users/{uid}` (tokens moved to an owner-only subcollection). Ship the app update
+  *together with* the rules deploy, or older clients will start failing their profile
+  writes.
+
+Expo Go cannot run this feature — `@react-native-firebase` and Branch are native
+modules — so a dev client build is required. The app degrades gracefully there: the
+Salah tracker keeps working from AsyncStorage and the friends surfaces disable
+themselves.
+
+---
+
 ## 🆘 Support
 
 ### Quick Fixes

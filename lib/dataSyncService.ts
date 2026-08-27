@@ -18,7 +18,13 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getFirestore, getAuth, isFirebaseConfigured } from './firebaseConfig';
+import { getFirestore, getAuth, isFirebaseConfigured, authReady } from './firebaseConfig';
+import {
+  LOCAL_PRAYER_KEYS,
+  CANONICAL_PRAYER_KEYS,
+  toCanonicalKey,
+  isLoggedStatus,
+} from './salah/prayerKeys';
 
 // ══════════════════════════════════════════════
 // TYPES
@@ -77,7 +83,18 @@ async function getDeviceId(): Promise<string> {
   }
 }
 
+/**
+ * The signed-in uid.
+ *
+ * Prefers the live auth session over the copy cached in AsyncStorage. A stale
+ * cached uid outlives the session it came from, and every write it produces is
+ * then rejected by the security rules — silently, because all cloud paths in this
+ * file are non-throwing by design. Falls back to the cache only when auth is
+ * unavailable, which keeps offline reads of previously-synced data working.
+ */
 async function getCurrentUserId(): Promise<string | null> {
+  const uid = await authReady();
+  if (uid) return uid;
   try {
     return await AsyncStorage.getItem(SYNC_KEYS.USER_ID);
   } catch {
@@ -280,56 +297,62 @@ export const DataSyncService = {
     }
     // Non-blocking cloud sync (fire-and-forget with retry)
     this._pushSalahToCloudWithRetry(dateKey, dayData);
-    // ALSO mirror into the Salah Buddy schema at prayers/{uid}/days/{date}.
-    // This is what Cloud Functions watch for streak fan-out. Local AsyncStorage
-    // remains the source of truth for the user's own UI; this write is best-effort.
-    this._mirrorToFriendsSchema(dateKey, dayData).catch(() => {});
+    // ALSO mirror into the Salah Buddy schema at prayers/{uid}/days/{date}, then
+    // re-evaluate shared streaks. On the Blaze plan the onPrayerWrite trigger would
+    // do the second half; on Spark it runs here. Both are best-effort — AsyncStorage
+    // remains the source of truth for the user's own UI, so a failure here never
+    // costs the user their prayer log.
+    this._mirrorToFriendsSchema(dateKey, dayData)
+      .then(async () => {
+        const { PairStreakEngine } = await import('./salah/pairStreak');
+        await PairStreakEngine.sync();
+      })
+      .catch(() => {});
   },
 
   /**
-   * Translate the legacy {fajr, zuhr, asr, maghrib, isha: PrayerStatus} shape
-   * into the Salah-Buddy doc shape and write it under prayers/{uid}/days/{date}.
+   * Translate the local tracker's day record into the Salah Buddy document shape
+   * and write it to prayers/{uid}/days/{date}.
    *
-   * Mapping:
-   *   - 'prayed' | 'jamaah' | 'qasr'  → logged: true
-   *   - 'missed' | 'none'             → logged: false
-   *   - the legacy `zuhr` key becomes `dhuhr` (canonical Arabic transliteration)
+   * The local→canonical key mapping (notably zuhr → dhuhr) lives in
+   * ./salah/prayerKeys.ts; it used to exist only as an inline comment here, which
+   * meant every new reader of these documents had to rediscover it.
    *
-   * prayerCount + completedAt are written client-side too as an optimization;
-   * the server's onPrayerWrite trigger will overwrite if anything is off.
+   * prayerCount is computed rather than trusted: firestore.rules recomputes it from
+   * the `logged` flags and rejects any write where the two disagree.
    */
   async _mirrorToFriendsSchema(dateKey: string, dayData: any): Promise<void> {
     if (!isFirebaseConfigured()) return;
     try {
       const db = await getFirestore();
-      const userId = await getCurrentUserId();
+      // Await auth rather than trusting the uid cached in AsyncStorage, which can
+      // outlive the session it came from and produce writes the rules reject.
+      const userId = await authReady();
       if (!db || !userId) return;
 
-      const isLogged = (s: unknown) => s === 'prayed' || s === 'jamaah' || s === 'qasr';
       const now = Date.now();
-      const buildEntry = (statusKey: 'fajr' | 'zuhr' | 'asr' | 'maghrib' | 'isha') => ({
-        logged: isLogged(dayData[statusKey]),
-        loggedAt: isLogged(dayData[statusKey]) ? now : null,
-      });
+      const entries: Record<string, { logged: boolean; loggedAt: number | null }> = {};
+      for (const localKey of LOCAL_PRAYER_KEYS) {
+        const logged = isLoggedStatus(dayData?.[localKey]);
+        entries[toCanonicalKey(localKey)] = { logged, loggedAt: logged ? now : null };
+      }
 
-      const fajr = buildEntry('fajr');
-      const dhuhr = buildEntry('zuhr'); // legacy → canonical
-      const asr = buildEntry('asr');
-      const maghrib = buildEntry('maghrib');
-      const isha = buildEntry('isha');
-
-      const prayerCount =
-        Number(fajr.logged) + Number(dhuhr.logged) + Number(asr.logged)
-        + Number(maghrib.logged) + Number(isha.logged);
+      const prayerCount = CANONICAL_PRAYER_KEYS
+        .reduce((n, k) => n + (entries[k].logged ? 1 : 0), 0);
 
       const tz = (() => {
         try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
         catch { return 'UTC'; }
       })();
 
+      // Exactly the keys firestore.rules allows on this path.
       await db.collection('prayers').doc(userId).collection('days').doc(dateKey).set({
         date: dateKey,
-        fajr, dhuhr, asr, maghrib, isha,
+        fajr: entries.fajr,
+        dhuhr: entries.dhuhr,
+        asr: entries.asr,
+        maghrib: entries.maghrib,
+        isha: entries.isha,
         prayerCount,
         completedAt: prayerCount === 5 ? now : null,
         timezone: tz,

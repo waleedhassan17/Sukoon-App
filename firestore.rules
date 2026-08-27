@@ -1,0 +1,464 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sukoon Firestore security rules — Salah Buddy.
+//
+// SECURITY MODEL (important context for anyone editing this file):
+//
+// The Firebase project is on the **Spark** plan, so Cloud Functions cannot be
+// deployed. That means there is no trusted server to own streak state. These
+// rules therefore do the job the server would have done: rather than trusting
+// whatever number the client writes, every streak-bearing transition is
+// RE-DERIVED here from the two members' own prayer-day documents.
+//
+// Concretely, a malicious client cannot:
+//   • invent a streak increment      → the transition is recomputed below
+//   • claim an unearned day          → both members' day docs are get()'d and
+//                                       must each show prayerCount == 5
+//   • fake prayerCount               → it is recomputed from the `logged` flags
+//   • befriend someone uninvited     → create requires a live invite code
+//   • lower longestStreak            → pinned to exactly max(old, new)
+//   • re-award or invent a milestone → monotone + constrained to MILESTONES
+//   • back/future-date a streak      → bounded against request.time
+//
+// What remains trust-based is a user lying about having prayed in their own day
+// document. That is equally true of the Cloud Functions design (the server
+// trusts the same booleans), so staying on Spark costs us very little here.
+//
+// `functions/` remains in the repo as the dormant Blaze path. If billing is ever
+// upgraded, the cutover is: deploy the functions, change the friendships/invites
+// write rules to `if false`, and delete the client mutation paths.
+// ─────────────────────────────────────────────────────────────────────────────
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Primitives ──────────────────────────────────────────────────────────
+
+    // TIMESTAMP CONVENTION: every time-valued field in this database is stored as
+    // epoch milliseconds (a number), never a Firestore Timestamp. The app already
+    // wrote users/* and prayers/* that way; standardising the rest removes the
+    // Timestamp/Date/number normalisation the client used to do at three separate
+    // call sites, and lets these rules do plain arithmetic on the values.
+    function signedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+
+    // Keys whose values differ between the incoming write and the stored doc.
+    // On a create there is no `resource`, so callers must only use this on update.
+    function affected() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // Canonical pair id — sorted uids joined by '_'. This definition is mirrored
+    // in Sukoon-App/lib/salah/pairId.ts and functions/src/streakMath.ts. All three
+    // must agree; changing one without the others silently orphans friendships.
+    function pairIdOf(a, b) {
+      return a < b ? a + '_' + b : b + '_' + a;
+    }
+
+    // ── Date-key helpers ────────────────────────────────────────────────────
+    // Day documents are keyed by the user's LOCAL date (YYYY-MM-DD), so the same
+    // instant can be a different key for two users. We never compare instants —
+    // only date strings — which is what makes cross-timezone pairs converge.
+
+    function isDateKey(k) {
+      return k is string && k.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    // Parse a YYYY-MM-DD key into a UTC timestamp for arithmetic. Only ever used
+    // for coarse bounds checks, never to decide which calendar day a user is in.
+    function keyToTs(k) {
+      return timestamp.date(int(k[0:4]), int(k[5:7]), int(k[8:10]));
+    }
+
+    // A client in UTC+14 can legitimately be a calendar day ahead of UTC, so we
+    // allow one day of slack. This still blocks gross clock-tampering (the
+    // "phone set to 2099" attack) without penalising real timezones.
+    function notFuture(k) {
+      return isDateKey(k) && keyToTs(k) <= request.time + duration.value(1, 'd');
+    }
+
+    // ── users/{uid} — PUBLIC profile ────────────────────────────────────────
+    // Readable by any signed-in user, because the invite-accept screen must show
+    // the inviter's name before any friendship exists.
+    //
+    // Rules cannot project fields on read, so "minimal public projection" is only
+    // achievable by physically keeping private data out of this document. The
+    // write allowlist below is what makes the open read rule safe: no client can
+    // inject a sensitive field into a world-readable doc. FCM tokens live in
+    // users/{uid}/private/tokens instead.
+    match /users/{userId} {
+      // TRANSITIONAL — app versions ≤ 1.3.0 write FCM tokens onto this document.
+      //
+      // Rejecting them outright would break every user who has not yet updated: the
+      // old ensureProfile() writes `fcmTokens: []` on create and its Firestore calls
+      // are unguarded, so a denial throws, no profile is created, and the whole Salah
+      // Buddy feature dies for them — while FCM registration fails app-wide. A mobile
+      // rollout takes days, so that is a live outage, not a transition cost.
+      //
+      // Tolerating these keys is not a regression: for un-updated clients this is the
+      // status quo. Updated clients stop writing them and actively migrate the values
+      // to users/{uid}/private/tokens, deleting them here (see migrateTokensToPrivate
+      // in lib/userProfileService.ts).
+      //
+      // REMOVE once telemetry shows no meaningful traffic from ≤ 1.3.0 — delete this
+      // list, and the four keys stay rejected like any other unexpected field.
+      function legacyTokenKeys() {
+        return ['fcmToken', 'fcmTokens', 'platform', 'lastTokenUpdate'];
+      }
+
+      function validProfile(d) {
+        return d.keys().hasOnly(
+              ['displayName', 'photoURL', 'timezone', 'inviteCode', 'createdAt']
+                .concat(legacyTokenKeys()))
+          && d.displayName is string && d.displayName.size() <= 40
+          && d.photoURL is string && d.photoURL.size() <= 512
+          && d.timezone is string && d.timezone.size() > 0 && d.timezone.size() <= 64
+          && (d.inviteCode == null
+              || (d.inviteCode is string && d.inviteCode.matches('^[A-Z0-9]{6}$')));
+      }
+
+      allow read: if signedIn();
+
+      allow create: if signedIn() && userId == uid()
+        && validProfile(request.resource.data)
+        && request.resource.data.createdAt is number;
+
+      // createdAt is immutable — it anchors nothing security-critical today, but
+      // a mutable creation date is the kind of thing that quietly becomes load
+      // bearing later.
+      allow update: if signedIn() && userId == uid()
+        && validProfile(request.resource.data)
+        && !affected().hasAny(['createdAt']);
+
+      allow delete: if false;
+    }
+
+    // ── users/{uid}/private/{doc} — owner-only ──────────────────────────────
+    // FCM registration tokens and anything else that must never be readable by
+    // another user. Declared BEFORE the legacy wildcard below so it wins.
+    match /users/{userId}/private/{docId} {
+      allow read, write: if signedIn() && userId == uid();
+    }
+
+    // ── prayers/{uid}/days/{date} — the streak's source of truth ────────────
+    match /prayers/{userId}/days/{date} {
+      // Recompute prayerCount from the logged flags. This is the check that used
+      // to live in the onPrayerWrite trigger; without it a client could simply
+      // write prayerCount: 5 having logged nothing and mint a streak.
+      function loggedCount(d) {
+        return (d.fajr.logged ? 1 : 0)
+             + (d.dhuhr.logged ? 1 : 0)
+             + (d.asr.logged ? 1 : 0)
+             + (d.maghrib.logged ? 1 : 0)
+             + (d.isha.logged ? 1 : 0);
+      }
+
+      function validEntry(e) {
+        return e.keys().hasOnly(['logged', 'loggedAt'])
+          && e.logged is bool
+          && (e.loggedAt == null || e.loggedAt is number);
+      }
+
+      function validDay(d) {
+        return d.keys().hasOnly([
+              'date', 'fajr', 'dhuhr', 'asr', 'maghrib', 'isha',
+              'prayerCount', 'completedAt', 'timezone', 'updatedAt'
+            ])
+          && d.keys().hasAll([
+              'date', 'fajr', 'dhuhr', 'asr', 'maghrib', 'isha', 'prayerCount'
+            ])
+          && d.date == date
+          && notFuture(d.date)
+          && validEntry(d.fajr) && validEntry(d.dhuhr) && validEntry(d.asr)
+          && validEntry(d.maghrib) && validEntry(d.isha)
+          && d.prayerCount == loggedCount(d)
+          && (!d.keys().hasAny(['timezone'])
+              || (d.timezone is string && d.timezone.size() > 0 && d.timezone.size() <= 64))
+          && (!d.keys().hasAny(['completedAt']) || d.completedAt == null || d.completedAt is number)
+          && (!d.keys().hasAny(['updatedAt']) || d.updatedAt is number);
+      }
+
+      // Owner reads their own days; a friend may read them only while an ACTIVE
+      // friendship exists. This is what unbreaks the friend-detail calendar and
+      // the partner today-counts on the friends list.
+      allow read: if signedIn() && (
+        userId == uid()
+        || get(/databases/$(database)/documents/friendships/$(pairIdOf(userId, uid())))
+             .data.status == 'active'
+      );
+
+      allow write: if signedIn() && userId == uid()
+        && validDay(request.resource.data);
+    }
+
+    // ── friendships/{pairId} — shared streak state ──────────────────────────
+    // The most sensitive collection: on Spark it is client-written, so every
+    // transition below is validated against re-derived facts.
+    match /friendships/{pairId} {
+      // Milestone thresholds. Mirrored in functions/src/types.ts:STREAK_MILESTONES
+      // and Sukoon-App/lib/salah/streakMath.ts. Change all three together.
+      function milestones() { return [7, 30, 100, 365]; }
+
+      function isMember() { return signedIn() && uid() in resource.data.users; }
+
+      function otherOf(users) { return users[0] == uid() ? users[1] : users[0]; }
+
+      // Day doc for `u` on `d` shows a complete day (all five prayers).
+      function completedDay(u, d) {
+        return get(/databases/$(database)/documents/prayers/$(u)/days/$(d))
+                 .data.prayerCount == 5;
+      }
+
+      function bothCompleted(users, d) {
+        return completedDay(users[0], d) && completedDay(users[1], d);
+      }
+
+      // A well-formed, freshly-created pair: sorted uids, caller is a member,
+      // and every streak field starts from zero so a create cannot smuggle in a
+      // pre-baked streak.
+      function validNewPair(d) {
+        return d.users is list && d.users.size() == 2
+          && d.users[0] < d.users[1]
+          && uid() in d.users
+          && d.currentStreak == 0
+          && d.longestStreak == 0
+          && d.lastStreakDate == null
+          && d.milestonesAchieved == []
+          && d.createdAt is number;
+      }
+
+      // ---- read -----------------------------------------------------------
+      // Two branches, both provable from a query's constraints so the friends
+      // listener can be authorised wholesale rather than post-filtered.
+      // See Sukoon-App/lib/friendsService.ts, which queries with an explicit
+      // `status == 'active'` filter to match branch one.
+      allow read: if isMember() && (
+        resource.data.status == 'active'
+        || (resource.data.status == 'blocked' && resource.data.blockedBy == uid())
+      );
+
+      // The caller must hold a live invite issued by the other member. This is
+      // the check that stops a client fabricating a friendship with an arbitrary
+      // uid purely to gain read access to that user's prayer history.
+      //
+      // Expiry is deliberately NOT checked here: legacy invite docs still carry a
+      // Timestamp `expiresAt` rather than epoch millis, and a rules-level type
+      // mismatch would hard-fail every acceptance against an old code. Expiry is
+      // enforced by the client accept path, and the security property that
+      // actually matters — "you were given this code by that user" — is fully
+      // covered by fromUid + status.
+      function holdsInviteFrom(codeValue, inviterUid) {
+        return codeValue is string
+          && get(/databases/$(database)/documents/invites/$(codeValue)).data.fromUid == inviterUid
+          && get(/databases/$(database)/documents/invites/$(codeValue)).data.status == 'active';
+      }
+
+      // ---- create: accepting an invite ------------------------------------
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+              'users', 'status', 'initiatedBy', 'acceptedAt', 'currentStreak',
+              'longestStreak', 'lastStreakDate', 'milestonesAchieved',
+              'createdAt', 'viaInvite', 'lastUpdatedAt'
+            ])
+        && validNewPair(request.resource.data)
+        && request.resource.data.status == 'active'
+        && request.resource.data.acceptedAt is number
+        && request.resource.data.initiatedBy == otherOf(request.resource.data.users)
+        && pairId == pairIdOf(request.resource.data.users[0], request.resource.data.users[1])
+        && holdsInviteFrom(
+             request.resource.data.viaInvite,
+             otherOf(request.resource.data.users));
+
+      // ---- create: block tombstone ----------------------------------------
+      // Lets a user pre-emptively block someone they have no friendship with, so
+      // a later invite acceptance is refused. No invite needed — and harmless,
+      // because a blocked document grants the other party no read at all.
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+              'users', 'status', 'blockedBy', 'initiatedBy', 'acceptedAt',
+              'currentStreak', 'longestStreak', 'lastStreakDate',
+              'milestonesAchieved', 'createdAt', 'lastUpdatedAt'
+            ])
+        && validNewPair(request.resource.data)
+        && request.resource.data.status == 'blocked'
+        && request.resource.data.blockedBy == uid()
+        && pairId == pairIdOf(request.resource.data.users[0], request.resource.data.users[1]);
+
+      // ---- update: advance the shared streak -------------------------------
+      // The heart of the model. We recompute the transition rather than trusting
+      // it: the candidate date must be a day BOTH members actually completed, the
+      // increment must follow from whether that date is contiguous with the last
+      // one, longest is pinned to the true max, and milestones only ever grow.
+      function isContinuation(oldLast, newLast) {
+        return isDateKey(oldLast)
+          && keyToTs(newLast) == keyToTs(oldLast) + duration.value(1, 'd');
+      }
+
+      function validAdvance(prev, next) {
+        return affected().hasOnly([
+              'currentStreak', 'longestStreak', 'lastStreakDate',
+              'milestonesAchieved', 'lastUpdatedAt'
+            ])
+          && prev.status == 'active'
+          && notFuture(next.lastStreakDate)
+          // Strictly forward: re-writing an older date could resurrect a streak.
+          && (prev.lastStreakDate == null
+              || keyToTs(next.lastStreakDate) > keyToTs(prev.lastStreakDate))
+          && bothCompleted(prev.users, next.lastStreakDate)
+          && next.currentStreak == (
+              isContinuation(prev.lastStreakDate, next.lastStreakDate)
+                ? prev.currentStreak + 1
+                : 1
+            )
+          // longestStreak == max(prev.longestStreak, next.currentStreak),
+          // spelled out because the rules language has no math.max.
+          && next.longestStreak >= prev.longestStreak
+          && next.longestStreak >= next.currentStreak
+          && (next.longestStreak == prev.longestStreak
+              || next.longestStreak == next.currentStreak)
+          // Monotone, and only ever real thresholds.
+          && next.milestonesAchieved is list
+          && next.milestonesAchieved.hasAll(prev.milestonesAchieved)
+          && milestones().hasAll(next.milestonesAchieved);
+      }
+
+      // ---- update: break the streak ----------------------------------------
+      // No scheduled sweep exists on Spark, so either member records the break
+      // lazily when they notice it. The bound below is a coarse sanity check —
+      // permissive enough that no legitimate break is ever blocked in any
+      // timezone — while the tz-aware client decides the exact moment.
+      function validBreak(prev, next) {
+        return affected().hasOnly([
+              'currentStreak', 'lastBrokenAt', 'lastBrokenStreak', 'lastUpdatedAt'
+            ])
+          && prev.status == 'active'
+          && prev.currentStreak > 0
+          && next.currentStreak == 0
+          && next.lastBrokenStreak == prev.currentStreak
+          && next.lastBrokenAt is number
+          && isDateKey(prev.lastStreakDate)
+          && request.time >= keyToTs(prev.lastStreakDate) + duration.value(2, 'd');
+      }
+
+      // ---- update: remove / block -----------------------------------------
+      // Either member may remove; the streak is zeroed but longestStreak is kept
+      // as a memorial. A removed doc is readable by nobody, so it simply vanishes
+      // from both lists.
+      function validRemove(prev, next) {
+        return affected().hasOnly([
+              'status', 'removedBy', 'currentStreak', 'lastStreakDate', 'lastUpdatedAt'
+            ])
+          && prev.status == 'active'
+          && next.status == 'removed'
+          && next.removedBy == uid()
+          && next.currentStreak == 0
+          && next.lastStreakDate == null;
+      }
+
+      function validBlock(prev, next) {
+        return affected().hasOnly([
+              'status', 'blockedBy', 'currentStreak', 'lastStreakDate', 'lastUpdatedAt'
+            ])
+          && next.status == 'blocked'
+          && next.blockedBy == uid()
+          && next.currentStreak == 0
+          && next.lastStreakDate == null;
+      }
+
+      // ---- update: reactivate a removed pair -------------------------------
+      // Re-accepting an invite after a removal. Streak restarts from zero;
+      // longestStreak survives. Requires a live invite from the other side, same
+      // as an initial create.
+      function validReactivate(prev, next) {
+        return affected().hasOnly([
+              'status', 'acceptedAt', 'currentStreak', 'lastStreakDate',
+              'milestonesAchieved', 'removedBy', 'viaInvite', 'lastUpdatedAt'
+            ])
+          && prev.status == 'removed'
+          && next.status == 'active'
+          && next.currentStreak == 0
+          && next.lastStreakDate == null
+          && next.milestonesAchieved == []
+          && holdsInviteFrom(next.viaInvite, otherOf(prev.users));
+      }
+
+      allow update: if isMember()
+        // Membership is immutable — nobody joins or leaves an existing pair.
+        && request.resource.data.users == resource.data.users
+        && (
+             validAdvance(resource.data, request.resource.data)
+          || validBreak(resource.data, request.resource.data)
+          || validRemove(resource.data, request.resource.data)
+          || validBlock(resource.data, request.resource.data)
+          || validReactivate(resource.data, request.resource.data)
+        );
+
+      // Friendships are never hard-deleted; `removed` is the tombstone.
+      allow delete: if false;
+    }
+
+    // ── invites/{code} — multi-use share codes ──────────────────────────────
+    // Any signed-in user may read one, because resolving a code is the first
+    // thing the accept screen does and it has no relationship to the inviter yet.
+    // Codes carry no secrets: they are meant to be pasted into WhatsApp.
+    match /invites/{code} {
+      // One year, matching INVITE_TTL_MS in functions/src/types.ts. Bounded so a
+      // client cannot mint a code that outlives any plausible revocation.
+      function validExpiry(d) {
+        return d.expiresAt is number
+          && d.expiresAt > request.time.toMillis()
+          && d.expiresAt <= request.time.toMillis() + 34560000000; // 400 days in ms
+      }
+
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(
+             ['code', 'fromUid', 'createdAt', 'expiresAt', 'usedByUid', 'status'])
+        && request.resource.data.code == code
+        && code.matches('^[A-Z0-9]{6}$')
+        && request.resource.data.fromUid == uid()
+        && request.resource.data.status == 'active'
+        && request.resource.data.usedByUid == null
+        && request.resource.data.createdAt is number
+        && validExpiry(request.resource.data);
+
+      // Revocation only. Codes are multi-use, so there is no "mark used" path:
+      // recipients never touch the invite, they only create their own friendship.
+      //
+      // The `resource != null` guard keeps this expression TOTAL. Without it an
+      // update against a missing document dereferences a null `resource` and the
+      // rule raises an evaluation error rather than returning false. Both deny the
+      // write, so it is invisible in tests — but an erroring rule is a poor
+      // foundation, and it makes genuine failures unreadable in the logs.
+      allow update: if signedIn()
+        && resource != null
+        && resource.data.fromUid == uid()
+        && resource.data.status == 'active'
+        && request.resource.data.status == 'revoked'
+        && affected().hasOnly(['status']);
+
+      allow delete: if false;
+    }
+
+    // ── audiobooksCatalog/{bookId} — Listen catalog overrides ───────────────
+    // Published out-of-band by the content-ops tooling; clients only read. The
+    // bundled seed catalog is the offline fallback.
+    match /audiobooksCatalog/{bookId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // ── Legacy user-scoped sync data ────────────────────────────────────────
+    // DataSyncService's generic backup lives here (users/{uid}/{domain}/{key}).
+    // Note this wildcard also matches users/{uid}/private/*. Firestore ORs all
+    // matching rules together rather than applying precedence, so the explicit
+    // `private` block above does not override this one — both are owner-only, so
+    // tokens stay private either way. Keep BOTH conditions owner-scoped: relaxing
+    // this wildcard would silently widen access to the token document.
+    match /users/{userId}/{collection}/{docId} {
+      allow read, write: if signedIn() && userId == uid();
+    }
+  }
+}

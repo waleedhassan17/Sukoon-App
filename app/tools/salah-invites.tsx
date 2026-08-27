@@ -24,9 +24,10 @@ import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { useTheme } from '@/contexts/ThemeContext';
 import { t, useLocale } from '@/lib/i18n';
-import { FirebaseFunctions } from '@/lib/firebaseFunctions';
+import { InviteService } from '@/lib/inviteService';
 import { UserProfileService } from '@/lib/userProfileService';
 import { BranchService } from '@/lib/branchService';
+import { toFriendsError } from '@/lib/salah/errors';
 import SalahTopTabs from '@/components/friends/SalahTopTabs';
 
 export default function SalahInvitesScreen() {
@@ -57,51 +58,27 @@ export default function SalahInvitesScreen() {
         if (!isActive) activeCode = null; // stale; fall through to regeneration
       }
 
+      // One honest path. This used to be a four-level fallback chain whose last
+      // resort invented a code in memory and never wrote it to Firestore — which
+      // produced a share link that was guaranteed to fail on the recipient's side,
+      // with no indication anything was wrong. A visible error beats a dead link.
       if (!activeCode || forceRegenerate) {
-        // Try Cloud Functions first
-        try {
-          const res = await FirebaseFunctions.createInvite();
-          activeCode = res.code;
-        } catch (fnErr) {
-          const fnMsg = (fnErr as Error).message ?? '';
-          console.warn('Cloud Function createInvite failed, falling back to local:', fnMsg);
-
-          // Try getting existing code from Firestore and validate it
-          const existingCode = await UserProfileService.getExistingInviteCode();
-          if (existingCode && !forceRegenerate) {
-            const isActive = await UserProfileService.isInviteCodeActive(existingCode);
-            activeCode = isActive ? existingCode : null;
-          }
-
-          if (!activeCode) {
-            // Generate a code locally and write directly to Firestore
-            const localCode = await UserProfileService.generateLocalInviteCode();
-            if (localCode) {
-              activeCode = localCode;
-            } else {
-              const ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
-              let code = '';
-              for (let i = 0; i < 6; i++) {
-                code += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
-              }
-              activeCode = code;
-            }
-          }
-        }
+        activeCode = await InviteService.createInvite();
       }
 
       setCode(activeCode);
 
-      // Generate share URL
       const url = await BranchService.createInviteLink({
-        code: activeCode!,
+        code: activeCode,
         inviterDisplayName: profile?.displayName ?? 'Sukoon User',
         inviterPhotoURL: profile?.photoURL ?? '',
       });
       setShareUrl(url);
     } catch (e) {
-      const msg = (e as Error).message ?? '';
-      setError(msg || t('common.error'));
+      setCode(null);
+      setShareUrl(null);
+      const { kind, message } = toFriendsError(e);
+      setError(kind === 'unknown' ? t('invites.errorCreate') : message);
     } finally {
       setBusy(null);
     }
@@ -125,11 +102,11 @@ export default function SalahInvitesScreen() {
     if (!shareUrl) return;
     if (needsName) {
       Alert.alert(
-        'Set your name first',
-        'Your display name is what your friend will see in the invite and in their friends list.',
+        t('invites.setNameTitle'),
+        t('invites.setNameBody'),
         [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Go to Settings', onPress: () => router.push('/(tabs)/settings' as any) },
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('common.ok'), onPress: () => router.push('/(tabs)/settings' as any) },
         ],
       );
       return;
@@ -184,14 +161,14 @@ export default function SalahInvitesScreen() {
             <View style={[st.nameWarn, { backgroundColor: `${theme.gold}12`, borderColor: `${theme.gold}55` }]}>
               <Ionicons name="person-circle-outline" size={18} color={theme.gold} />
               <Text style={[st.nameWarnText, { color: theme.textSecondary }]}>
-                Set your display name so friends don’t see random names.
+                {t('invites.setNameWarning')}
               </Text>
               <TouchableOpacity
                 onPress={() => router.push('/(tabs)/settings' as any)}
                 style={[st.nameWarnBtn, { backgroundColor: `${theme.gold}22` }]}
                 activeOpacity={0.85}
               >
-                <Text style={[st.nameWarnBtnText, { color: theme.gold }]}>Settings</Text>
+                <Text style={[st.nameWarnBtnText, { color: theme.gold }]}>{t('common.ok')}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -200,10 +177,19 @@ export default function SalahInvitesScreen() {
               <ActivityIndicator color={theme.primary} />
             </View>
           ) : error ? (
-            <View style={[st.codePill, { backgroundColor: `${theme.error}15`, borderColor: theme.error, borderWidth: 1, marginBottom: 20 }]}>
+            // Tappable: creating an invite is a one-shot action, so retry always
+            // makes sense here — unlike the friends listener, where a rules
+            // rejection would fail identically on every attempt.
+            <TouchableOpacity
+              onPress={() => refreshCode(false)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              style={[st.codePill, { backgroundColor: `${theme.error}15`, borderColor: theme.error, borderWidth: 1, marginBottom: 20 }]}
+            >
               <Ionicons name="alert-circle-outline" size={18} color={theme.error} />
               <Text style={[st.codeText, { color: theme.error, fontSize: 13 }]} numberOfLines={2}>{error}</Text>
-            </View>
+              <Text style={[st.codeText, { color: theme.primary, fontSize: 12 }]}>{t('common.retry')}</Text>
+            </TouchableOpacity>
           ) : (
             <View style={{ height: 16 }} />
           )}
@@ -218,7 +204,7 @@ export default function SalahInvitesScreen() {
             style={[st.cta, { backgroundColor: theme.primary }, (!shareUrl || busy === 'share' || needsName) && { opacity: 0.5 }]}
           >
             <Ionicons name="share-outline" size={20} color="#fff" />
-            <Text style={st.ctaText}>Share Invite Link</Text>
+            <Text style={st.ctaText}>{t('invites.shareCta')}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

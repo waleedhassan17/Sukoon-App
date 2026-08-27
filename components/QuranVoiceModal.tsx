@@ -7,13 +7,17 @@
  *   • action "play" → open the Surah at that ayah and auto-play the recitation.
  *   • action "open" → open the Surah at that ayah WITHOUT auto-playing.
  *
- * It reuses the app's existing speechRecognitionService (on-device STT) and the
- * Surah screen's `?startAyah=&autoPlay=` params, so no audio code is duplicated.
+ * Lifecycle note (this used to be the bug): the "start listening" effect must
+ * depend on `visible` ALONE. When it also depended on callbacks recreated by
+ * the parent's renders, every unrelated Home-screen state change tore the live
+ * session down and restarted it — and an abort()+start() in quick succession
+ * makes Android's recognizer emit an immediate error, which surfaced as a
+ * spurious "No speech detected". All callbacks are therefore held in refs.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Modal, Animated, ActivityIndicator,
+  View, Text, StyleSheet, TouchableOpacity, Modal, Animated, ActivityIndicator, Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -23,7 +27,13 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { speechRecognitionService, SpeechRecognitionResult } from '@/lib/speechRecognitionService';
 import { QuranVoiceService } from '@/lib/quranVoiceService';
 
-type Phase = 'listening' | 'thinking' | 'error';
+type Phase = 'starting' | 'listening' | 'thinking' | 'error';
+
+/** Nudges the recognizer toward Quranic vocabulary it would otherwise mangle. */
+const VOICE_HINTS = [
+  'Surah', 'Ayah', 'Ayat ul Kursi', 'Al-Fatiha', 'Al-Baqarah', 'Ya-Sin', 'Yaseen',
+  'Ar-Rahman', 'Al-Mulk', 'Al-Kahf', 'Al-Ikhlas', 'An-Nas', 'Al-Falaq', 'Maryam',
+];
 
 function friendlyError(code: string): string {
   switch (code) {
@@ -31,6 +41,8 @@ function friendlyError(code: string): string {
       return "Voice assistant isn't set up yet. Please add the Gemini API key.";
     case 'RATE_LIMITED':
       return 'Too many requests right now. Please try again in a moment.';
+    case 'TIMEOUT':
+      return 'That took too long. Check your connection and try again.';
     case 'EMPTY_COMMAND':
       return "I didn't catch that. Tap the mic and try again.";
     case 'INVALID_SURAH':
@@ -48,16 +60,28 @@ export default function QuranVoiceModal({ visible, onClose }: { visible: boolean
   const { theme } = useTheme();
   const router = useRouter();
 
-  const [phase, setPhase] = useState<Phase>('listening');
+  const [phase, setPhase] = useState<Phase>('starting');
   const [transcript, setTranscript] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [permissionBlocked, setPermissionBlocked] = useState(false);
 
   const pulse = useRef(new Animated.Value(1)).current;
-  const handledRef = useRef(false); // guard so we act on a final result only once
+  const handledRef = useRef(false);   // act on a final result only once
+  const mountedRef = useRef(true);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const isRecording = phase === 'starting' || phase === 'listening';
 
   // ── Pulsing mic animation while listening ──
   useEffect(() => {
-    if (phase !== 'listening') {
+    if (!isRecording) {
       pulse.stopAnimation();
       pulse.setValue(1);
       return;
@@ -70,95 +94,139 @@ export default function QuranVoiceModal({ visible, onClose }: { visible: boolean
     );
     loop.start();
     return () => loop.stop();
-  }, [phase, pulse]);
+  }, [isRecording, pulse]);
+
+  const fail = useCallback((message: string, blocked = false) => {
+    if (!mountedRef.current) return;
+    setPermissionBlocked(blocked);
+    setErrorMsg(message);
+    setPhase('error');
+  }, []);
 
   const runCommand = useCallback(async (text: string) => {
+    if (!mountedRef.current) return;
     setPhase('thinking');
     setTranscript(text);
     try {
       const cmd = await QuranVoiceService.parseCommand(text);
+      if (!mountedRef.current) return;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       const suffix = cmd.action === 'play' ? '&autoPlay=true' : '';
       const path = `/quran/${cmd.surah_number}?startAyah=${cmd.ayah_number}${suffix}`;
-      onClose();
+      onCloseRef.current();
       router.push(path as any);
     } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-      setErrorMsg(friendlyError(String((e as Error)?.message ?? '')));
-      setPhase('error');
+      fail(friendlyError(String((e as Error)?.message ?? '')));
     }
-  }, [onClose, router]);
+  }, [router, fail]);
 
   const onSpeechResult = useCallback((r: SpeechRecognitionResult) => {
-    // Live partial transcript for preview.
-    if (r.text) setTranscript(r.text);
+    if (!mountedRef.current || handledRef.current) return;
 
-    if (!r.isFinal || handledRef.current) return;
+    switch (r.status) {
+      // ── Live ──
+      case 'listening':
+        setPhase(r.ready === false ? 'starting' : 'listening');
+        if (r.text) setTranscript(r.text);
+        return;
 
-    if (r.status === 'success' && r.text.trim()) {
-      handledRef.current = true;
-      runCommand(r.text.trim());
-    } else if (r.status === 'error' || r.status === 'unavailable') {
-      handledRef.current = true;
-      setErrorMsg(r.error || friendlyError('EMPTY_COMMAND'));
-      setPhase('error');
-    } else if (!r.text.trim()) {
-      handledRef.current = true;
-      setErrorMsg(friendlyError('EMPTY_COMMAND'));
-      setPhase('error');
+      case 'processing':
+        if (r.text) setTranscript(r.text);
+        setPhase('thinking');
+        return;
+
+      // ── Terminal ──
+      case 'success':
+        if (r.text.trim()) {
+          handledRef.current = true;
+          runCommand(r.text.trim());
+        } else {
+          handledRef.current = true;
+          fail(friendlyError('EMPTY_COMMAND'));
+        }
+        return;
+
+      case 'error':
+      case 'unavailable':
+        handledRef.current = true;
+        fail(r.error || friendlyError('EMPTY_COMMAND'), r.errorCode === 'permission-blocked');
+        return;
+
+      // Nothing was running — the session was already torn down.
+      case 'idle':
+        return;
     }
-  }, [runCommand]);
+  }, [runCommand, fail]);
 
-  const startListening = useCallback(async () => {
+  const beginListening = useCallback(async () => {
     handledRef.current = false;
     setTranscript('');
     setErrorMsg('');
-    setPhase('listening');
+    setPermissionBlocked(false);
+    setPhase('starting');
 
     if (!QuranVoiceService.isConfigured()) {
-      setErrorMsg(friendlyError('VOICE_NOT_CONFIGURED'));
-      setPhase('error');
+      fail(friendlyError('VOICE_NOT_CONFIGURED'));
       return;
     }
     if (!speechRecognitionService.isAvailable()) {
-      setErrorMsg('Voice input needs the installed app build (not Expo Go).');
-      setPhase('error');
+      fail('Voice input needs the installed app build (not Expo Go).');
       return;
     }
-    try {
-      const ok = (await speechRecognitionService.checkPermission())
-        || (await speechRecognitionService.requestPermission());
-      if (!ok) {
-        setErrorMsg('Microphone permission is needed to use voice commands.');
-        setPhase('error');
-        return;
-      }
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      await speechRecognitionService.startListening(onSpeechResult);
-    } catch {
-      setErrorMsg(friendlyError('EMPTY_COMMAND'));
-      setPhase('error');
-    }
-  }, [onSpeechResult]);
 
-  // Start when opened; stop/cleanup when closed.
-  useEffect(() => {
-    if (visible) {
-      startListening();
-    } else {
-      speechRecognitionService.cancelListening().catch(() => {});
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    try {
+      // Permission + availability + restart cooldown are all the service's job;
+      // it always answers through onSpeechResult, success or failure.
+      await speechRecognitionService.startListening(onSpeechResult, {
+        lang: 'en-US',
+        contextualStrings: VOICE_HINTS,
+      });
+    } catch {
+      fail(friendlyError('EMPTY_COMMAND'));
     }
+  }, [onSpeechResult, fail]);
+
+  // Keep the latest starter in a ref so the effect below can stay
+  // dependent on `visible` alone.
+  const beginListeningRef = useRef(beginListening);
+  useEffect(() => { beginListeningRef.current = beginListening; }, [beginListening]);
+
+  // ── Start on open, tear down on close. Depends on `visible` ONLY. ──
+  useEffect(() => {
+    if (!visible) return;
+    beginListeningRef.current();
     return () => {
+      handledRef.current = true; // ignore anything still in flight
       speechRecognitionService.cancelListening().catch(() => {});
     };
-  }, [visible, startListening]);
+  }, [visible]);
 
   const handleClose = useCallback(() => {
+    handledRef.current = true;
     speechRecognitionService.cancelListening().catch(() => {});
-    onClose();
-  }, [onClose]);
+    onCloseRef.current();
+  }, []);
+
+  const handleRetry = useCallback(() => {
+    beginListeningRef.current();
+  }, []);
 
   if (!visible) return null;
+
+  const statusLine = (() => {
+    switch (phase) {
+      case 'starting':
+        return transcript ? `“${transcript}”` : 'Getting ready…';
+      case 'listening':
+        return transcript ? `“${transcript}”` : 'Listening… say e.g. “Play Surah Rahman ayah 13”';
+      case 'thinking':
+        return transcript ? `“${transcript}”` : 'Thinking…';
+      case 'error':
+        return errorMsg;
+    }
+  })();
 
   return (
     <Modal transparent visible={visible} animationType="fade" onRequestClose={handleClose}>
@@ -172,7 +240,7 @@ export default function QuranVoiceModal({ visible, onClose }: { visible: boolean
           <Text style={[styles.title, { color: theme.text }]}>Quran Voice Assistant</Text>
 
           {/* Mic orb */}
-          <Animated.View style={[styles.orbWrap, { transform: [{ scale: phase === 'listening' ? pulse : 1 }] }]}>
+          <Animated.View style={[styles.orbWrap, { transform: [{ scale: isRecording ? pulse : 1 }] }]}>
             <LinearGradient
               colors={phase === 'error' ? ['#9B2226', '#BB3E03'] : ['#1B4332', '#2D6A4F', '#52B788']}
               start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
@@ -187,20 +255,28 @@ export default function QuranVoiceModal({ visible, onClose }: { visible: boolean
           </Animated.View>
 
           {/* Status line */}
-          <Text style={[styles.status, { color: theme.textSecondary }]}>
-            {phase === 'listening' && (transcript ? `“${transcript}”` : 'Listening… say e.g. “Play Surah Rahman ayah 13”')}
-            {phase === 'thinking' && (transcript ? `“${transcript}”` : 'Thinking…')}
-            {phase === 'error' && errorMsg}
-          </Text>
+          <Text style={[styles.status, { color: theme.textSecondary }]}>{statusLine}</Text>
+
+          {phase === 'listening' && (
+            <TouchableOpacity
+              onPress={() => speechRecognitionService.stopListening(onSpeechResult).catch(() => {})}
+              style={[styles.secondaryBtn, { borderColor: theme.textSecondary + '40' }]}
+              activeOpacity={0.7}
+              accessibilityLabel="Done speaking"
+            >
+              <Ionicons name="checkmark" size={17} color={theme.textSecondary} />
+              <Text style={[styles.secondaryText, { color: theme.textSecondary }]}>Done</Text>
+            </TouchableOpacity>
+          )}
 
           {phase === 'error' && (
             <TouchableOpacity
-              onPress={startListening}
+              onPress={permissionBlocked ? () => Linking.openSettings() : handleRetry}
               style={[styles.retryBtn, { backgroundColor: theme.primary }]}
               activeOpacity={0.88}
             >
-              <Ionicons name="mic" size={18} color="#fff" />
-              <Text style={styles.retryText}>Try again</Text>
+              <Ionicons name={permissionBlocked ? 'settings-outline' : 'mic'} size={18} color="#fff" />
+              <Text style={styles.retryText}>{permissionBlocked ? 'Open Settings' : 'Try again'}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -219,4 +295,6 @@ const styles = StyleSheet.create({
   status: { fontSize: 15, textAlign: 'center', lineHeight: 22, minHeight: 44, paddingHorizontal: 8 },
   retryBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14 },
   retryText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  secondaryBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 14, borderWidth: 1 },
+  secondaryText: { fontSize: 14, fontWeight: '600' },
 });

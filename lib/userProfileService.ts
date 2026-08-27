@@ -8,13 +8,19 @@
  *   - Provide `displayName` / `photoURL` defaults for anonymous users so the
  *     friend list still has something visible.
  *
- * Backwards-compat: the existing FCMService writes a `fcmToken` (string) field;
- * we now migrate to `fcmTokens` (array). Both fields may exist temporarily; the
- * client and server prefer `fcmTokens`.
+ * PRIVACY: users/{uid} is readable by any signed-in user, because the invite-accept
+ * screen must show the inviter's name before any friendship exists. Firestore rules
+ * cannot project fields on read, so this document must contain ONLY public profile
+ * data. FCM registration tokens therefore live in users/{uid}/private/tokens, which
+ * is owner-only; ensureProfile() migrates them out of any legacy `fcmToken` /
+ * `fcmTokens` field it finds here.
+ *
+ * The rules enforce an exact key allowlist on writes, so adding a field to this
+ * document without also updating firestore.rules will fail the write outright.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getFirestore, getAuth, isFirebaseConfigured } from './firebaseConfig';
+import { getFirestore, getAuth, isFirebaseConfigured, authReady } from './firebaseConfig';
 
 const PROFILE_KEYS = {
   DISPLAY_NAME: 'sukoon_profile_display_name',
@@ -32,6 +38,52 @@ function normalizeName(name: unknown): string | null {
   if (typeof name !== 'string') return null;
   const trimmed = name.trim().slice(0, 40);
   return trimmed.length > 0 ? trimmed : null;
+}
+
+/** Owner-only document holding this user's FCM registration tokens. */
+export const PRIVATE_TOKENS_DOC = 'tokens';
+
+/**
+ * Move FCM tokens out of the world-readable profile document and into
+ * users/{uid}/private/tokens.
+ *
+ * Older builds wrote `fcmToken` (string) and later `fcmTokens` (array) directly onto
+ * users/{uid}, which any signed-in user could read. A leaked registration token lets
+ * someone send spoofed pushes to that device, so it does not belong in a public doc.
+ *
+ * Runs at most once per device per legacy field: after the delete there is nothing
+ * left to migrate. Non-throwing by design — the caller treats it as best-effort.
+ */
+async function migrateTokensToPrivate(
+  db: any,
+  uid: string,
+  data: Record<string, any>,
+): Promise<void> {
+  const legacy: string[] = [];
+  if (typeof data.fcmToken === 'string' && data.fcmToken.length > 0) legacy.push(data.fcmToken);
+  if (Array.isArray(data.fcmTokens)) {
+    data.fcmTokens.forEach((t: unknown) => {
+      if (typeof t === 'string' && t.length > 0) legacy.push(t);
+    });
+  }
+
+  const hasLegacyFields = 'fcmToken' in data || 'fcmTokens' in data;
+  if (!hasLegacyFields) return;
+
+  const firestore = await import('@react-native-firebase/firestore');
+  const FieldValue = firestore.default.FieldValue;
+
+  if (legacy.length > 0) {
+    await db.collection('users').doc(uid).collection('private').doc(PRIVATE_TOKENS_DOC)
+      .set({ fcmTokens: FieldValue.arrayUnion(...legacy) }, { merge: true });
+  }
+
+  // Clear the public copies. The rules' key allowlist rejects these fields on any
+  // future write, so this is the last time they can appear.
+  await db.collection('users').doc(uid).update({
+    fcmToken: FieldValue.delete(),
+    fcmTokens: FieldValue.delete(),
+  });
 }
 
 export interface PublicUserProfile {
@@ -98,13 +150,15 @@ export const UserProfileService = {
    */
   async ensureProfile(): Promise<PublicUserProfile | null> {
     if (!isFirebaseConfigured()) return null;
-    const auth = await getAuth();
+    // Await auth instead of reading currentUser synchronously — on a cold start
+    // anonymous sign-in has typically not resolved yet, and every write below
+    // needs request.auth to be populated or the rules reject it.
+    const uid = await authReady();
     const db = await getFirestore();
-    if (!auth || !db) return null;
+    if (!uid || !db) return null;
 
-    const user = auth.currentUser;
-    if (!user) return null;
-    const uid: string = user.uid;
+    const auth = await getAuth();
+    const user = auth?.currentUser ?? null;
 
     let { displayName, photoURL } = await ensureLocalDefaults(uid);
     const tz = deviceTimezone();
@@ -120,13 +174,13 @@ export const UserProfileService = {
     const snap = await ref.get();
 
     if (!snap.exists) {
+      // Exactly the keys firestore.rules allows on this document — no fcmTokens.
       await ref.set({
         displayName,
         photoURL,
         inviteCode: null,
         timezone: tz,
         createdAt: Date.now(),
-        fcmTokens: [],
       }, { merge: true });
       await AsyncStorage.setItem(PROFILE_KEYS.LAST_TZ, tz);
       return { uid, displayName, photoURL, inviteCode: null, timezone: tz };
@@ -157,20 +211,15 @@ export const UserProfileService = {
     }
 
     if (data.timezone !== tz) updates.timezone = tz;
-    // Migrate legacy single fcmToken field into fcmTokens array on first sight.
-    if (typeof data.fcmToken === 'string' && Array.isArray(data.fcmTokens)) {
-      if (!data.fcmTokens.includes(data.fcmToken)) {
-        updates.fcmTokens = [...data.fcmTokens, data.fcmToken];
-      }
-    } else if (typeof data.fcmToken === 'string' && !Array.isArray(data.fcmTokens)) {
-      updates.fcmTokens = [data.fcmToken];
-    } else if (!Array.isArray(data.fcmTokens)) {
-      updates.fcmTokens = [];
-    }
 
     if (Object.keys(updates).length > 0) {
       await ref.update(updates);
     }
+
+    // Relocate any tokens left in the public document by an older build. Best
+    // effort and non-fatal: failing to move a token costs a push, not the profile.
+    await migrateTokensToPrivate(db, uid, data).catch(() => {});
+
     await AsyncStorage.setItem(PROFILE_KEYS.LAST_TZ, tz);
 
     return {
@@ -226,27 +275,6 @@ export const UserProfileService = {
   },
 
   /**
-   * Get the user's existing invite code from their profile doc.
-   * Returns null if no code exists or Firebase is unavailable.
-   */
-  async getExistingInviteCode(): Promise<string | null> {
-    if (!isFirebaseConfigured()) return null;
-    const auth = await getAuth();
-    const db = await getFirestore();
-    if (!auth || !db) return null;
-    const user = auth.currentUser;
-    if (!user) return null;
-    try {
-      const snap = await db.collection('users').doc(user.uid).get();
-      if (!snap.exists) return null;
-      const data = snap.data() ?? {};
-      return (data.inviteCode as string | null) ?? null;
-    } catch {
-      return null;
-    }
-  },
-
-  /**
    * Returns true if the given invite code exists in Firestore and is still active/unexpired.
    * Used by the invite screen to detect stale codes before displaying them.
    */
@@ -272,57 +300,6 @@ export const UserProfileService = {
     }
   },
 
-  /**
-   * Generate a local invite code and write it directly to Firestore.
-   * Fallback for when Cloud Functions are unavailable (dev builds).
-   * Uses the same Crockford-style charset as the Cloud Function.
-   */
-  async generateLocalInviteCode(): Promise<string | null> {
-    if (!isFirebaseConfigured()) return null;
-    const auth = await getAuth();
-    const db = await getFirestore();
-    if (!auth || !db) return null;
-    const user = auth.currentUser;
-    if (!user) return null;
-
-    const ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
-    let code = '';
-    for (let i = 0; i < 6; i++) {
-      code += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
-    }
-
-    try {
-      // Revoke any existing active invites before creating a new one
-      const stale = await db.collection('invites')
-        .where('fromUid', '==', user.uid)
-        .where('status', '==', 'active')
-        .get();
-      if (!stale.empty) {
-        const batch = db.batch();
-        stale.docs.forEach((d: any) => batch.update(d.ref, { status: 'revoked' }));
-        await batch.commit();
-      }
-
-      // Create the new invite document
-      await db.collection('invites').doc(code).set({
-        code,
-        fromUid: user.uid,
-        createdAt: new Date(),
-        // Multi-use shareable link — keep it alive for a year, not the old 7 days.
-        expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-        usedByUid: null,
-        status: 'active',
-      });
-
-      // Update user profile with new code
-      await db.collection('users').doc(user.uid).set({ inviteCode: code }, { merge: true });
-
-      return code;
-    } catch (e) {
-      if (__DEV__) console.warn('[UserProfileService] generateLocalInviteCode error:', e);
-      return null;
-    }
-  },
 };
 
 export default UserProfileService;

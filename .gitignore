@@ -42,3 +42,18 @@ expo-env.d.ts
 google-services.json
 *.apk
 *.aab
+
+# ── Firebase backend (moved in from the repo root) ──
+firestore-debug.log
+firebase-debug.log
+ui-debug.log
+database-debug.log
+pubsub-debug.log
+.firebase/
+emulator-data/
+
+# Cloud Functions build output (dormant Blaze path)
+functions/lib/
+
+# Never commit
+functions/.secret.local

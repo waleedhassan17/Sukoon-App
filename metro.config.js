@@ -33,6 +33,12 @@ config.resolver = {
     /ios\/build\/.*/,
     /ios\/Pods\/.*/,
     /\.git\/.*/,
+    // The Firebase backend lives inside this directory but is NOT part of the
+    // app bundle. Crawling functions/node_modules would add thousands of files to
+    // the watcher (ENOSPC risk on Linux, which this config already guards against)
+    // and can produce duplicate-package collisions in Metro's haste map.
+    /functions\/.*/,
+    /tests\/rules\/.*/,
   ],
 };
 

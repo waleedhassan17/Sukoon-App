@@ -13,8 +13,9 @@
 
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getMessaging, getFirestore, isFirebaseConfigured } from './firebaseConfig';
+import { getMessaging, getFirestore, isFirebaseConfigured, authReady } from './firebaseConfig';
 import { NotificationStorage } from './notificationStorage';
+import { PRIVATE_TOKENS_DOC } from './userProfileService';
 
 // ══════════════════════════════════════════════
 // STORAGE KEYS
@@ -104,26 +105,29 @@ export const FCMService = {
       // Store locally
       await AsyncStorage.setItem(KEYS.FCM_TOKEN, token);
 
-      // Store in Firestore for server-side push.
-      // Salah Buddy requires fcmTokens to be an ARRAY (multi-device support — a user
-      // may sign in on phone + tablet and we need to push to both). We migrate the
-      // legacy `fcmToken` (string) field opportunistically: if it exists, fold it into
-      // the array; either way the array is the new source of truth.
+      // Store in Firestore under users/{uid}/private/tokens — NOT on the profile
+      // document. users/{uid} is readable by any signed-in user (the invite-accept
+      // screen needs the inviter's name before a friendship exists), and Firestore
+      // rules cannot hide individual fields on read. A registration token sitting
+      // there was readable by everyone, and a leaked token lets someone push
+      // arbitrary notifications to that device.
+      //
+      // An array rather than a single value because one account may be signed in on
+      // several devices; UserProfileService.ensureProfile migrates tokens written to
+      // the old location by earlier builds.
       const db = await getFirestore();
-      const userId = await AsyncStorage.getItem(KEYS.USER_ID);
+      const userId = await authReady();
       if (!db || !userId) return;
 
-      const ref = db.collection('users').doc(userId);
-      // arrayUnion guards against duplicates if the same token re-registers.
       const firestore = await import('@react-native-firebase/firestore');
-      await ref.set({
-        fcmTokens: firestore.default.FieldValue.arrayUnion(token),
-        platform: Platform.OS,
-        lastTokenUpdate: Date.now(),
-        // Keep the legacy field in lockstep so any code reading it still works
-        // during the transition window. Cleanup happens in UserProfileService.ensureProfile.
-        fcmToken: token,
-      }, { merge: true });
+      await db.collection('users').doc(userId)
+        .collection('private').doc(PRIVATE_TOKENS_DOC)
+        .set({
+          // arrayUnion guards against duplicates if the same token re-registers.
+          fcmTokens: firestore.default.FieldValue.arrayUnion(token),
+          platform: Platform.OS,
+          lastTokenUpdate: Date.now(),
+        }, { merge: true });
     } catch (error) {
       if (__DEV__) console.warn('[FCM] Token storage failed:', error);
     }

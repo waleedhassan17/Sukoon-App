@@ -8,7 +8,17 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "reset-project": "node ./scripts/reset-project.js",
-    "test": "jest"
+    "test": "jest",
+    "test:rules": "node tools/emulator-env.js firebase emulators:exec --only firestore --project demo-sukoon-rules \"npm --prefix tests/rules test\"",
+    "test:functions": "npm --prefix functions test",
+    "test:all": "npm test && npm run test:rules && npm run test:functions",
+    "emu": "node tools/emulator-env.js firebase emulators:start --only firestore,auth --project demo-sukoon",
+    "typecheck": "tsc --noEmit && npm --prefix functions exec -- tsc -p functions --noEmit",
+    "typecheck:app": "tsc --noEmit",
+    "typecheck:functions": "cd functions && npx tsc --noEmit",
+    "deploy:rules": "firebase deploy --only firestore:rules",
+    "deploy:indexes": "firebase deploy --only firestore:indexes",
+    "deploy:firestore": "firebase deploy --only firestore:rules,firestore:indexes"
   },
   "dependencies": {
     "@expo/metro-runtime": "^6.1.2",

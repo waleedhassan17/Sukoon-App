@@ -24,9 +24,9 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
 import { t, useLocale } from '@/lib/i18n';
-import { FirebaseFunctions } from '@/lib/firebaseFunctions';
-import { getFirestore } from '@/lib/firebaseConfig';
+import { InviteService, InviteError, InviteFailure } from '@/lib/inviteService';
 import { UserProfileService, PublicUserProfile } from '@/lib/userProfileService';
+import { classifyError } from '@/lib/salah/errors';
 
 type State =
   | { kind: 'loading' }
@@ -35,18 +35,32 @@ type State =
   | { kind: 'accepted'; alreadyFriends: boolean }
   | { kind: 'error'; messageKey: string };
 
-const ERROR_KEY_FROM_CODE: Record<string, string> = {
+/** Invite-specific failures, which are more precise than the generic taxonomy. */
+const ERROR_KEY_FROM_REASON: Record<InviteFailure, string> = {
   INVITE_NOT_FOUND: 'accept.errors.invalid',
   INVITE_EXPIRED: 'accept.errors.expired',
-  INVITE_USED: 'accept.errors.used',
   INVITE_REVOKED: 'accept.errors.invalid',
   INVITE_SELF: 'accept.errors.self',
   BLOCKED: 'accept.errors.blocked',
+  UNAVAILABLE: 'accept.errors.network',
 };
 
-function pairIdOf(uidA: string, uidB: string): string {
-  if (uidA === uidB) throw new Error('INVITE_SELF');
-  return uidA < uidB ? `${uidA}_${uidB}` : `${uidB}_${uidA}`;
+/**
+ * Resolve any thrown value to a message key.
+ *
+ * This used to concatenate two error messages and substring-match them, which meant
+ * a Firestore permission-denied fell through to "Couldn't reach the server" — telling
+ * an offline user and a rejected user the same, half-wrong thing.
+ */
+function messageKeyFor(err: unknown): string {
+  if (err instanceof InviteError) return ERROR_KEY_FROM_REASON[err.reason];
+  switch (classifyError(err)) {
+    case 'unauthenticated': return 'common.signedOut';
+    case 'offline':         return 'accept.errors.network';
+    case 'permissionDenied':return 'accept.errors.blocked';
+    case 'notFound':        return 'accept.errors.invalid';
+    default:                return 'common.error';
+  }
 }
 
 export default function AcceptInviteScreen() {
@@ -65,47 +79,16 @@ export default function AcceptInviteScreen() {
 
   const resolveInvite = useCallback(async () => {
     setState({ kind: 'loading' });
-    if (!/^[A-Z0-9]{6}$/.test(code)) {
-      setState({ kind: 'error', messageKey: 'accept.errors.invalid' });
-      return;
-    }
     try {
-      const db = await getFirestore();
-      if (!db) {
-        setState({ kind: 'error', messageKey: 'accept.errors.network' });
-        return;
-      }
-      const inviteSnap = await db.collection('invites').doc(code).get();
-      if (!inviteSnap.exists) {
-        setState({ kind: 'error', messageKey: 'accept.errors.invalid' });
-        return;
-      }
-      const invite = inviteSnap.data();
-      if (!invite) {
-        setState({ kind: 'error', messageKey: 'accept.errors.invalid' });
-        return;
-      }
-      if (invite.status === 'used') {
-        setState({ kind: 'error', messageKey: 'accept.errors.used' });
-        return;
-      }
-      if (invite.status === 'revoked') {
-        setState({ kind: 'error', messageKey: 'accept.errors.invalid' });
-        return;
-      }
-      const expiresMs = invite.expiresAt?.toMillis ? invite.expiresAt.toMillis() : 0;
-      if (expiresMs && expiresMs < Date.now()) {
-        setState({ kind: 'error', messageKey: 'accept.errors.expired' });
-        return;
-      }
-      const inviter = await UserProfileService.readPublicProfile(invite.fromUid);
+      const { fromUid } = await InviteService.resolveInvite(code);
+      const inviter = await UserProfileService.readPublicProfile(fromUid);
       if (!inviter) {
         setState({ kind: 'error', messageKey: 'accept.errors.invalid' });
         return;
       }
       setState({ kind: 'resolved', inviter });
-    } catch {
-      setState({ kind: 'error', messageKey: 'accept.errors.network' });
+    } catch (err) {
+      setState({ kind: 'error', messageKey: messageKeyFor(err) });
     }
   }, [code]);
 
@@ -117,103 +100,16 @@ export default function AcceptInviteScreen() {
     setState({ kind: 'accepting' });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
-      const res = await FirebaseFunctions.acceptInvite(code);
+      // Single path. The previous version tried a Cloud Function and, on any
+      // failure, silently forged the friendship document itself — so a genuine
+      // rejection looked identical to success. InviteService writes once, and
+      // firestore.rules validates that write against the inviter's live code.
+      const res = await InviteService.acceptInvite(code);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setState({ kind: 'accepted', alreadyFriends: res.alreadyFriends });
       setTimeout(() => router.replace('/tools/salah-friends' as any), 1200);
-    } catch (e) {
-      // Local fallback if Cloud Functions fail/unreachable
-      try {
-        const { getAuth } = await import('@/lib/firebaseConfig');
-        const auth = await getAuth();
-        const db = await getFirestore();
-        if (!auth || !db || !auth.currentUser) throw e;
-        
-        const inviteSnap = await db.collection('invites').doc(code).get();
-        if (!inviteSnap.exists) throw e;
-        const invite = inviteSnap.data();
-        if (!invite || invite.status !== 'active') throw e;
-        
-        const myUid = auth.currentUser.uid;
-        const inviterUid = invite.fromUid;
-        if (myUid === inviterUid) throw new Error('INVITE_SELF');
-
-        // Validate expiry if present (Timestamp or Date)
-        const expiresMs =
-          invite.expiresAt?.toMillis ? invite.expiresAt.toMillis()
-          : invite.expiresAt instanceof Date ? invite.expiresAt.getTime()
-          : typeof invite.expiresAt === 'number' ? invite.expiresAt
-          : 0;
-        if (expiresMs && expiresMs < Date.now()) throw new Error('INVITE_EXPIRED');
-
-        const pairId = pairIdOf(inviterUid, myUid);
-        const usersSorted = inviterUid < myUid ? [inviterUid, myUid] : [myUid, inviterUid];
-
-        const friendshipRef = db.collection('friendships').doc(pairId);
-        const existingFriendship = await friendshipRef.get();
-
-        if (existingFriendship.exists) {
-          const existing = existingFriendship.data() ?? {};
-          if (existing.status === 'active') {
-            // Idempotent: already friends. Multi-use invite stays active.
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-            setState({ kind: 'accepted', alreadyFriends: true });
-            setTimeout(() => router.replace('/tools/salah-friends' as any), 1200);
-            return;
-          }
-          if (existing.status === 'blocked') throw new Error('BLOCKED');
-
-          // removed → reactivate. Invite is NOT consumed (multi-use).
-          await friendshipRef.update({
-            status: 'active',
-            acceptedAt: new Date(),
-            currentStreak: 0,
-            lastStreakDate: null,
-            milestonesAchieved: [],
-            lastUpdatedAt: new Date(),
-          });
-
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-          setState({ kind: 'accepted', alreadyFriends: false });
-          setTimeout(() => router.replace('/tools/salah-friends' as any), 1200);
-          return;
-        }
-
-        // Create new friendship (schema aligned with backend).
-        // The invite is multi-use: we do NOT mark it used or regenerate it, so the
-        // same shared link keeps working for every friend who opens it.
-        await friendshipRef.set({
-          users: usersSorted,
-          status: 'active',
-          initiatedBy: inviterUid,
-          acceptedAt: new Date(),
-          currentStreak: 0,
-          longestStreak: 0,
-          lastStreakDate: null,
-          milestonesAchieved: [],
-          createdAt: new Date(),
-        }, { merge: false });
-
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-        setState({ kind: 'accepted', alreadyFriends: false });
-        setTimeout(() => router.replace('/tools/salah-friends' as any), 1200);
-      } catch (fallbackError) {
-        const primaryMsg = String((fallbackError as any)?.message ?? '');
-        const secondaryMsg = String((e as any)?.message ?? '');
-        const combinedMsg = `${primaryMsg} ${secondaryMsg}`.trim();
-        const fnCode = String((e as any)?.code ?? '');
-
-        if (fnCode.includes('unauthenticated')) {
-          setState({ kind: 'error', messageKey: 'common.signedOut' });
-          return;
-        }
-
-        const key = Object.keys(ERROR_KEY_FROM_CODE).find(k => combinedMsg.includes(k));
-        setState({
-          kind: 'error',
-          messageKey: key ? ERROR_KEY_FROM_CODE[key] : 'accept.errors.network',
-        });
-      }
+    } catch (err) {
+      setState({ kind: 'error', messageKey: messageKeyFor(err) });
     }
   }, [code, router]);
 
@@ -358,12 +254,12 @@ export default function AcceptInviteScreen() {
         <View style={st.nameBackdrop}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
             <View style={[st.nameCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}>
-              <Text style={[st.nameTitle, { color: theme.text }]}>Set your name</Text>
-              <Text style={[st.nameSub, { color: theme.textSecondary }]}>Your friend will see this in their friends list.</Text>
+              <Text style={[st.nameTitle, { color: theme.text }]}>{t('accept.setNameTitle')}</Text>
+              <Text style={[st.nameSub, { color: theme.textSecondary }]}>{t('accept.setNameBody')}</Text>
               <TextInput
                 value={nameDraft}
                 onChangeText={setNameDraft}
-                placeholder="Your name"
+                placeholder={t('accept.namePlaceholder')}
                 placeholderTextColor={theme.textTertiary}
                 autoFocus
                 maxLength={40}
@@ -380,7 +276,7 @@ export default function AcceptInviteScreen() {
                   disabled={savingName}
                   activeOpacity={0.85}
                 >
-                  <Text style={[st.nameBtnText, { color: theme.text }]}>Cancel</Text>
+                  <Text style={[st.nameBtnText, { color: theme.text }]}>{t('common.cancel')}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -413,7 +309,7 @@ export default function AcceptInviteScreen() {
                   disabled={savingName || !nameDraft.trim()}
                   activeOpacity={0.85}
                 >
-                  <Text style={[st.nameBtnText, { color: '#fff' }]}>{savingName ? 'Saving…' : 'Continue'}</Text>
+                  <Text style={[st.nameBtnText, { color: '#fff' }]}>{savingName ? t('accept.savingCta') : t('accept.continueCta')}</Text>
                 </TouchableOpacity>
               </View>
             </View>

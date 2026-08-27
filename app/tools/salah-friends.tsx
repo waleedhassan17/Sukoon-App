@@ -16,7 +16,7 @@ import {
   View, Text, FlatList, RefreshControl, StyleSheet,
   TouchableOpacity, ActivityIndicator, Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -25,12 +25,15 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { t, useLocale } from '@/lib/i18n';
 import { FriendsService, FriendListEntry } from '@/lib/friendsService';
 import { PrayerTimesService } from '@/lib/prayerTimes';
+import { toFriendsError } from '@/lib/salah/errors';
+import { readTodaySelfCount } from '@/lib/salah/todayCount';
+import PairStreakEngine from '@/lib/salah/pairStreak';
 import SalahTopTabs from '@/components/friends/SalahTopTabs';
 import FriendListItem from '@/components/friends/FriendListItem';
 
 type ScreenState =
   | { kind: 'loading' }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; retryable: boolean }
   | { kind: 'data'; entries: FriendListEntry[] };
 
 export default function SalahFriendsScreen() {
@@ -49,12 +52,13 @@ export default function SalahFriendsScreen() {
     unsubRef.current?.();
     setState({ kind: 'loading' });
     unsubRef.current = FriendsService.subscribeToFriends(
-      entries => {
-        setState({ kind: 'data', entries });
-        // Header X/5 — derive from any entry (todayCountSelf is the same for all).
-        setTodaySelfCount(entries.length > 0 ? entries[0].todayCountSelf : 0);
+      entries => setState({ kind: 'data', entries }),
+      err => {
+        // Distinct message per failure mode, and retry offered only where retrying
+        // can actually help — a rules rejection will fail identically forever.
+        const { message, retryable } = toFriendsError(err);
+        setState({ kind: 'error', message, retryable });
       },
-      err => setState({ kind: 'error', message: err.message ?? t('common.error') }),
     );
   }, []);
 
@@ -63,6 +67,34 @@ export default function SalahFriendsScreen() {
     subscribe();
     return () => unsubRef.current?.();
   }, [subscribe]);
+
+  /**
+   * The header's X/5 comes from the user's OWN prayer log, not from the friends
+   * list. It used to be read off entries[0], which meant it showed 0/5 for anyone
+   * with no friends — the exact people this screen is trying to convert.
+   */
+  const refreshSelfCount = useCallback(async () => {
+    setTodaySelfCount(await readTodaySelfCount());
+  }, []);
+
+  useEffect(() => { refreshSelfCount(); }, [refreshSelfCount]);
+
+  // Advance or break shared streaks on focus. This is the client-side stand-in for
+  // the onPrayerWrite trigger and the hourly sweep, neither of which can run on the
+  // Spark plan. Every transition is idempotent, so repeating it on focus is safe.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      refreshSelfCount();
+      PairStreakEngine.sync().then(outcome => {
+        if (cancelled) return;
+        if (outcome.advanced.length > 0 || outcome.broken.length > 0) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        }
+      });
+      return () => { cancelled = true; };
+    }, [refreshSelfCount]),
+  );
 
   // Compute pastMaghribLocal once + on every refocus.
   useEffect(() => {
@@ -138,10 +170,18 @@ export default function SalahFriendsScreen() {
       )}
 
       {state.kind === 'error' && (
-        <TouchableOpacity onPress={subscribe} style={[st.errBox, { borderColor: theme.error }]}>
+        <TouchableOpacity
+          onPress={state.retryable ? subscribe : undefined}
+          disabled={!state.retryable}
+          activeOpacity={state.retryable ? 0.7 : 1}
+          accessibilityRole={state.retryable ? 'button' : 'alert'}
+          style={[st.errBox, { borderColor: theme.error }]}
+        >
           <Ionicons name="alert-circle-outline" size={20} color={theme.error} />
           <Text style={[st.errText, { color: theme.error }]}>{state.message}</Text>
-          <Text style={[st.retry, { color: theme.primary }]}>{t('friends.errorRetry')}</Text>
+          {state.retryable && (
+            <Text style={[st.retry, { color: theme.primary }]}>{t('friends.errorRetry')}</Text>
+          )}
         </TouchableOpacity>
       )}
 

@@ -136,5 +136,22 @@
   "listen.badgeName.first_book_finished": "First book finished",
   "listen.badgeName.ten_hours": "10 hours of listening",
   "listen.badgeName.streak_7": "7-day streak",
-  "listen.badgeName.streak_30": "30-day streak"
+  "listen.badgeName.streak_30": "30-day streak",
+  "friends.errors.permissionDenied": "We couldn't load your friends. Please update Sukoon to the latest version.",
+  "friends.errors.offline": "You're offline. Your prayers are still being saved on this device.",
+  "friends.errors.missingIndex": "Something's misconfigured on our side. Please try again later.",
+  "friends.errors.unauthenticated": "Still signing you in — give it a moment.",
+  "friends.errors.notFound": "This friend is no longer available.",
+  "friends.detail.partialData": "Some days couldn't be loaded.",
+  "friends.detail.you": "You",
+  "invites.errorCreate": "Couldn't create your invite link. Please try again.",
+  "invites.shareCta": "Share Invite Link",
+  "invites.setNameTitle": "Set your name first",
+  "invites.setNameBody": "Your display name is what your friend will see in the invite and in their friends list.",
+  "invites.setNameWarning": "Set your display name so friends don't see random names.",
+  "accept.setNameTitle": "Set your name",
+  "accept.setNameBody": "Your friend will see this in their friends list.",
+  "accept.namePlaceholder": "Your name",
+  "accept.continueCta": "Continue",
+  "accept.savingCta": "Saving…"
 }
