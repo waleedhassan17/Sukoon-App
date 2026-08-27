@@ -60,5 +60,26 @@ build-release.sh
 # Test coverage
 coverage/
 
-# Web build
+# Web build output — `expo export` writes here. Never needed for a native build,
+# and it was ~33 MB of the upload tarball (a stale web bundle plus a duplicated
+# 11 MB font), which is what tipped the upload over into a 408 timeout.
 web-build/
+dist/
+
+# Firebase backend and tests. These live inside the app directory so they are
+# version-controlled next to the client they secure, but they are never part of
+# the app bundle — Metro blocklists them and tsconfig excludes them, so there is
+# no reason to ship them to the build server either.
+functions/
+tests/
+__tests__/
+firestore.rules
+firestore.indexes.json
+firebase.json
+.firebaserc
+emulator-data/
+firestore-debug.log
+firebase-debug.log
+
+# Repo tooling
+tools/
