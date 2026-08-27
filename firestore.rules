@@ -393,7 +393,10 @@ service cloud.firestore {
           && next.lastStreakDate == null;
       }
 
-      function validBlock(prev, next) {
+      // No `prev` parameter: unlike remove, blocking is permitted from ANY prior
+      // status, so there is nothing about the existing document to check beyond
+      // the membership already enforced by the `allow update` guard.
+      function validBlock(next) {
         return affected().hasOnly([
               'status', 'blockedBy', 'currentStreak', 'lastStreakDate', 'lastUpdatedAt'
             ])
@@ -427,7 +430,7 @@ service cloud.firestore {
              validAdvance(resource.data, request.resource.data)
           || validBreak(resource.data, request.resource.data)
           || validRemove(resource.data, request.resource.data)
-          || validBlock(resource.data, request.resource.data)
+          || validBlock(request.resource.data)
           || validReactivate(resource.data, request.resource.data)
         );
 
