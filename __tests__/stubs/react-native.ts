@@ -8,4 +8,12 @@ export const Platform = {
     specifics[Platform.OS] ?? specifics.default,
 };
 
-export default { Platform };
+/**
+ * Native module registry. Empty by default, which is what lib/firebaseConfig's
+ * hasNativeFirebaseModules() reads as "Expo Go / no native Firebase" — the
+ * behaviour every other test relies on. Tests that need native Firebase present
+ * assign into this object before requiring the module under test.
+ */
+export const NativeModules: Record<string, any> = {};
+
+export default { Platform, NativeModules };

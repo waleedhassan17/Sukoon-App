@@ -199,6 +199,21 @@ export async function getAuth(): Promise<any | null> {
 let authReadyPromise: Promise<string | null> | null = null;
 
 /**
+ * Hard ceiling on how long anyone waits for anonymous sign-in.
+ *
+ * This is not a nicety. App startup awaits DataSyncService.init(), which awaits
+ * this, and that await gates setAppReady() → SplashScreen.hideAsync(). Firebase's
+ * signInAnonymously() has no timeout of its own, so on a captive-portal wifi or a
+ * stalled connection it can neither resolve nor reject — and an unbounded await
+ * there means the app never leaves the splash screen.
+ *
+ * 10s is generous for a slow-but-working network while still bounded. Cloud sync
+ * is optional; the tracker works entirely from AsyncStorage, so timing out costs
+ * the user nothing they can see.
+ */
+const AUTH_READY_TIMEOUT_MS = 10000;
+
+/**
  * Resolve once anonymous auth has actually settled, yielding the uid.
  *
  * Why this exists: sign-in used to be fire-and-forgotten in DataSyncService.init(),
@@ -228,9 +243,21 @@ export function authReady(): Promise<string | null> {
       const finish = (uid: string | null) => {
         if (settled) return;
         settled = true;
+        clearTimeout(timer);
         try { unsubscribe(); } catch { /* listener already torn down */ }
+        if (uid === null) {
+          // Don't cache a failure forever — the next caller should get a fresh
+          // attempt once the network recovers, rather than being told "no auth"
+          // for the rest of the process lifetime.
+          authReadyPromise = null;
+        }
         resolve(uid);
       };
+
+      const timer = setTimeout(() => {
+        if (__DEV__) console.warn('[Firebase] Anonymous sign-in timed out; continuing without cloud sync');
+        finish(null);
+      }, AUTH_READY_TIMEOUT_MS);
 
       const unsubscribe = auth.onAuthStateChanged((user: any) => {
         if (user?.uid) finish(user.uid);

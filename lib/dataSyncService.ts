@@ -18,7 +18,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getFirestore, getAuth, isFirebaseConfigured, authReady } from './firebaseConfig';
+import { getFirestore, isFirebaseConfigured, authReady } from './firebaseConfig';
 import {
   LOCAL_PRAYER_KEYS,
   CANONICAL_PRAYER_KEYS,
@@ -115,21 +115,24 @@ export const DataSyncService = {
     // One-time migration: fix any salah data stored in wrapped {data:{...}} format
     await this._migrateSalahDataFormat();
     
-    // Try anonymous Firebase auth (enables Firestore access)
+    // Anonymous Firebase auth (enables Firestore access).
+    //
+    // Routed through authReady() rather than calling signInAnonymously() directly:
+    // that call has no timeout of its own, and this runs inside the startup
+    // sequence that gates the splash screen — an unbounded await here strands the
+    // app on the splash screen on a captive-portal or stalled connection.
+    // authReady() bounds the wait and returns null instead of hanging.
+    //
+    // It also means there is ONE sign-in path. Doing it here as well would race
+    // two attempts against each other on first launch.
     if (isFirebaseConfigured()) {
       try {
-        const auth = await getAuth();
-        if (auth) {
-          const currentUser = auth.currentUser;
-          if (!currentUser) {
-            const credential = await auth.signInAnonymously();
-            if (credential.user) {
-              await AsyncStorage.setItem(SYNC_KEYS.USER_ID, credential.user.uid);
-              if (__DEV__) console.log('[DataSync] Anonymous auth:', credential.user.uid);
-            }
-          } else {
-            await AsyncStorage.setItem(SYNC_KEYS.USER_ID, currentUser.uid);
-          }
+        const uid = await authReady();
+        if (uid) {
+          await AsyncStorage.setItem(SYNC_KEYS.USER_ID, uid);
+          if (__DEV__) console.log('[DataSync] Anonymous auth:', uid);
+        } else if (__DEV__) {
+          console.log('[DataSync] No auth — running local-only');
         }
       } catch (error) {
         if (__DEV__) console.warn('[DataSync] Auth failed (offline mode):', error);
