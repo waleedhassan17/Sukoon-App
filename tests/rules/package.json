@@ -8,12 +8,35 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "testMatch": ["<rootDir>/*.test.js"],
-    "testTimeout": 20000
+    "testMatch": [
+      "<rootDir>/*.test.js",
+      "<rootDir>/*.test.ts"
+    ],
+    "testTimeout": 60000,
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "esModuleInterop": true,
+            "strict": false,
+            "types": [
+              "jest",
+              "node"
+            ],
+            "skipLibCheck": true,
+            "resolveJsonModule": true
+          }
+        }
+      ]
+    }
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^4.0.1",
+    "@types/jest": "^30.0.0",
     "firebase": "^11.0.0",
-    "jest": "^29.7.0"
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.12",
+    "typescript": "^6.0.3"
   }
 }

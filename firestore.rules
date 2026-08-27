@@ -229,11 +229,48 @@ service cloud.firestore {
       }
 
       // ---- read -----------------------------------------------------------
-      // Two branches, both provable from a query's constraints so the friends
-      // listener can be authorised wholesale rather than post-filtered.
-      // See Sukoon-App/lib/friendsService.ts, which queries with an explicit
-      // `status == 'active'` filter to match branch one.
-      allow read: if isMember() && (
+      // `get` and `list` are separated deliberately.
+      //
+      // GET must tolerate a MISSING document. acceptInvite() and blockFriend()
+      // both open a transaction with a read of friendships/{pairId} to decide
+      // whether they are creating or reactivating — and on a first-time accept
+      // that document does not exist yet. A rule that dereferences
+      // resource.data on a null resource raises an evaluation error and denies
+      // the read, which killed the entire accept transaction. Probing existence
+      // is limited to pairs the caller belongs to, so this leaks nothing: pairId
+      // is the sorted uid pair, and only its two members may ask about it.
+      //
+      // Membership is checked by matching the uid against the head or tail
+      // segment of the pairId, rather than splitting on '_'. A split would break
+      // for any uid that itself contains an underscore — it would fail closed,
+      // silently blocking a legitimate accept.
+      //
+      // Residual, and deliberately accepted: a caller whose uid is a suffix of a
+      // real member's uid can also pass this check. All they learn is that a
+      // pairId they already had to construct in full does not exist — the
+      // non-null branch below still denies them any actual friendship data.
+      function pairHasMember(pid, u) {
+        return pid.size() > u.size() + 1
+          && (
+               (pid[0:u.size()] == u && pid[u.size():u.size() + 1] == '_')
+               || (pid[pid.size() - u.size():pid.size()] == u
+                   && pid[pid.size() - u.size() - 1:pid.size() - u.size()] == '_')
+             );
+      }
+
+      allow get: if signedIn() && (
+        (resource == null && pairHasMember(pairId, uid()))
+        || (resource != null && isMember() && (
+              resource.data.status == 'active'
+              || (resource.data.status == 'blocked' && resource.data.blockedBy == uid())
+           ))
+      );
+
+      // LIST is the friends listener. Both conditions are provable from the
+      // query's constraints (array-contains uid + status == 'active'), so the
+      // whole query is authorised rather than post-filtered — see
+      // lib/friendsService.ts. Query results always exist, so no null case here.
+      allow list: if isMember() && (
         resource.data.status == 'active'
         || (resource.data.status == 'blocked' && resource.data.blockedBy == uid())
       );
