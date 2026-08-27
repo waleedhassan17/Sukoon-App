@@ -316,6 +316,33 @@ You now have:
 
 ---
 
+## ⚠️ Version numbering — read before every release
+
+Three places carry a version and **the one that wins is not the obvious one**:
+
+| Source | Controls | Notes |
+|---|---|---|
+| `app.json` → `expo.version` | nothing, while `android/` exists | ignored by EAS |
+| `android/app/build.gradle` → `versionName` | **the shipped version name** | ← EAS reads this |
+| EAS remote counter | `versionCode` | `eas.json` sets `appVersionSource: remote`, so EAS auto-increments |
+
+Because a native `android/` directory exists, EAS logs *"Specified value in app.json is
+ignored because an android directory was detected"* and takes `versionName` from the
+native code. A v1.3.0 release was queued as **1.2.4** for exactly this reason — Play
+would have accepted it (the versionCode was higher) and users would have seen the
+previous version number on a security release.
+
+**Before every release: set `versionName` in `android/app/build.gradle` to match
+`app.json`.** `android/` is in `.gitignore`, so this fix does not travel between
+machines — it must be redone wherever you build.
+
+The durable fix is to pick one workflow and commit to it: either delete `android/` and
+let EAS prebuild from `app.json`, or track `android/` in git and treat it as the source
+of truth. It is currently half of each, which is what created the trap. That decision
+was deliberately left open rather than made mid-release.
+
+---
+
 ## 🔥 Firebase / Salah Buddy
 
 This document covers the **native build system**. The Firebase backend for the Salah
