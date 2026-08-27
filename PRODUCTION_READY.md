@@ -332,8 +332,12 @@ The short version:
 - **Deploying is rules + indexes only** — there is nothing else to push:
   ```bash
   firebase login
-  npm run deploy:firestore    # indexes first, then rules
+  npm run deploy:indexes      # first — let index builds finish
+  npm run deploy:rules        # then
   ```
+  If the deploy fails to reach `firestore.googleapis.com`, that host resolves to an
+  unroutable IPv6 address on some networks and Node hangs on it. Prefix with
+  `NODE_OPTIONS="--no-network-family-autoselection"`.
 - **Local development** runs against the Firebase emulators:
   ```bash
   npm run emu                                     # Firestore :8090, Auth :9099
@@ -344,7 +348,7 @@ The short version:
   `tools/emulator-env.js`.
 - **Before shipping a rules change**, run the security suite:
   ```bash
-  npm run test:rules     # 79 tests; boots the emulator itself
+  npm run test:rules     # 92 rules + acceptance tests; boots the emulator itself
   ```
 - **Migration warning**: the current rules reject `fcmToken` / `fcmTokens` on
   `users/{uid}` (tokens moved to an owner-only subcollection). Ship the app update

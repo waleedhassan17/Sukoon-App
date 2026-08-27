@@ -143,10 +143,11 @@ Sukoon-App/                    ← the git repo; app AND backend
 ├── firebase.json  .firebaserc ← project sukoon-b36b4; emulator ports
 ├── package.json               ← scripts: emu, test:rules, test:all, deploy:*
 ├── tools/emulator-env.js      ← JDK-21 preflight for the emulator
-├── tests/rules/               ← 81 security-rules tests — the primary gate
+├── tests/rules/               ← 92 rules + acceptance tests — the primary gate
 │   ├── friendships.test.js      forgery attempts against streak state
 │   ├── prayers.test.js          day docs, profiles, private tokens, invites
-│   └── clientShapes.test.js     every real client payload must be ACCEPTED
+│   ├── clientShapes.test.js     every real client payload must be ACCEPTED
+│   └── acceptance.test.ts      the checklist below, executed end-to-end
 ├── functions/                 ← DORMANT Blaze path (compiles, tests pass)
 ├── public/invite/             ← hosting fallback page for invite links
 ├── lib/salah/                 ← the client streak engine (see its README.md)
@@ -208,7 +209,7 @@ tracker still works from AsyncStorage and the friends surfaces disable themselve
 
 ```bash
 npm run test:all      # app + rules + functions
-npm run test:rules    # 81 security-rules tests (boots the emulator itself)
+npm run test:rules    # 92 rules + acceptance tests (boots the emulator itself)
 npm run typecheck     # app and functions
 ```
 
@@ -236,7 +237,17 @@ Only rules and indexes deploy on Spark. There are no functions to push.
 
 ```bash
 firebase login
-npm run deploy:firestore          # rules + indexes
+npm run deploy:indexes            # first — let builds finish
+npm run deploy:rules              # then
+```
+
+**If the deploy fails with `Failed to make request to https://firestore.googleapis.com`:**
+that host resolves to an IPv6 address that is unroutable on some networks, and Node's
+connection logic hangs on it rather than falling back to IPv4 (curl succeeds, which
+makes it look like a CLI bug). Force IPv4 for the CLI process:
+
+```bash
+NODE_OPTIONS="--no-network-family-autoselection" npm run deploy:indexes
 ```
 
 Or separately: `npm run deploy:rules`, `npm run deploy:indexes`.
@@ -272,19 +283,34 @@ property that actually matters) so old codes keep working.
 
 ## Acceptance checklist
 
-Run with two anonymous users against the emulator.
+**Items 1 and 3–8 are automated** in `tests/rules/acceptance.test.ts`, which drives
+two users through the real flow against the real rules — using the actual client
+streak math from `lib/salah/streakMath.ts` and the exact payloads the app writes,
+not a reimplementation. Item 2 is covered by `__tests__/todayCount.test.ts`.
 
-1. Fresh user opens **Friends** → empty state, no error banner.
-2. Log 3 prayers with **zero** friends → the header reads `3/5`.
-3. A creates an invite → B opens `/invite/{CODE}` → accept → each appears in the
-   other's list with the correct name and today-count.
-4. Both log all 5 for the same local date → shared streak becomes exactly **1**;
-   revisiting the screen leaves it at 1.
-5. Skip a day, then complete the next → streak resets to 1, `longestStreak` unchanged.
-6. Drive `currentStreak` to 7 → milestone awarded once; re-syncing does not re-award.
-7. Let a streak lapse two days → 💔 badge appears, and stops showing after 24h.
-8. `npm run test:rules` → every forged write denied.
-9. Airplane mode → the tracker still logs locally; no unhandled rejections.
+```bash
+npm run test:rules
+```
+
+| # | Check | Covered by |
+|---|---|---|
+| 1 | Fresh user's Friends tab is empty, never a permission error | `acceptance.test.ts` |
+| 2 | Header reads X/5 with **zero** friends | `__tests__/todayCount.test.ts` |
+| 3 | Invite → accept → each appears in the other's list; partner counts readable | `acceptance.test.ts` |
+| 4 | A shared complete day advances the streak by **exactly 1**; repeats are no-ops | `acceptance.test.ts` |
+| 5 | A missed day resets the streak; `longestStreak` never decreases | `acceptance.test.ts` |
+| 6 | The 7-day milestone fires exactly once | `acceptance.test.ts` |
+| 7 | 💔 window: a lapsed streak records `lastBrokenAt`/`lastBrokenStreak`, once | `acceptance.test.ts` |
+| 8 | Forged writes rejected; a stranger cannot join or read an established pair | `acceptance.test.ts` |
+
+### Still needs a human, on two devices
+
+These are UI-level and cannot be asserted from a test harness:
+
+- the empty state and error banner actually **render** as intended;
+- **airplane mode** — the tracker still logs locally, with no unhandled rejections;
+- **Expo Go** — the feature disables gracefully instead of crashing;
+- the invite **deep link** opens the accept screen from a real WhatsApp message.
 
 ### Manual deep-link test
 
