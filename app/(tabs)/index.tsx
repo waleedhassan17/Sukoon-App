@@ -29,11 +29,14 @@ import { VoiceInputButton } from '@/components/VoiceInputButton';
 import QuranVoiceModal from '@/components/QuranVoiceModal';
 import { ReadingProgress } from '@/lib/readingProgress';
 import { QuranService } from '@/lib/quranService';
-import { PrayerTimesService, PrayerTimesData, HijriDate, IslamicCalendarData } from '@/lib/prayerTimes';
-import { NotificationService } from '@/lib/notificationService';
+import { PrayerTimesService } from '@/lib/prayerTimes';
+import { usePrayerTimes } from '@/lib/usePrayerTimes';
+import { formatHijri } from '@/lib/hijri';
+import { prayerNameKey } from '@/lib/prayerFormat';
+import { shouldAutoSubmitVoice, speechLangForLocale, VOICE_SUBMIT_DELAY_MS } from '@/lib/voiceSubmit';
+import { t, useLocale } from '@/lib/i18n';
 import { SHADOWS, RADIUS, SPACING, TYPOGRAPHY } from '@/constants/theme';
 import { EmotionService } from '@/lib/emotionService';
-import * as Location from 'expo-location';
 
 const { width } = Dimensions.get('window');
 const CARD_GAP = 12;
@@ -93,6 +96,7 @@ export default function HomeScreen() {
   const { theme } = useTheme();
   const { sizes } = useFontSize();
   const router = useRouter();
+  const locale = useLocale();
 
   const heroFade = useRef(new Animated.Value(0)).current;
   const heroSlide = useRef(new Animated.Value(30)).current;
@@ -102,13 +106,15 @@ export default function HomeScreen() {
   const [dailyAyah, setDailyAyah] = useState<any>(null);
   const [streak, setStreak] = useState(0);
   const [lastSeen, setLastSeen] = useState<any>(null);
-  const [prayerTimes, setPrayerTimes] = useState<PrayerTimesData | null>(null);
-  const [nextPrayer, setNextPrayer] = useState<any>(null);
+  // Prayer times: computed offline from the last-known location, refreshed from
+  // GPS in the background (and re-lays the notification window if the user moved).
+  const prayer = usePrayerTimes({ askPermission: 'ifNoLocation' });
+  const nextPrayer = prayer.next;
   const [inputFocused, setInputFocused] = useState(false);
-  const [islamicDate, setIslamicDate] = useState<IslamicCalendarData | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [voiceDetecting, setVoiceDetecting] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState('idle');
   const [interimText, setInterimText] = useState('');
 
@@ -191,8 +197,9 @@ export default function HomeScreen() {
     { label: 'Tasbeeh', icon: 'ellipse-outline' as const, family: 'ion' as const, route: '/tools/tasbeeh', gradient: theme.actionGradient1 },
     { label: 'Qiblah', icon: 'kaaba' as const, family: 'fa6' as const, route: '/tools/qiblah', gradient: theme.actionGradient2 },
     { label: 'Prayer', icon: 'mosque' as const, family: 'mci' as const, route: '/tools/prayer', gradient: theme.actionGradient3 },
+    { label: t('listen.title'), icon: 'headset-outline' as const, family: 'ion' as const, route: '/listen', gradient: theme.actionGradient4 },
     { label: 'Insights', icon: 'bar-chart-outline' as const, family: 'ion' as const, route: '/insights', gradient: theme.actionGradient4 },
-  ], [theme]);
+  ], [theme, locale]);
 
   useEffect(() => {
     Animated.parallel([
@@ -206,83 +213,77 @@ export default function HomeScreen() {
     ReadingProgress.getStreak().then(setStreak).catch(() => {});
     ReadingProgress.getLastSeen().then(setLastSeen).catch(() => {});
     QuranService.getRandomAyah().then(setDailyAyah).catch(() => {});
-    PrayerTimesService.getIslamicDate().then(setIslamicDate).catch(() => {});
     EmotionService.warmUp().catch(() => {}); // Pre-warm ML API
-    loadPrayerTimes();
-  };
-
-  const loadPrayerTimes = async () => {
-    try {
-      // ── Cache-first: instant load from today's cached data ──
-      const cached = await PrayerTimesService.getCachedPrayerTimes();
-      if (cached) {
-        setPrayerTimes(cached.data);
-        setNextPrayer(PrayerTimesService.getNextPrayer(cached.data));
-        return; // Done — no GPS or API needed
-      }
-
-      // ── No cache: fetch fresh ──
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
-
-      // Use cached location if available (avoids GPS delay)
-      let lat: number;
-      let lng: number;
-      const cachedLoc = await PrayerTimesService.getCachedLocation();
-      if (cachedLoc) {
-        lat = cachedLoc.lat;
-        lng = cachedLoc.lng;
-      } else {
-        const loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        lat = loc.coords.latitude;
-        lng = loc.coords.longitude;
-        // Cache location for next time
-        await PrayerTimesService.cacheLocation(lat, lng, '');
-      }
-
-      const times = await PrayerTimesService.getByCoordinates(lat, lng);
-      if (times) {
-        setPrayerTimes(times);
-        setNextPrayer(PrayerTimesService.getNextPrayer(times));
-
-        // Cache prayer times for instant load
-        await PrayerTimesService.cachePrayerTimes(times, '');
-
-        // Schedule notifications if enabled
-        try {
-          const prefs = await NotificationService.getPreferences();
-          if (prefs.enabled) {
-            await NotificationService.scheduleRollingWindow({ lat, lng });
-          }
-        } catch (notifErr) {
-          if (__DEV__) console.warn('Failed to schedule prayer notifications:', notifErr);
-        }
-      }
-    } catch (e) {
-      if (__DEV__) console.error('Prayer times error:', e);
-    }
   };
 
   // Debounce ref to prevent double navigation from rapid taps
   const isNavigatingRef = useRef(false);
+  const voiceSubmitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastWarmRef = useRef(0);
 
-  const handleAnalyze = useCallback(() => {
-    if (!emotionText.trim() || isRecording || isSubmitting) return;
-    if (isNavigatingRef.current) return;
+  /** Wake the (sleeping) emotion API a little before it is needed. Cheap + bounded. */
+  const warmEmotionApi = useCallback(() => {
+    const now = Date.now();
+    if (now - lastWarmRef.current < 20_000) return;
+    lastWarmRef.current = now;
+    EmotionService.warmUp().catch(() => {});
+  }, []);
+
+  /**
+   * Detect emotions for `raw` and open the result screen.
+   *
+   * Takes the text as an ARGUMENT on purpose: the voice path calls this the
+   * instant speech finishes, when React state (`emotionText`, `isRecording`) has
+   * not caught up yet — reading it here would submit stale/empty text.
+   */
+  const submitEmotion = useCallback((raw: string) => {
+    const text = raw.trim();
+    if (!text || isNavigatingRef.current) return;
     isNavigatingRef.current = true;
 
     Keyboard.dismiss();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setIsSubmitting(true);
 
-    router.push({ pathname: '/emotion-result', params: { text: emotionText.trim() } });
+    router.push({ pathname: '/emotion-result', params: { text } });
     setTimeout(() => {
       isNavigatingRef.current = false;
       setIsSubmitting(false);
     }, 1000);
-  }, [emotionText, isRecording, isSubmitting]);
+  }, [router]);
+
+  const handleAnalyze = useCallback(() => {
+    if (isRecording || isSubmitting || voiceDetecting) return;
+    submitEmotion(emotionText);
+  }, [emotionText, isRecording, isSubmitting, voiceDetecting, submitEmotion]);
+
+  const cancelVoiceSubmit = useCallback(() => {
+    if (voiceSubmitTimer.current) {
+      clearTimeout(voiceSubmitTimer.current);
+      voiceSubmitTimer.current = null;
+    }
+    setVoiceDetecting(false);
+  }, []);
+
+  /**
+   * The user finished speaking (silence, end of speech, or tapped stop) and we
+   * have real text → detect their emotions automatically after a short beat.
+   * Editing or clearing the text during that beat cancels it.
+   */
+  const handleVoiceFinal = useCallback((fullText: string) => {
+    if (!shouldAutoSubmitVoice(fullText)) return;
+    if (voiceSubmitTimer.current) clearTimeout(voiceSubmitTimer.current);
+    setVoiceDetecting(true);
+    voiceSubmitTimer.current = setTimeout(() => {
+      voiceSubmitTimer.current = null;
+      setVoiceDetecting(false);
+      submitEmotion(fullText);
+    }, VOICE_SUBMIT_DELAY_MS);
+  }, [submitEmotion]);
+
+  useEffect(() => () => {
+    if (voiceSubmitTimer.current) clearTimeout(voiceSubmitTimer.current);
+  }, []);
 
   const handleEmotionQuick = useCallback((name: string) => {
     if (isNavigatingRef.current) return;
@@ -292,13 +293,14 @@ export default function HomeScreen() {
     setTimeout(() => { isNavigatingRef.current = false; }, 1000);
   }, []);
 
-  const canAnalyze = emotionText.trim().length > 0 && !isRecording && !isSubmitting;
+  const canAnalyze = emotionText.trim().length > 0 && !isRecording && !isSubmitting && !voiceDetecting;
 
   // Memoized callbacks — no inline functions in JSX
   const handleTextChange = useCallback((text: string) => {
+    cancelVoiceSubmit(); // the user is editing what was heard — don't auto-submit over them
     setEmotionText(text);
     setVoiceError(null);
-  }, []);
+  }, [cancelVoiceSubmit]);
 
   const handleVoiceTextAppended = useCallback((newText: string) => {
     setEmotionText(newText);
@@ -306,9 +308,10 @@ export default function HomeScreen() {
   }, []);
 
   const handleVoiceClear = useCallback(() => {
+    cancelVoiceSubmit();
     setEmotionText('');
     setVoiceError(null);
-  }, []);
+  }, [cancelVoiceSubmit]);
 
   const handleVoiceError = useCallback((error: string) => {
     setVoiceError(error);
@@ -316,11 +319,14 @@ export default function HomeScreen() {
 
   const handleRecordingChange = useCallback((recording: boolean) => {
     setIsRecording(recording);
-    if (!recording) {
+    if (recording) {
+      cancelVoiceSubmit(); // a new recording supersedes any pending auto-submit
+      warmEmotionApi(); // wake the API while the user is still talking
+    } else {
       setVoiceStatus('idle');
       setInterimText('');
     }
-  }, []);
+  }, [cancelVoiceSubmit, warmEmotionApi]);
 
   const handleVoiceStatusChange = useCallback((s: any) => {
     setVoiceStatus(s);
@@ -334,7 +340,10 @@ export default function HomeScreen() {
   // this prop changes, and an inline arrow changes on every Home-screen render.
   const handleVoiceModalClose = useCallback(() => setVoiceVisible(false), []);
 
-  const handleInputFocus = useCallback(() => setInputFocused(true), []);
+  const handleInputFocus = useCallback(() => {
+    setInputFocused(true);
+    warmEmotionApi();
+  }, [warmEmotionApi]);
   const handleInputBlur = useCallback(() => setInputFocused(false), []);
 
   return (
@@ -358,9 +367,7 @@ export default function HomeScreen() {
             <View style={styles.heroTopBar}>
               <View>
                 <Text style={styles.heroDate}>
-                  {islamicDate
-                    ? `${islamicDate.hijri.day} ${islamicDate.hijri.month} ${islamicDate.hijri.year} AH`
-                    : new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                  {formatHijri(new Date())}
                 </Text>
               </View>
               <View style={styles.heroTopRight}>
@@ -451,6 +458,9 @@ export default function HomeScreen() {
                 <VoiceInputButton
                   searchText={emotionText}
                   onTextAppended={handleVoiceTextAppended}
+                  onFinalTranscript={handleVoiceFinal}
+                  lang={speechLangForLocale(locale)}
+                  micLabel={t('voice.micLabel')}
                   onClear={handleVoiceClear}
                   onInterimText={handleInterimText}
                   onRecordingChange={handleRecordingChange}
@@ -470,7 +480,7 @@ export default function HomeScreen() {
                 onPress={handleAnalyze}
                 disabled={!canAnalyze}
                 activeOpacity={0.8}
-                style={{ opacity: canAnalyze ? 1 : 0.4 }}
+                style={{ opacity: canAnalyze || isSubmitting || voiceDetecting ? 1 : 0.4 }}
               >
                 <LinearGradient
                   colors={['#143D2B', '#2D6A4F']}
@@ -478,13 +488,13 @@ export default function HomeScreen() {
                   end={{ x: 1, y: 0 }}
                   style={styles.guidanceBtn}
                 >
-                  {isSubmitting ? (
+                  {isSubmitting || voiceDetecting ? (
                     <ActivityIndicator size={16} color="#fff" />
                   ) : (
                     <Ionicons name="sparkles" size={16} color="#fff" />
                   )}
                   <Text style={styles.guidanceBtnText}>
-                    {isSubmitting ? 'Finding...' : 'Find Guidance'}
+                    {voiceDetecting ? t('voice.detecting') : isSubmitting ? 'Finding...' : 'Find Guidance'}
                   </Text>
                 </LinearGradient>
               </TouchableOpacity>
@@ -496,29 +506,36 @@ export default function HomeScreen() {
 
           {/* ═══════════════ STATS STRIP ═══════════════ */}
           <Animated.View style={[styles.statsStrip, { backgroundColor: theme.surfaceElevated, shadowColor: theme.shadowColor }, sectionAnims[0]]}>
-            {/* Next Prayer */}
-            {nextPrayer ? (
-              <View style={styles.statItem}>
-                <View style={[styles.statIconWrap, { backgroundColor: theme.primaryMuted + '20' }]}>
-                  <Ionicons name="moon-outline" size={16} color={theme.primary} />
-                </View>
-                <View style={styles.statTextWrap}>
-                  <Text style={[styles.statLabel, { color: theme.textTertiary }]} numberOfLines={1}>NEXT PRAYER</Text>
-                  <Text style={[styles.statValue, { color: theme.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{nextPrayer.name}</Text>
-                  <Text style={[styles.statSub, { color: theme.textTertiary }]}>{PrayerTimesService.formatTime(nextPrayer.time)}</Text>
-                </View>
+            {/* Next Prayer — tap for the full schedule */}
+            <TouchableOpacity
+              style={styles.statItem}
+              activeOpacity={0.7}
+              onPress={() => router.push('/tools/prayer')}
+              accessibilityRole="button"
+              accessibilityLabel={
+                nextPrayer
+                  ? `${t('prayer.nextPrayer')}: ${t(prayerNameKey(nextPrayer.key, nextPrayer.time))}, ${PrayerTimesService.formatInstant(nextPrayer.time.getTime())}`
+                  : t('prayer.title')
+              }
+            >
+              <View style={[styles.statIconWrap, { backgroundColor: theme.primaryMuted + '20' }]}>
+                <Ionicons name="moon-outline" size={16} color={theme.primary} />
               </View>
-            ) : (
-              <View style={styles.statItem}>
-                <View style={[styles.statIconWrap, { backgroundColor: theme.primaryMuted + '20' }]}>
-                  <Ionicons name="moon-outline" size={16} color={theme.primary} />
-                </View>
-                <View style={styles.statTextWrap}>
-                  <Text style={[styles.statLabel, { color: theme.textTertiary }]}>Prayer</Text>
-                  <Text style={[styles.statValue, { color: theme.text }]}>—</Text>
-                </View>
+              <View style={styles.statTextWrap}>
+                <Text style={[styles.statLabel, { color: theme.textSecondary }]} numberOfLines={1}>
+                  {nextPrayer ? t('prayer.nextPrayer').toUpperCase() : t('prayer.title')}
+                </Text>
+                <Text style={[styles.statValue, { color: theme.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                  {nextPrayer ? t(prayerNameKey(nextPrayer.key, nextPrayer.time)) : '—'}
+                </Text>
+                {nextPrayer && (
+                  <Text style={[styles.statSub, { color: theme.textSecondary }]} numberOfLines={1}>
+                    {PrayerTimesService.formatInstant(nextPrayer.time.getTime())}
+                    {nextPrayer.isTomorrow ? ` · ${t('prayer.tomorrow')}` : ''}
+                  </Text>
+                )}
               </View>
-            )}
+            </TouchableOpacity>
 
             <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
 
@@ -655,6 +672,8 @@ export default function HomeScreen() {
                   onPress={() => router.push(action.route as any)}
                   activeOpacity={0.8}
                   style={[styles.actionCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={action.label}
                 >
                   <LinearGradient
                     colors={action.gradient as [string, string]}
@@ -668,7 +687,7 @@ export default function HomeScreen() {
                       <Ionicons name={action.icon as any} size={20} color={theme.textOnDark} />
                     )}
                   </LinearGradient>
-                  <Text style={[styles.actionLabel, { color: theme.text }]}>{action.label}</Text>
+                  <Text style={[styles.actionLabel, { color: theme.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>{action.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -736,7 +755,7 @@ export default function HomeScreen() {
           }}
           activeOpacity={0.85}
           accessibilityRole="button"
-          accessibilityLabel="Quran voice assistant"
+          accessibilityLabel={t('voice.quranLabel')}
           style={styles.voiceDockBtn}
         >
           <LinearGradient
