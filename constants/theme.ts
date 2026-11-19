@@ -338,3 +338,13 @@ export const EMOTION_MAP: Record<string, { icon: string; color: string; label: s
   vulnerability: { icon: 'umbrella-outline', color: '#F472B6', label: 'Vulnerability' },
   inspiration: { icon: 'color-wand-outline', color: '#FBBF24', label: 'Inspiration' },
 };
+
+/**
+ * Height of the bottom tab bar content (excluding the safe-area inset).
+ * Shared by app/(tabs)/_layout.tsx and the global MiniPlayer so the player can
+ * never drift out of sync with the bar it floats above.
+ */
+export const TAB_BAR_HEIGHT = 60;
+
+/** Minimum touch-target size (px) — platform accessibility guidance. */
+export const MIN_TOUCH = 44;
