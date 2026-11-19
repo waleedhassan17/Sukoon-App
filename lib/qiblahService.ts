@@ -29,10 +29,15 @@
  *   FIX: Use `% 8` on the rounded value (already present, verified correct).
  */
 
+import { distanceKm } from './prayerEngine';
+
 // ── Constants ──────────────────────────────────────────────────────────────────
 const KAABA_LAT = 21.4225;
 const KAABA_LNG = 39.8262;
 const ALADHAN_BASE_URL = 'https://api.aladhan.com/v1';
+
+/** Kaaba coordinates (Makkah, Saudi Arabia). */
+export const KAABA = { lat: KAABA_LAT, lng: KAABA_LNG } as const;
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 export interface QiblahData {
@@ -72,6 +77,53 @@ export function calculateQiblahBearing(lat: number, lng: number): number {
 
 /** @deprecated Alias kept for backward compatibility */
 export const calculateQiblahLocal = calculateQiblahBearing;
+
+/** Great-circle distance from a point to the Kaaba, in kilometres. */
+export function distanceToKaabaKm(lat: number, lng: number): number {
+  return distanceKm({ lat, lng }, KAABA);
+}
+
+// ── Raw magnetometer → heading ─────────────────────────────────────────────────
+
+/**
+ * Compass heading (degrees clockwise from MAGNETIC north, [0, 360)) of a phone
+ * held FLAT, from its raw magnetometer reading.
+ *
+ * Device frame: +X right, +Y toward the top of the phone. The horizontal field
+ * vector is (x, y); atan2(x, y) is the angle from the phone's top to it,
+ * counter-clockwise-positive, so it is negated for a clockwise compass heading.
+ * Returns NaN for non-finite input (callers must skip it).
+ */
+export function magnetometerToHeading(x: number, y: number): number {
+  if (!isFinite(x) || !isFinite(y)) return NaN;
+  const heading = -Math.atan2(x, y) * (180 / Math.PI);
+  return ((heading % 360) + 360) % 360;
+}
+
+// ── Alignment & guidance ───────────────────────────────────────────────────────
+
+/** Entering "facing the Qibla" is stricter than leaving it, so the state never flickers at the edge. */
+export const ALIGN_ENTER_DEG = 5;
+export const ALIGN_EXIT_DEG = 9;
+
+/** True when the phone points at the Qibla (with hysteresis — pass the previous result). */
+export function isFacingQibla(wasAligned: boolean, qiblaBearing: number, heading: number): boolean {
+  const off = Math.abs(normalizeAngleDiff(heading, qiblaBearing));
+  return wasAligned ? off <= ALIGN_EXIT_DEG : off <= ALIGN_ENTER_DEG;
+}
+
+export interface TurnGuidance {
+  direction: 'aligned' | 'left' | 'right';
+  /** Whole degrees still to turn (0 when aligned). */
+  degrees: number;
+}
+
+/** What the user should do to face the Qibla: turn left/right by N°, or hold still. */
+export function turnGuidance(qiblaBearing: number, heading: number, aligned: boolean): TurnGuidance {
+  if (aligned) return { direction: 'aligned', degrees: 0 };
+  const diff = normalizeAngleDiff(heading, qiblaBearing); // positive → clockwise → turn right
+  return { direction: diff >= 0 ? 'right' : 'left', degrees: Math.round(Math.abs(diff)) };
+}
 
 // ── Compass direction label ────────────────────────────────────────────────────
 

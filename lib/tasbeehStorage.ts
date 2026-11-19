@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { sanitizeSession, TasbeehSession } from './dhikr';
 
 export type DhikrId = string;
 
@@ -11,6 +12,7 @@ export interface DhikrTotals {
 export type DhikrTotalsMap = Record<DhikrId, DhikrTotals>;
 
 const STORAGE_KEY = '@tasbeeh_totals_v1';
+const SESSION_KEY = '@tasbeeh_session_v1';
 
 type StoredShape = {
   v: 1;
@@ -50,6 +52,24 @@ export const TasbeehStorage = {
       return sanitizeTotalsMap(parsed.totals);
     } catch {
       return {};
+    }
+  },
+
+  /** The dhikr that was open and the in-progress round of each (so leaving the screen loses nothing). */
+  async loadSession(): Promise<TasbeehSession> {
+    try {
+      const raw = await AsyncStorage.getItem(SESSION_KEY);
+      return sanitizeSession(raw ? JSON.parse(raw) : null);
+    } catch {
+      return sanitizeSession(null);
+    }
+  },
+
+  async saveSession(session: TasbeehSession): Promise<void> {
+    try {
+      await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(sanitizeSession(session)));
+    } catch {
+      // Non-fatal.
     }
   },
 

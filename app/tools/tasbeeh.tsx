@@ -1,25 +1,36 @@
 /**
- * TasbeehScreen - Premium digital dhikr counter
+ * TasbeehScreen — a calm digital dhikr counter.
+ *
+ *   header   back · title · reset count — with the dhikr in Arabic and its name
+ *   counter  one large ring; tap anywhere on it
+ *   dhikr    a row of chips to switch
+ *   totals   lifetime taps and rounds for the selected dhikr
+ *
+ * Correct by construction: the counter and the lifetime totals live in refs and
+ * are updated from the previous ref value (never from a render-time closure), so
+ * a burst of rapid taps cannot lose or invent a count. The in-progress round and
+ * the open dhikr are saved, so leaving the screen — or the app being closed —
+ * never throws away a half-finished round. Rules: lib/dhikr.ts (unit-tested).
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Alert, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, AppState, Dimensions,
+} from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
-import { SHADOWS, RADIUS } from '@/constants/theme';
+import { MIN_TOUCH, SHADOWS } from '@/constants/theme';
+import { t, useLocale } from '@/lib/i18n';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { DhikrTotalsMap, TasbeehStorage } from '@/lib/tasbeehStorage';
+import { applyTap, DEFAULT_DHIKR_ID, DHIKR_PRESETS, dhikrNameKey, findDhikr } from '@/lib/dhikr';
+import ToolHero, { HeroIconButton } from '@/components/ToolHero';
+import CounterRing from '@/components/tasbeeh/CounterRing';
 
-const PRESETS = [
-  { id: 'subhanallah', label: 'سُبْحَانَ اللَّهِ', eng: 'SubhanAllah', target: 33 },
-  { id: 'alhamdulillah', label: 'الْحَمْدُ لِلَّهِ', eng: 'Alhamdulillah', target: 33 },
-  { id: 'allahu-akbar', label: 'اللَّهُ أَكْبَرُ', eng: 'Allahu Akbar', target: 34 },
-  { id: 'la-ilaha-illallah', label: 'لَا إِلَٰهَ إِلَّا اللَّهُ', eng: 'La Ilaha IllAllah', target: 100 },
-  { id: 'astaghfirullah', label: 'أَسْتَغْفِرُ اللَّهَ', eng: 'Astaghfirullah', target: 100 },
-];
+const RING_SIZE = Math.min(Dimensions.get('window').width - 96, 264);
+const SAVE_DEBOUNCE_MS = 600;
+const EMPTY_TOTALS = { taps: 0, rounds: 0, updatedAt: 0 };
 
 function formatNumber(n: number): string {
   try {
@@ -31,293 +42,283 @@ function formatNumber(n: number): string {
 
 export default function TasbeehScreen() {
   const { theme } = useTheme();
-  const router = useRouter();
-  const [count, setCount] = useState(0);
-  const [selectedPreset, setSelectedPreset] = useState(0);
-  const [sessionRounds, setSessionRounds] = useState(0);
+  const goBack = useSafeBack('/');
+  const insets = useSafeAreaInsets();
+  useLocale();
+
+  const [selectedId, setSelectedId] = useState(DEFAULT_DHIKR_ID);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [totals, setTotals] = useState<DhikrTotalsMap>({});
-  const [totalsLoaded, setTotalsLoaded] = useState(false);
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-  const rippleAnim = useRef(new Animated.Value(0)).current;
+  const [loaded, setLoaded] = useState(false);
+  const [sessionRounds, setSessionRounds] = useState(0);
+  const [completions, setCompletions] = useState(0);
 
-  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingPersistRef = useRef<DhikrTotalsMap | null>(null);
+  // Source of truth for the counter — always read the previous value from here.
+  const selectedRef = useRef(DEFAULT_DHIKR_ID);
+  const countsRef = useRef<Record<string, number>>({});
+  const totalsRef = useRef<DhikrTotalsMap>({});
+  const loadedRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const preset = PRESETS[selectedPreset];
+  const preset = findDhikr(selectedId);
+  const count = counts[selectedId] ?? 0;
+  const current = totals[selectedId] ?? EMPTY_TOTALS;
+  const name = t(dhikrNameKey(preset.id));
 
-  const queuePersistTotals = useCallback((nextTotals: DhikrTotalsMap) => {
-    pendingPersistRef.current = nextTotals;
-    if (persistTimerRef.current) return;
-
-    persistTimerRef.current = setTimeout(async () => {
-      const toSave = pendingPersistRef.current;
-      pendingPersistRef.current = null;
-      persistTimerRef.current = null;
-      if (!toSave) return;
-      await TasbeehStorage.saveTotals(toSave);
-    }, 600);
+  // ── Persistence ──
+  const flush = useCallback(() => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    if (!dirtyRef.current || !loadedRef.current) return;
+    dirtyRef.current = false;
+    TasbeehStorage.saveTotals(totalsRef.current).catch(() => {});
+    TasbeehStorage.saveSession({ selected: selectedRef.current, counts: countsRef.current }).catch(() => {});
   }, []);
+
+  const queueSave = useCallback(() => {
+    dirtyRef.current = true;
+    if (saveTimer.current) return;
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null;
+      flush();
+    }, SAVE_DEBOUNCE_MS);
+  }, [flush]);
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      const loaded = await TasbeehStorage.loadTotals();
+      const [savedTotals, session] = await Promise.all([TasbeehStorage.loadTotals(), TasbeehStorage.loadSession()]);
       if (!alive) return;
-      setTotals(loaded);
-      setTotalsLoaded(true);
+      totalsRef.current = savedTotals;
+      countsRef.current = session.counts;
+      selectedRef.current = session.selected;
+      loadedRef.current = true;
+      setTotals(savedTotals);
+      setCounts(session.counts);
+      setSelectedId(session.selected);
+      setLoaded(true);
     })();
+
+    // Never lose taps: save when the app leaves the foreground and when the screen closes.
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') flush();
+    });
     return () => {
       alive = false;
-      // Flush any pending persistence
-      if (persistTimerRef.current) {
-        clearTimeout(persistTimerRef.current);
-        persistTimerRef.current = null;
-      }
-      if (pendingPersistRef.current) {
-        TasbeehStorage.saveTotals(pendingPersistRef.current).catch(() => {});
-        pendingPersistRef.current = null;
-      }
+      sub.remove();
+      flush();
     };
-  }, []);
+  }, [flush]);
 
-  // Reset session count when switching dhikr
-  useEffect(() => {
-    setSessionRounds(0);
-  }, [selectedPreset]);
-
-  const currentTotals = useMemo(() => {
-    return totals[preset.id] || { taps: 0, rounds: 0, updatedAt: 0 };
-  }, [totals, preset.id]);
-
+  // ── Actions ──
   const handleTap = useCallback(() => {
-    const newCount = count + 1;
-    const completed = newCount >= preset.target;
+    if (!loadedRef.current) return;
+    const id = selectedRef.current;
+    const { count: next, completed } = applyTap(countsRef.current[id] ?? 0, findDhikr(id).target);
 
-    setCount(completed ? 0 : newCount);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    countsRef.current = { ...countsRef.current, [id]: next };
+    const prev = totalsRef.current[id] ?? EMPTY_TOTALS;
+    totalsRef.current = {
+      ...totalsRef.current,
+      [id]: { taps: prev.taps + 1, rounds: prev.rounds + (completed ? 1 : 0), updatedAt: Date.now() },
+    };
+    setCounts(countsRef.current);
+    setTotals(totalsRef.current);
+    queueSave();
 
-    // Scale animation
-    Animated.sequence([
-      Animated.timing(scaleAnim, { toValue: 0.95, duration: 50, useNativeDriver: true }),
-      Animated.spring(scaleAnim, { toValue: 1, tension: 300, friction: 10, useNativeDriver: true }),
-    ]).start();
-
-    // Ripple
-    rippleAnim.setValue(0);
-    Animated.timing(rippleAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
-
-    // Persist lifetime totals (per dhikr)
-    setTotals(prev => {
-      const prevTotals = prev[preset.id] || { taps: 0, rounds: 0, updatedAt: 0 };
-      const nextTotals: DhikrTotalsMap = {
-        ...prev,
-        [preset.id]: {
-          taps: prevTotals.taps + 1,
-          rounds: prevTotals.rounds + (completed ? 1 : 0),
-          updatedAt: Date.now(),
-        },
-      };
-      queuePersistTotals(nextTotals);
-      return nextTotals;
-    });
-
-    // Completion
     if (completed) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      setSessionRounds(s => s + 1);
+      setSessionRounds((r) => r + 1);
+      setCompletions((c) => c + 1);
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     }
-  }, [count, preset.id, preset.target, queuePersistTotals]);
+  }, [queueSave]);
 
-  const handleReset = useCallback(() => {
+  const handleSelect = useCallback(
+    (id: string) => {
+      if (id === selectedRef.current) return;
+      Haptics.selectionAsync().catch(() => {});
+      selectedRef.current = id;
+      setSelectedId(id);
+      setSessionRounds(0);
+      queueSave();
+    },
+    [queueSave],
+  );
+
+  const handleResetCount = useCallback(() => {
+    const id = selectedRef.current;
+    if ((countsRef.current[id] ?? 0) === 0) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    setCount(0);
-  }, []);
+    countsRef.current = { ...countsRef.current, [id]: 0 };
+    setCounts(countsRef.current);
+    queueSave();
+  }, [queueSave]);
 
   const handleResetTotal = useCallback(() => {
-    Alert.alert(
-      'Reset lifetime total?',
-      `This will clear the saved lifetime count for ${preset.eng}.` ,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset',
-          style: 'destructive',
-          onPress: () => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-            setTotals(prev => {
-              const next = { ...prev };
-              next[preset.id] = { taps: 0, rounds: 0, updatedAt: Date.now() };
-              queuePersistTotals(next);
-              return next;
-            });
-          },
+    Alert.alert(t('tasbeeh.resetTotalTitle'), t('tasbeeh.resetTotalBody', { name }), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('tasbeeh.resetTotalConfirm'),
+        style: 'destructive',
+        onPress: () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+          const id = selectedRef.current;
+          totalsRef.current = { ...totalsRef.current, [id]: { taps: 0, rounds: 0, updatedAt: Date.now() } };
+          setTotals(totalsRef.current);
+          queueSave();
         },
-      ]
-    );
-  }, [preset.eng, preset.id, queuePersistTotals]);
+      },
+    ]);
+  }, [name, queueSave]);
 
-  const progress = count / preset.target;
+  const caption =
+    sessionRounds > 0
+      ? sessionRounds === 1
+        ? t('tasbeeh.roundOne')
+        : t('tasbeeh.roundMany', { count: sessionRounds })
+      : t('tasbeeh.tapToCount');
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color={theme.text} />
-          </TouchableOpacity>
-          <Text style={[styles.title, { color: theme.text }]}>Tasbeeh</Text>
-          <TouchableOpacity
-            onPress={handleReset}
-            onLongPress={handleResetTotal}
-            delayLongPress={350}
-            style={styles.resetBtn}
-          >
-            <Ionicons name="refresh" size={20} color={theme.textSecondary} />
-          </TouchableOpacity>
+    <View style={[s.root, { backgroundColor: theme.surface }]}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+        {/* ═══ HEADER ═══ */}
+        <ToolHero
+          title={t('tasbeeh.title')}
+          onBack={goBack}
+          right={
+            <HeroIconButton
+              icon="refresh"
+              label={t('tasbeeh.resetCount')}
+              onPress={handleResetCount}
+              disabled={count === 0}
+            />
+          }
+        >
+          <View style={s.dhikr} accessible accessibilityLabel={name}>
+            <Text style={s.arabic}>{preset.arabic}</Text>
+            <Text style={s.name}>{name}</Text>
+          </View>
+        </ToolHero>
+
+        {/* ═══ COUNTER ═══ */}
+        <View style={s.counter}>
+          <CounterRing
+            size={RING_SIZE}
+            count={count}
+            target={preset.target}
+            ofLabel={t('tasbeeh.of', { target: preset.target })}
+            completions={completions}
+            onTap={handleTap}
+            accessibilityLabel={t('tasbeeh.a11y.counter', { count, target: preset.target })}
+            accessibilityHint={t('tasbeeh.tapToCount')}
+          />
+          <Text style={[s.caption, { color: theme.textSecondary }]}>{caption}</Text>
         </View>
 
+        {/* ═══ DHIKR ═══ */}
         <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: 40 }}
-          showsVerticalScrollIndicator={false}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.chips}
+          accessibilityRole="tablist"
         >
-          {/* Dhikr Label */}
-          <View style={styles.dhikrWrap}>
-          <Text style={[styles.dhikrArabic, { color: theme.arabicText }]}>{preset.label}</Text>
-          <Text style={[styles.dhikrEng, { color: theme.textSecondary }]}>{preset.eng}</Text>
-          <View style={styles.statsRow}>
-            <View style={[styles.statPill, { backgroundColor: theme.surface, borderColor: theme.borderLight }]}>
-              <Text style={[styles.statLabel, { color: theme.textTertiary }]}>LIFETIME</Text>
-              <Text style={[styles.statValue, { color: theme.text }]}>
-                {totalsLoaded ? formatNumber(currentTotals.taps) : '—'}
-                <Text style={[styles.statUnit, { color: theme.textSecondary }]}> taps</Text>
-              </Text>
+          {DHIKR_PRESETS.map((p) => {
+            const selected = p.id === selectedId;
+            return (
+              <TouchableOpacity
+                key={p.id}
+                onPress={() => handleSelect(p.id)}
+                activeOpacity={0.8}
+                style={[
+                  s.chip,
+                  selected
+                    ? { backgroundColor: theme.primary, borderColor: theme.primary }
+                    : { backgroundColor: theme.surfaceElevated, borderColor: theme.border },
+                ]}
+                accessibilityRole="tab"
+                accessibilityState={{ selected }}
+              >
+                <Text style={[s.chipName, { color: selected ? '#FFFFFF' : theme.text }]}>{t(dhikrNameKey(p.id))}</Text>
+                <Text style={[s.chipTarget, { color: selected ? 'rgba(255,255,255,0.8)' : theme.textSecondary }]}>
+                  ×{p.target}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {/* ═══ TOTALS ═══ */}
+        <View style={[s.card, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }, SHADOWS.sm]}>
+          <View style={s.statsRow}>
+            <View style={s.stat}>
+              <Text style={[s.statValue, { color: theme.text }]}>{loaded ? formatNumber(current.taps) : '—'}</Text>
+              <Text style={[s.statLabel, { color: theme.textSecondary }]}>{t('tasbeeh.totalCount')}</Text>
             </View>
-            <View style={[styles.statPill, { backgroundColor: theme.surface, borderColor: theme.borderLight }]}>
-              <Text style={[styles.statLabel, { color: theme.textTertiary }]}>ROUNDS</Text>
-              <Text style={[styles.statValue, { color: theme.text }]}>
-                {totalsLoaded ? formatNumber(currentTotals.rounds) : '—'}
-                <Text style={[styles.statUnit, { color: theme.textSecondary }]}> total</Text>
-              </Text>
-            </View>
-            <View style={[styles.statPill, { backgroundColor: theme.surface, borderColor: theme.borderLight }]}>
-              <Text style={[styles.statLabel, { color: theme.textTertiary }]}>SESSION</Text>
-              <Text style={[styles.statValue, { color: theme.text }]}>
-                {formatNumber(sessionRounds)}
-                <Text style={[styles.statUnit, { color: theme.textSecondary }]}> rounds</Text>
-              </Text>
+            <View style={[s.divider, { backgroundColor: theme.border }]} />
+            <View style={s.stat}>
+              <Text style={[s.statValue, { color: theme.text }]}>{loaded ? formatNumber(current.rounds) : '—'}</Text>
+              <Text style={[s.statLabel, { color: theme.textSecondary }]}>{t('tasbeeh.roundsDone')}</Text>
             </View>
           </View>
-        </View>
-
-        {/* Counter */}
-        <View style={styles.counterWrap}>
-          <Animated.View style={[styles.counterOuter, { transform: [{ scale: scaleAnim }] }]}>
-            {/* Ripple */}
-            <Animated.View style={[styles.ripple, {
-              opacity: rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0] }),
-              transform: [{ scale: rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] }) }],
-            }]} />
-
-            <TouchableOpacity onPress={handleTap} activeOpacity={0.85} style={styles.counterButton}>
-              <LinearGradient colors={theme.headerGradient} style={styles.counterGradient}>
-                {/* Progress Ring */}
-                <View style={styles.progressRing}>
-                  <View style={[styles.progressTrack, { borderColor: 'rgba(255,255,255,0.15)' }]} />
-                  <View style={[styles.progressFill, {
-                    borderColor: theme.gold,
-                    borderTopColor: progress > 0.25 ? theme.gold : 'transparent',
-                    borderRightColor: progress > 0.5 ? theme.gold : 'transparent',
-                    borderBottomColor: progress > 0.75 ? theme.gold : 'transparent',
-                    borderLeftColor: progress > 0 ? theme.gold : 'transparent',
-                    transform: [{ rotate: `${progress * 360}deg` }],
-                  }]} />
-                </View>
-                <Text style={styles.countText}>{count}</Text>
-                <Text style={styles.targetText}>/ {preset.target}</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
-
-        {/* Sessions */}
-        <Text style={[styles.sessionsText, { color: theme.textSecondary }]}>
-          {sessionRounds > 0
-            ? `${sessionRounds} round${sessionRounds > 1 ? 's' : ''} completed this session`
-            : 'Tap the circle to count'}
-        </Text>
-
-        {/* Presets */}
-        <View style={styles.presetsWrap}>
-          <Text style={[styles.presetsTitle, { color: theme.text }]}>Dhikr Presets</Text>
-          {PRESETS.map((p, i) => (
+          <View style={[s.cardFooter, { borderTopColor: theme.border }]}>
             <TouchableOpacity
-              key={p.id}
-              style={[
-                styles.presetCard,
-                { backgroundColor: theme.surface, borderColor: selectedPreset === i ? theme.primary : theme.borderLight },
-                SHADOWS.sm,
-              ]}
-              onPress={() => { setSelectedPreset(i); setCount(0); }}
-              activeOpacity={0.7}
+              onPress={handleResetTotal}
+              disabled={!loaded || current.taps === 0}
+              style={[s.resetTotal, (!loaded || current.taps === 0) && s.disabled]}
+              accessibilityRole="button"
             >
-              <Text style={[styles.presetArabic, { color: theme.arabicText }]}>{p.label}</Text>
-              <View style={styles.presetInfo}>
-                <Text style={[styles.presetEng, { color: theme.textSecondary }]}>{p.eng}</Text>
-                <Text style={[styles.presetTarget, { color: theme.primary }]}>×{p.target}</Text>
-                <Text style={[styles.presetTotal, { color: theme.textTertiary }]}>
-                  Total {totalsLoaded ? formatNumber((totals[p.id]?.taps ?? 0)) : '—'}
-                </Text>
-              </View>
+              <Text style={[s.resetTotalText, { color: theme.error }]}>{t('tasbeeh.resetTotal')}</Text>
             </TouchableOpacity>
-          ))}
+          </View>
         </View>
-        </ScrollView>
-      </SafeAreaView>
+      </ScrollView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  safeArea: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 10 },
-  backBtn: { padding: 8 },
-  title: { fontSize: 20, fontWeight: '700' },
-  resetBtn: { padding: 8 },
-  dhikrWrap: { alignItems: 'center', paddingVertical: 16 },
-  dhikrArabic: { fontSize: 28, lineHeight: 44, marginBottom: 4, fontFamily: 'AlQalamQuran', writingDirection: 'rtl' },
-  dhikrEng: { fontSize: 14 },
-  statsRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  statPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    minWidth: 96,
+const s = StyleSheet.create({
+  root: { flex: 1 },
+
+  dhikr: { alignItems: 'center', marginTop: 12 },
+  arabic: {
+    fontSize: 34,
+    lineHeight: 56,
+    color: '#FFFFFF',
+    fontFamily: 'AlQalamQuran',
+    writingDirection: 'rtl',
+    textAlign: 'center',
+  },
+  name: { marginTop: 2, fontSize: 15, fontWeight: '500', color: 'rgba(255,255,255,0.78)' },
+
+  counter: { alignItems: 'center', paddingTop: 32 },
+  caption: { marginTop: 22, fontSize: 14, textAlign: 'center' },
+
+  chips: { paddingHorizontal: 16, paddingTop: 28, paddingBottom: 4 },
+  chip: {
+    minHeight: MIN_TOUCH,
+    paddingHorizontal: 16,
+    marginEnd: 8,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  statLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
-  statValue: { fontSize: 14, fontWeight: '800', marginTop: 2 },
-  statUnit: { fontSize: 11, fontWeight: '600' },
-  counterWrap: { alignItems: 'center', paddingVertical: 20 },
-  counterOuter: { width: 200, height: 200 },
-  ripple: { position: 'absolute', width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(20,184,166,0.2)' },
-  counterButton: { width: 200, height: 200, borderRadius: 100, overflow: 'hidden' },
-  counterGradient: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  progressRing: { position: 'absolute', width: 190, height: 190, borderRadius: 95 },
-  progressTrack: { position: 'absolute', width: '100%', height: '100%', borderRadius: 95, borderWidth: 3 },
-  progressFill: { position: 'absolute', width: '100%', height: '100%', borderRadius: 95, borderWidth: 3 },
-  countText: { color: '#fff', fontSize: 56, fontWeight: '800' },
-  targetText: { color: 'rgba(255,255,255,0.6)', fontSize: 16, marginTop: 2 },
-  sessionsText: { textAlign: 'center', fontSize: 14, marginBottom: 20 },
-  presetsWrap: { paddingHorizontal: 20 },
-  presetsTitle: { fontSize: 16, fontWeight: '700', marginBottom: 12 },
-  presetCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, borderRadius: RADIUS.md, borderWidth: 1.5, marginBottom: 8 },
-  presetArabic: { fontSize: 18, flex: 1, fontFamily: 'AlQalamQuran', writingDirection: 'rtl' },
-  presetInfo: { alignItems: 'flex-end' },
-  presetEng: { fontSize: 12, marginBottom: 2 },
-  presetTarget: { fontSize: 13, fontWeight: '700' },
-  presetTotal: { fontSize: 11, marginTop: 6 },
+  chipName: { fontSize: 15, fontWeight: '600' },
+  chipTarget: { marginStart: 8, fontSize: 13, fontWeight: '700' },
+
+  card: { marginHorizontal: 16, marginTop: 24, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  statsRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 20 },
+  stat: { flex: 1, alignItems: 'center' },
+  statValue: { fontSize: 26, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  statLabel: { marginTop: 4, fontSize: 13 },
+  divider: { width: StyleSheet.hairlineWidth, height: 40 },
+  cardFooter: { borderTopWidth: StyleSheet.hairlineWidth, alignItems: 'center' },
+  resetTotal: { minHeight: MIN_TOUCH, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
+  resetTotalText: { fontSize: 14, fontWeight: '600' },
+  disabled: { opacity: 0.4 },
 });
