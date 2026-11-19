@@ -1,3 +1,59 @@
+# Unreleased — next release (draft)
+
+## 📋 Google Play — Release Notes (draft)
+
+### English (en-US)
+```
+Prayer times you can rely on 🕌
+
+• Azan alerts keep arriving even if you don't open the app — they are now scheduled weeks ahead
+• Prayer times are worked out on your phone from where you are: correct anywhere in the world, even offline
+• A simpler Prayer Times screen with a live countdown to the next prayer
+• Qibla finder redesigned — a clearer compass that tells you which way to turn
+• Tasbeeh redesigned — your count is saved when you leave
+• Speak your feelings: the mic now finds Quranic guidance as soon as you stop speaking
+• Listen features original human narrations and recitations only
+• Five tabs for easier navigation
+• Fixes: back buttons no longer get stuck; emotion detection no longer hangs on a slow connection
+```
+
+### Internal changelog
+
+**Prayer times & azan reliability**
+- Offline engine (`lib/prayerEngine.ts`, `adhan`): times are absolute instants computed on the device — no network, no timezone/DST drift, polar-circle safe. **No user-facing calculation settings:** method + Asr school are derived from the location by a region table (Karachi + Hanafi across South Asia, Umm al-Qura, Dubai, Qatar, Kuwait, Tehran, Turkey (single-shadow Asr), Egyptian, ISNA, Singapore/JAKIM, MWL elsewhere; Shafi'i pockets of Sri Lanka/Kerala keep the standard Asr).
+- Verified against an independent reference (Aladhan) for 26 cities, mostly within 0–2 min: `__tests__/prayerGolden.test.ts`; 93-city method matrix in `prayerEngine.test.ts`. The QA pass found and fixed a real bug (Turkey defaulted to Hanafi Asr, +38 min).
+- Root cause of "must open the app daily": the background task was defined inside a React effect (`defineTask` must be global-scope), so the OS unregistered it, and the window was only 7 days refilled by foreground JS. Now: task defined at module scope (`lib/prayerBackgroundTask.ts`), up to 30 days on Android / as many whole days as fit under iOS's 64-notification cap, repeating DAILY reminders, diff-by-signature top-up on every launch/foreground (`lib/prayerSchedule.ts`, serialised queue), a "keep your reminders running" safety-net notice before the window ends.
+- Android channels are versioned (`*-v2`) and created only if missing; azan-sound-off and Fajr-special-sound toggles now actually work (channel is chosen per notification); `sukoon-friends` channel created.
+- Salah Settings → **Reliability** section: permission status, "scheduled through <date>", send-test-azan, exact-alarm and battery-optimisation shortcuts, OEM autostart tip. Tapping an old azan notification no longer replays the azan; Friday's Dhuhr is "Jumu'ah".
+
+**Screens**
+- Prayer Times: simple screen — gradient header, location + Gregorian/Hijri date, next-prayer card with live countdown (rolls to tomorrow's Fajr after Isha), one list with a per-prayer bell.
+- Qibla: one compass (SVG face, Kaaba marker, fixed pointer), "Turn right 42°" guidance, gold "facing the Qibla" state with hysteresis, distance to the Kaaba; starts instantly from the last-known location (GPS now has a timeout), compass stops when the screen is hidden; maths in `lib/qiblahService.ts` cross-checked against an independent vector implementation.
+- Tasbeeh: real SVG progress ring, lossless rapid tapping, the open dhikr and in-progress round are saved, visible reset, translated (EN/UR), accessible.
+- Shared `ToolHero` / `ToolStateCard`; every tool screen follows the same layout.
+
+**Emotion detection**
+- API call has a single hard deadline (headers + body; ≤ 20 s total, 1 retry) — previously a stalled body hung the screen forever. After 6 s the screen offers *Show offline guidance* / *Cancel*; an offline result is labelled with the reason and a Retry. Offline fallback matches whole words and understands Urdu / Roman Urdu. Ayah ranges ("5-6") no longer break save/share.
+- The in-input mic now detects emotions automatically once speech finishes (silence, end of speech or tapping stop); editing the text cancels it. Recognition language follows the app language. Endpoint overridable with `EXPO_PUBLIC_EMOTION_API_URL`.
+
+**Navigation & content**
+- Five bottom tabs (Listen removed); Listen opens from Home Quick Access and the Books tab; mini-player no longer overlaps Home's mic button.
+- Original narrations only: fail-closed filter in `CatalogService` (hides AI books from the seed, Firestore and on-device caches); 16 AI books and ~34 MB of bundled audio removed; one-time cleanup of previously downloaded AI files.
+- `useSafeBack` on all 32 back buttons — no more "GO_BACK was not handled by any navigator", falls back to a sensible parent and ignores double taps.
+
+**Housekeeping**
+- `app.json`: removed the invalid `android.useNextNotificationsApi`; `npm run start:go` (Expo Go) / `npm run start:dev` (dev build).
+- 534 tests in 20 suites (`npm test`), including an en/ur translation-integrity guard.
+
+**Before shipping / follow-ups**
+- Build a fresh APK/AAB — the APK in the repo (v1.2.4) predates all of this. `versionCode` differs between `app.json` (19) and `android/app/build.gradle` (17).
+- Optional admin step: delete the AI docs from Firestore `audiobooksCatalog` (hidden by the client either way).
+- Rotate the Gemini key that is in plain text in `claude.md`; set `EXPO_PUBLIC_GEMINI_API_KEY` in the EAS dashboard for cloud builds.
+- Migrate `expo-background-fetch` (deprecated) to `expo-background-task`; consider `npx expo install --fix` (10 SDK-54 patch bumps); Play policy: `USE_EXACT_ALARM` is restricted to alarm/calendar apps.
+- Known trade-off: with no Asr setting, Hanafi users in standard-Asr regions (e.g. the UK) see the earlier Asr.
+
+---
+
 # Sukoon v1.3.0 — Release Notes
 
 ## Release Name
