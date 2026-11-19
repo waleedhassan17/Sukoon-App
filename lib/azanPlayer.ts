@@ -32,9 +32,9 @@ const AZAN_FAJR_SOUND = require('@/assets/sounds/azan_fajr.wav');
 
 const PREFS_KEY = 'sukoon_notif_prefs';
 
-// Time window (ms) in which we consider the azan still "recent" enough to play
-// when the app returns to foreground. Prevents playing stale azans hours later.
-const AZAN_FRESHNESS_WINDOW = 5 * 60 * 1000; // 5 minutes
+// How long after the scheduled prayer time a notification TAP may still start
+// the full azan. Tapping an hours-old notification must not blast a 25 s azan.
+const AZAN_TAP_FRESHNESS_MS = 2 * 60 * 1000; // 2 minutes
 
 // ══════════════════════════════════════════════
 // AZAN PLAYER SERVICE
@@ -43,10 +43,6 @@ const AZAN_FRESHNESS_WINDOW = 5 * 60 * 1000; // 5 minutes
 class AzanPlayerService {
   private sound: Audio.Sound | null = null;
   private isPlaying = false;
-  /** Timestamp of the last azan notification received (even if not played) */
-  private lastAzanTimestamp = 0;
-  /** Prayer name from the last azan notification */
-  private lastAzanPrayer: string | undefined;
   /** Lock to prevent concurrent play() calls from racing */
   private playLock = false;
 
@@ -201,10 +197,6 @@ class AzanPlayerService {
 
       // Only play for prayer azan notifications (not pre-alerts or reminders)
       if (data.type === 'prayer' && data.action === 'azan') {
-        // Record the azan event so we can decide later if we should play on resume
-        this.lastAzanTimestamp = Date.now();
-        this.lastAzanPrayer = data.prayer;
-
         // Play immediately — we're in the foreground (listener guarantees this)
         await this.play(data.prayer);
       }
@@ -215,8 +207,9 @@ class AzanPlayerService {
 
   /**
    * Handle notification response (user tapped the notification).
-   * If the azan isn't currently playing and the notification is fresh,
-   * play it now. This covers the background → foreground transition.
+   * Plays the full azan only if the PRAYER TIME is still recent (the schedule
+   * stamps `data.fireAt`). A tap on an old notification — or on a legacy one
+   * without a timestamp — never replays the azan.
    */
   async handleNotificationResponse(notification: any): Promise<void> {
     try {
@@ -224,39 +217,14 @@ class AzanPlayerService {
       if (!data) return;
 
       if (data.type === 'prayer' && data.action === 'azan') {
-        // Record the event
-        this.lastAzanTimestamp = Date.now();
-        this.lastAzanPrayer = data.prayer;
-
-        // Play the full azan now that the user is in the app
-        if (!this.isPlaying) {
+        const fireAt = Number(data.fireAt);
+        const fresh = Number.isFinite(fireAt) && Date.now() - fireAt <= AZAN_TAP_FRESHNESS_MS;
+        if (fresh && !this.isPlaying) {
           await this.play(data.prayer);
         }
       }
     } catch (e) {
       console.warn('[AzanPlayer] Handle notification response error:', e);
-    }
-  }
-
-  /**
-   * Called when app returns to foreground (AppState → active).
-   * If an azan notification arrived recently while app was in background,
-   * play it now so the user hears the full azan.
-   */
-  async handleAppForeground(): Promise<void> {
-    try {
-      if (this.isPlaying) return; // Already playing
-
-      const elapsed = Date.now() - this.lastAzanTimestamp;
-      if (this.lastAzanTimestamp > 0 && elapsed < AZAN_FRESHNESS_WINDOW) {
-        console.log(`[AzanPlayer] App returned to foreground — playing missed azan (${Math.round(elapsed / 1000)}s ago)`);
-        await this.play(this.lastAzanPrayer);
-        // Clear so we don't replay on next foreground
-        this.lastAzanTimestamp = 0;
-        this.lastAzanPrayer = undefined;
-      }
-    } catch (e) {
-      console.warn('[AzanPlayer] Foreground resume error:', e);
     }
   }
 

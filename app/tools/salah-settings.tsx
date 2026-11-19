@@ -21,13 +21,15 @@ import {
   PanResponder, Dimensions,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '@/contexts/ThemeContext';
-import { NotificationService, NotificationPreferences, PrayerName } from '@/lib/notificationService';
+import { NotificationService, NotificationPreferences, PrayerName, ScheduleHealth } from '@/lib/notificationService';
+import { t, useLocale } from '@/lib/i18n';
 import { PrayerTimesService } from '@/lib/prayerTimes';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -470,7 +472,7 @@ function ClockPicker({
    ═══════════════════════════════════════════════ */
 export default function SalahTrackerSettingsScreen() {
   const { theme } = useTheme();
-  const router = useRouter();
+  const goBack = useSafeBack('/tools/salah-tracker');
   const insets = useSafeAreaInsets();
 
   const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
@@ -478,6 +480,19 @@ export default function SalahTrackerSettingsScreen() {
   const [fajrTime, setFajrTime] = useState<string | null>(null);
   const [isCustom, setIsCustom] = useState(false);
   const [clockOpen, setClockOpen] = useState(false);
+  useLocale();
+  const { focus } = useLocalSearchParams<{ focus?: string }>();
+  const scrollRef = useRef<ScrollView>(null);
+  const reliabilityY = useRef<number | null>(null);
+  const didFocusScroll = useRef(false);
+  const [health, setHealth] = useState<ScheduleHealth | null>(null);
+
+  const refreshHealth = useCallback(async () => {
+    try { setHealth(await NotificationService.getScheduleHealth()); } catch {}
+  }, []);
+
+  // Re-check delivery health whenever this screen is shown.
+  useFocusEffect(useCallback(() => { refreshHealth(); }, [refreshHealth]));
 
   /* ── Load ── */
   useEffect(() => {
@@ -536,21 +551,15 @@ export default function SalahTrackerSettingsScreen() {
         ]);
         return;
       }
-      // Check internet for prayer times API
-      try {
-        const ac = new AbortController();
-        const tid = setTimeout(() => ac.abort(), 5000);
-        await fetch('https://api.aladhan.com/v1/currentTime?zone=UTC', { method: 'HEAD', signal: ac.signal });
-        clearTimeout(tid);
-      } catch {
-        await NotificationService.sendInternetOffNotification?.();
-      }
-      save({ ...prefs, enabled: true });
+      // Prayer times are computed on-device, so no internet is needed. Reflect
+      // what the service saved (it also laid down the schedule).
+      setPrefs(await NotificationService.getPreferences());
     } else {
       await NotificationService.disableNotifications();
-      save({ ...prefs, enabled: false });
+      setPrefs(await NotificationService.getPreferences());
     }
-  }, [prefs, save]);
+    refreshHealth();
+  }, [prefs, refreshHealth]);
 
   const togglePrayer = useCallback(async (p: PrayerName) => {
     if (!prefs) return;
@@ -621,6 +630,32 @@ export default function SalahTrackerSettingsScreen() {
     );
   };
 
+  /* ── Reliability ── */
+  const sendTestAzan = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    const ok = await NotificationService.scheduleTestAzan(5);
+    Alert.alert(ok ? t('reliability.testSent') : t('reliability.testFailed'));
+  }, []);
+
+  const openAndroidSetting = useCallback(async (action: string) => {
+    try {
+      await Linking.sendIntent(action);
+    } catch {
+      Linking.openSettings().catch(() => {});
+    }
+  }, []);
+
+  // Deep link from the Prayer screen ("Make sure alerts arrive") → scroll here.
+  useEffect(() => {
+    if (focus === 'reliability' && !loading && !didFocusScroll.current && reliabilityY.current != null) {
+      didFocusScroll.current = true;
+      setTimeout(() => scrollRef.current?.scrollTo({ y: Math.max(0, (reliabilityY.current ?? 0) - 12), animated: true }), 120);
+    }
+  }, [focus, loading, prefs]);
+
+  const fmtThrough = (ms: number | null) =>
+    ms ? new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+
   /* ── Prayers config ── */
   const PRAYERS = [
     { key: 'fajr' as PrayerName, name: 'Fajr', icon: 'sunny-outline' as const, grad: ['#56A8E2', '#3D8FCC'] as [string, string] },
@@ -632,7 +667,7 @@ export default function SalahTrackerSettingsScreen() {
 
   return (
     <View style={[st.root, { backgroundColor: theme.surface }]}>
-      <ScrollView showsVerticalScrollIndicator={false}
+      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}>
 
         {/* ═══ HEADER ═══ */}
@@ -641,7 +676,7 @@ export default function SalahTrackerSettingsScreen() {
           style={[st.hdr, { paddingTop: insets.top + 6 }]}>
 
           <View style={st.hdrRow}>
-            <TouchableOpacity style={st.hdrBack} onPress={() => router.back()} activeOpacity={0.7}>
+            <TouchableOpacity style={st.hdrBack} onPress={() => goBack()} activeOpacity={0.7}>
               <Ionicons name="chevron-back" size={20} color="#fff" />
             </TouchableOpacity>
             <View style={{ alignItems: 'center' }}>
@@ -690,6 +725,57 @@ export default function SalahTrackerSettingsScreen() {
               )}
             </Section>
 
+            {/* ═══ RELIABILITY ═══ */}
+            <View onLayout={(e) => { reliabilityY.current = e.nativeEvent.layout.y; }}>
+              <Section title={t('reliability.title').toUpperCase()}>
+                <Text style={[st.relIntro, { color: theme.textSecondary }]}>{t('reliability.subtitle')}</Text>
+
+                <Row icon="notifications-circle-outline" bg="#40916C"
+                  label={t('reliability.permission')}
+                  sub={health ? t(`reliability.${health.permission}`) : '…'}
+                  right={health?.permission === 'denied' ? (
+                    <Text style={[st.relAction, { color: theme.error }]}>{t('reliability.open')}</Text>
+                  ) : undefined}
+                  onPress={health?.permission === 'denied' ? () => Linking.openSettings().catch(() => {}) : undefined} />
+
+                <Row icon="calendar-outline" bg="#4568B8"
+                  label={health && health.azanCount > 0
+                    ? t('reliability.scheduledCount', { count: health.scheduledCount })
+                    : t('reliability.noSchedule')}
+                  sub={!prefs.enabled
+                    ? t('reliability.disabled')
+                    : health && health.lastAzanAt
+                      ? `${t('reliability.scheduled')} ${fmtThrough(health.lastAzanAt)}`
+                      : t('reliability.noLocation')} />
+
+                {!!health?.blockedChannels?.length && (
+                  <Row icon="volume-mute-outline" bg="#DC3545"
+                    label={t('reliability.blockedChannel', { names: health.blockedChannels.join(', ') })}
+                    onPress={() => Linking.openSettings().catch(() => {})} />
+                )}
+
+                <Row icon="megaphone-outline" bg="#F0C146"
+                  label={t('reliability.testAzan')}
+                  onPress={sendTestAzan}
+                  last={Platform.OS !== 'android'} />
+
+                {Platform.OS === 'android' && (
+                  <>
+                    <Row icon="alarm-outline" bg="#9B72CF"
+                      label={t('reliability.exactAlarm')}
+                      sub={t('reliability.exactAlarmDesc')}
+                      onPress={() => openAndroidSetting('android.settings.REQUEST_SCHEDULE_EXACT_ALARM')} />
+                    <Row icon="battery-charging-outline" bg="#F09846"
+                      label={t('reliability.battery')}
+                      sub={t('reliability.batteryDesc')}
+                      onPress={() => openAndroidSetting('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS')}
+                      last />
+                    <Text style={[st.relTip, { color: theme.textSecondary }]}>{t('reliability.oemTip')}</Text>
+                  </>
+                )}
+              </Section>
+            </View>
+
             {prefs.enabled && (
               <>
                 {/* ═══ AZAN SOUND ═══ */}
@@ -736,7 +822,7 @@ export default function SalahTrackerSettingsScreen() {
               <Row icon="checkmark-circle-outline" bg="#40916C"
                 label="Salah Tracker Reminder"
                 sub={prefs.salahTrackerReminder
-                  ? 'Daily reminder at 10:00 PM'
+                  ? `Daily reminder at ${fmt12(prefs.salahTrackerTime)}`
                   : 'Disabled'}
                 right={<Switch {...sw(prefs.salahTrackerReminder, v => {
                   save({ ...prefs, salahTrackerReminder: v });
@@ -748,7 +834,7 @@ export default function SalahTrackerSettingsScreen() {
                 <View style={[st.trackerHint, { backgroundColor: `${theme.primary}08` }]}>
                   <Ionicons name="sparkles" size={14} color={theme.primary} />
                   <Text style={[st.trackerHintTxt, { color: theme.textTertiary }]}>
-                    Smart notification based on your daily prayer progress
+                    A gentle nudge to log your prayers and keep your streak alive
                   </Text>
                 </View>
               )}
@@ -892,6 +978,9 @@ export default function SalahTrackerSettingsScreen() {
    STYLES — every token matched to SalahTrackerScreen
    ═══════════════════════════════════════════════ */
 const st = StyleSheet.create({
+  relIntro: { fontSize: 13, lineHeight: 19, marginBottom: 6, marginHorizontal: 2 },
+  relAction: { fontSize: 14, fontWeight: '700' },
+  relTip: { fontSize: 12, lineHeight: 18, marginTop: 10, marginHorizontal: 2 },
   root: { flex: 1 },
 
   /* Ornament — identical to tracker */

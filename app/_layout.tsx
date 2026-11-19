@@ -3,13 +3,15 @@
  * Hides expo-splash-screen, runs SukoonSplash animation, then renders app
  */
 
+// MUST stay the first import: defines the background prayer task at global
+// scope so it exists in headless background launches (no React tree mounted).
+import '@/lib/prayerBackgroundTask';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, StyleSheet, AppState, AppStateStatus, Platform } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Font from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { FontSizeProvider } from '@/contexts/FontSizeContext';
 import { SavedVersesProvider } from '@/contexts/SavedVersesContext';
@@ -156,7 +158,6 @@ function RootLayoutInner() {
   }, [appReady, router]);
 
   // Handle app state changes (foreground/background)
-  // When returning to foreground, play missed azan if one arrived recently
   useEffect(() => {
     if (!appReady) return;
 
@@ -164,29 +165,15 @@ function RootLayoutInner() {
       const prevState = appStateRef.current;
       appStateRef.current = state;
 
-      // App just came to foreground — check if we missed an azan
       if (state === 'active' && prevState !== 'active') {
-        // Give the system a moment to deliver any pending notifications
-        setTimeout(() => {
-          AzanPlayer.handleAppForeground().catch(() => {});
-        }, 500);
-
         // Sync any notifications delivered while app was in background
         // This ensures the Notifications screen shows all delivered notifications
         NotificationService.syncDeliveredNotifications().catch(() => {});
 
-        // Check if notifications need rescheduling (new day). Reschedule the
-        // rolling multi-day window right away using cached coords so we don't
-        // wait for the user to open the prayer screen.
-        const prefs = await NotificationService.getPreferences();
-        if (prefs.enabled) {
-          const lastScheduled = await AsyncStorage.getItem('sukoon_notif_last_scheduled');
-          const today = new Date().toDateString();
-          if (lastScheduled !== today) {
-            if (__DEV__) console.log('[Sukoon] New day detected — re-extending notification window');
-            NotificationService.rescheduleFromCache().catch(() => {});
-          }
-        }
+        // Top the notification window up on EVERY foreground. It is computed
+        // offline and diffed against what's pending, so a no-op costs nothing —
+        // and it self-heals alarms the OS or an OEM battery manager dropped.
+        NotificationService.syncSchedule().catch(() => {});
       }
     });
 

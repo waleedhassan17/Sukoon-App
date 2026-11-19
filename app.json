@@ -51,8 +51,7 @@
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
-      ],
-      "useNextNotificationsApi": true
+      ]
     },
     "androidNavigationBar": {
       "backgroundColor": "#0B0B0C",

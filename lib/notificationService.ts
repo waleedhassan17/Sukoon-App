@@ -1,4 +1,29 @@
 /**
+ * NotificationService — local prayer/azan notifications.
+ *
+ * Architecture (why alerts keep firing without opening the app)
+ * ─────────────────────────────────────────────────────────────
+ *  • Prayer times are computed OFFLINE (lib/prayerEngine.ts) from the last-known
+ *    coordinates, so there is nothing to fetch and nothing that can fail.
+ *  • lib/prayerSchedule.ts (pure, unit-tested) decides WHAT to schedule: up to
+ *    30 days of date-triggered azans on Android, as many whole days as fit under
+ *    iOS's 64-notification cap, plus repeating DAILY reminders.
+ *  • This module only APPLIES that plan: it diffs against what is already
+ *    scheduled (by identifier + signature), cancels stale items and adds new or
+ *    changed ones. It never wipes a longer window to lay a shorter one.
+ *  • Every call funnels through ONE queue (`syncSchedule`) so concurrent callers
+ *    — app start, foreground, location change, settings toggles, the background
+ *    task — can never interleave a cancel with a re-lay.
+ *  • A module-scope background task (lib/prayerBackgroundTask.ts) tops the
+ *    window up periodically as a bonus, but reliability does NOT depend on it.
+ *
+ * Android channel note: expo-notifications reads the channel from the TRIGGER
+ * (`trigger.channelId`), not from the content. Putting it in `content` is
+ * silently ignored and the notification lands on the fallback channel with the
+ * default sound — so every scheduled notification here sets it on the trigger.
+ */
+
+/**
  * Safe lazy imports — expo-notifications was removed from Expo Go in SDK 53.
  * We lazy-load all notification modules so the app doesn't crash on import.
  * Each module is loaded independently to prevent one failure from blocking others.
@@ -22,19 +47,32 @@ function loadModules(): boolean {
 }
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform, AppState } from 'react-native';
+import { Platform } from 'react-native';
+import { AzanPlayer } from './azanPlayer';
+import { NotificationStorage } from './notificationStorage';
+import { PrayerTimesService } from './prayerTimes';
+import { isValidCoords, LatLng } from './prayerEngine';
+import {
+  azanChannelAndSound,
+  buildSchedule,
+  CHANNEL_ID,
+  DailySpec,
+  dailySig,
+  DateSpec,
+  diffSchedule,
+  isOurId,
+  LEGACY_CHANNEL_IDS,
+  platformBudget,
+  prayerBody,
+  ScheduleResult,
+} from './prayerSchedule';
+import { PRAYER_TASK_NAME } from './prayerBackgroundTask';
 
 // ══════════════════════════════════════════════
 // TYPES
 // ══════════════════════════════════════════════
 
 export type PrayerName = 'fajr' | 'sunrise' | 'dhuhr' | 'asr' | 'maghrib' | 'isha';
-
-export interface PrayerTimeEntry {
-  name: PrayerName;
-  label: string;
-  time: Date; // today's prayer time as a Date object
-}
 
 export interface NotificationPreferences {
   enabled: boolean;                      // master toggle
@@ -48,9 +86,30 @@ export interface NotificationPreferences {
   quranReminderTime: string;             // "08:00" — morning nudge
 }
 
-import { AzanPlayer } from './azanPlayer';
-import { NotificationStorage } from './notificationStorage';
-import { PrayerTimesService } from './prayerTimes';
+export interface SyncResult {
+  ok: boolean;
+  /** Why nothing was scheduled, when `ok` is false (or the master toggle is off). */
+  reason?: 'unavailable' | 'disabled' | 'permission' | 'no-location' | 'no-times' | 'error';
+  /** True when at least one notification was added, changed or cancelled. */
+  changed: boolean;
+  /** Total notifications that should now be pending. */
+  count: number;
+  /** Epoch ms of the end of the covered window (azans), if any. */
+  through: number | null;
+}
+
+export interface ScheduleHealth {
+  available: boolean;
+  permission: 'granted' | 'denied' | 'undetermined';
+  /** All pending notifications owned by this scheduler. */
+  scheduledCount: number;
+  azanCount: number;
+  /** Epoch ms of the soonest / furthest pending azan. */
+  nextAzanAt: number | null;
+  lastAzanAt: number | null;
+  /** Android channels the user has turned fully off in system settings. */
+  blockedChannels: string[];
+}
 
 // ══════════════════════════════════════════════
 // STORAGE KEYS
@@ -58,30 +117,14 @@ import { PrayerTimesService } from './prayerTimes';
 
 const KEYS = {
   PREFS: 'sukoon_notif_prefs',
-  LAST_SCHEDULED: 'sukoon_notif_last_scheduled', // date string
+  SCHEDULE_META: 'sukoon_notif_schedule_meta', // { at, through, count, daysCovered }
+  CHANNELS_VERSION: 'sukoon_notif_channels_version',
   PUSH_TOKEN: 'sukoon_push_token',
-  // NEW: Track end-of-day reminder sent today
+  // Track end-of-day reminder sent today
   EOD_REMINDER_SENT: 'sukoon_eod_reminder_sent',
-  // NEW: Track internet off notification sent today
-  INTERNET_NOTIF_SENT: 'sukoon_internet_notif_sent',
 };
 
-const BACKGROUND_TASK_NAME = 'SUKOON_PRAYER_RESCHEDULE';
-
-// How many days ahead we schedule prayer notifications in one pass. Local
-// notifications only fire if they're scheduled, so a single-day schedule stops
-// the moment the user goes a day without opening the app. By laying down a
-// rolling multi-day window (re-extended on every app open / background run),
-// notifications keep firing even if the app isn't opened for several days.
-const WINDOW_DAYS = 7;
-
-/** Combine a calendar day (midnight) with an "HH:MM" string into an absolute Date. */
-function atTimeOnDate(base: Date, hhmm: string): Date {
-  const [h, m] = hhmm.split(':').map(Number);
-  const d = new Date(base);
-  d.setHours(h || 0, m || 0, 0, 0);
-  return d;
-}
+const CHANNELS_VERSION = '2';
 
 // ══════════════════════════════════════════════
 // DEFAULT PREFERENCES
@@ -91,7 +134,7 @@ const DEFAULT_PREFS: NotificationPreferences = {
   enabled: false,
   prayerAlerts: {
     fajr: true,
-    sunrise: false,  // most people don't want sunrise alert
+    sunrise: false,  // sunrise is not a salah — never scheduled
     dhuhr: true,
     asr: true,
     maghrib: true,
@@ -110,58 +153,114 @@ const DEFAULT_PREFS: NotificationPreferences = {
 // NOTIFICATION CHANNELS (Android)
 // ══════════════════════════════════════════════
 
+/**
+ * Create the (versioned) channels that don't exist yet. We never delete and
+ * recreate on every launch: Android restores a deleted channel's old settings
+ * when the same id returns, and deleting also clears delivered notifications.
+ * Changed channel config ⇒ bump the id suffix in lib/prayerSchedule.ts instead.
+ */
 async function setupChannels(): Promise<void> {
   if (Platform.OS !== 'android' || !Notifications) return;
 
-  // Delete old channels so Android picks up updated sound files
-  // (Android caches channel config — once created, sound can't change without deleting)
+  // One-time removal of the pre-v2 channels (their sounds were never applied
+  // because notifications were never routed to them).
   try {
-    await Notifications.deleteNotificationChannelAsync('prayer-azan').catch(() => {});
-    await Notifications.deleteNotificationChannelAsync('prayer-fajr').catch(() => {});
-    await Notifications.deleteNotificationChannelAsync('prayer-reminder').catch(() => {});
-    await Notifications.deleteNotificationChannelAsync('daily-reminder').catch(() => {});
+    const done = await AsyncStorage.getItem(KEYS.CHANNELS_VERSION);
+    if (done !== CHANNELS_VERSION) {
+      for (const id of LEGACY_CHANNEL_IDS) {
+        await Notifications.deleteNotificationChannelAsync(id).catch(() => {});
+      }
+      await AsyncStorage.setItem(KEYS.CHANNELS_VERSION, CHANNELS_VERSION);
+    }
   } catch {}
 
-  // High-importance channel for azan
-  await Notifications.setNotificationChannelAsync('prayer-azan', {
-    name: 'Prayer Azan',
-    importance: Notifications.AndroidImportance.HIGH,
-    sound: 'azan.wav',
-    vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#2D6A4F',
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-    bypassDnd: false,
-    enableLights: true,
-    enableVibrate: true,
-  });
+  const N = Notifications;
+  const defs: { id: string; config: any }[] = [
+    {
+      id: CHANNEL_ID.azan,
+      config: {
+        name: 'Prayer Azan',
+        description: 'Azan at prayer time',
+        importance: N.AndroidImportance.HIGH,
+        sound: 'azan.wav',
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#2D6A4F',
+        lockscreenVisibility: N.AndroidNotificationVisibility.PUBLIC,
+        enableLights: true,
+        enableVibrate: true,
+      },
+    },
+    {
+      id: CHANNEL_ID['azan-fajr'],
+      config: {
+        name: 'Fajr Azan',
+        description: 'Special azan for Fajr',
+        importance: N.AndroidImportance.HIGH,
+        sound: 'azan_fajr.wav',
+        vibrationPattern: [0, 500, 250, 500],
+        lightColor: '#56A8E2',
+        lockscreenVisibility: N.AndroidNotificationVisibility.PUBLIC,
+        enableLights: true,
+        enableVibrate: true,
+      },
+    },
+    {
+      id: CHANNEL_ID['azan-silent'],
+      config: {
+        name: 'Prayer Alerts (silent)',
+        description: 'Prayer-time alerts without the azan sound',
+        importance: N.AndroidImportance.HIGH,
+        sound: null,
+        vibrationPattern: [0, 250, 250, 250],
+        lockscreenVisibility: N.AndroidNotificationVisibility.PUBLIC,
+        enableVibrate: true,
+      },
+    },
+    {
+      id: CHANNEL_ID.reminder,
+      config: {
+        name: 'Prayer Reminders',
+        description: 'Gentle reminder shortly before prayer time',
+        importance: N.AndroidImportance.DEFAULT,
+        sound: 'reminder.wav',
+        vibrationPattern: [0, 200],
+        lightColor: '#D4A373',
+      },
+    },
+    {
+      id: CHANNEL_ID.daily,
+      config: {
+        name: 'Daily Reminders',
+        description: 'Salah tracker and Quran reading reminders',
+        importance: N.AndroidImportance.DEFAULT,
+        sound: 'reminder.wav',
+      },
+    },
+    {
+      // Target of the Cloud Function push notifications (Salah Buddy).
+      id: 'sukoon-friends',
+      config: {
+        name: 'Friends & Streaks',
+        description: 'Salah Buddy nudges and streak updates',
+        importance: N.AndroidImportance.DEFAULT,
+      },
+    },
+  ];
 
-  // Fajr-specific channel (different sound)
-  await Notifications.setNotificationChannelAsync('prayer-fajr', {
-    name: 'Fajr Prayer',
-    importance: Notifications.AndroidImportance.HIGH,
-    sound: 'azan_fajr.wav',
-    vibrationPattern: [0, 500, 250, 500],
-    lightColor: '#56A8E2',
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-    enableLights: true,
-    enableVibrate: true,
-  });
+  let existing = new Set<string>();
+  try {
+    const list = await Notifications.getNotificationChannelsAsync();
+    existing = new Set((list ?? []).map((c: any) => c.id));
+  } catch {}
 
-  // Pre-alert channel (gentle reminder)
-  await Notifications.setNotificationChannelAsync('prayer-reminder', {
-    name: 'Prayer Reminders',
-    importance: Notifications.AndroidImportance.DEFAULT,
-    sound: 'reminder.wav',
-    vibrationPattern: [0, 200],
-    lightColor: '#D4A373',
-  });
-
-  // Tracker & Quran reminders (low priority)
-  await Notifications.setNotificationChannelAsync('daily-reminder', {
-    name: 'Daily Reminders',
-    importance: Notifications.AndroidImportance.DEFAULT,
-    sound: 'reminder.wav',
-  });
+  for (const d of defs) {
+    if (existing.has(d.id)) continue;
+    try {
+      await Notifications.setNotificationChannelAsync(d.id, d.config);
+    } catch (e) {
+      if (__DEV__) console.warn('[Sukoon] channel setup failed:', d.id, e);
+    }
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -188,6 +287,19 @@ async function requestPermissions(): Promise<boolean> {
 }
 
 // ══════════════════════════════════════════════
+// SERIALISATION
+// All schedule mutations run through this queue, so a foreground re-sync can
+// never interleave with a settings change or the background task.
+// ══════════════════════════════════════════════
+
+let _queue: Promise<unknown> = Promise.resolve();
+function runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const p = _queue.then(fn, fn);
+  _queue = p.catch(() => {});
+  return p;
+}
+
+// ══════════════════════════════════════════════
 // MAIN SERVICE
 // ══════════════════════════════════════════════
 
@@ -200,7 +312,6 @@ export const NotificationService = {
       return;
     }
 
-    // Set up notification handler (how to display when app is foreground)
     // Configure how notifications are displayed when app is in the foreground.
     // For prayer azan notifications, we DISABLE the system sound because
     // AzanPlayer (expo-av) handles the full 25-second azan reliably.
@@ -216,7 +327,6 @@ export const NotificationService = {
         const isPrayerAzan = data?.type === 'prayer' && data?.action === 'azan';
 
         // Persist notification to storage (fire-and-forget, non-blocking)
-        // This is the PRIMARY save point for foreground notifications.
         try {
           await NotificationStorage.addFromNotification(notification);
         } catch {}
@@ -235,22 +345,13 @@ export const NotificationService = {
       },
     });
 
-    // Set up Android channels
+    // Channels first (cheap, only creates what's missing)…
     await setupChannels();
 
-    // Check if we need to reschedule (new day)
-    const prefs = await this.getPreferences();
-    if (prefs.enabled) {
-      const lastScheduled = await AsyncStorage.getItem(KEYS.LAST_SCHEDULED);
-      const today = new Date().toDateString();
-      if (lastScheduled !== today) {
-        // Attempt to reschedule from cached prayer times immediately
-        // This ensures notifications are scheduled even before the user
-        // opens the prayer screen (which triggers a fresh API fetch).
-        await this.rescheduleFromCache().catch(() => {});
-        console.log('[Sukoon] Auto-rescheduled notifications from cache on init');
-      }
-    }
+    // …then top the window up in the background. Everything here is offline, but
+    // a first-time lay of ~300 notifications takes a moment, so never hold the
+    // splash screen for it. The queue makes overlapping calls safe.
+    this.syncSchedule().catch(() => {});
   },
 
   // ── PREFERENCES ──
@@ -260,11 +361,15 @@ export const NotificationService = {
       if (raw) {
         const stored = JSON.parse(raw);
         // Merge with defaults (handles new fields added in updates)
-        return { ...DEFAULT_PREFS, ...stored };
+        return {
+          ...DEFAULT_PREFS,
+          ...stored,
+          prayerAlerts: { ...DEFAULT_PREFS.prayerAlerts, ...(stored?.prayerAlerts ?? {}) },
+        };
       }
-      return { ...DEFAULT_PREFS };
+      return { ...DEFAULT_PREFS, prayerAlerts: { ...DEFAULT_PREFS.prayerAlerts } };
     } catch {
-      return { ...DEFAULT_PREFS };
+      return { ...DEFAULT_PREFS, prayerAlerts: { ...DEFAULT_PREFS.prayerAlerts } };
     }
   },
 
@@ -272,15 +377,17 @@ export const NotificationService = {
     try {
       await AsyncStorage.setItem(KEYS.PREFS, JSON.stringify(prefs));
 
-      // Keep schedules in sync with latest preferences.
-      // This covers toggles like prayer selection, pre-alert minutes,
-      // quran reminder time, and azan sound settings.
-      if (prefs.enabled) {
-        await setupChannels().catch(() => {});
-        await this.rescheduleFromCache().catch(() => {});
-      } else {
-        await this.cancelPrayerNotifications().catch(() => {});
+      // A daily reminder switched on with the master off still needs the OS
+      // permission (a no-op if already granted) — the user just asked for it.
+      if (!prefs.enabled && (prefs.salahTrackerReminder || prefs.quranReminder) && loadModules()) {
+        await setupChannels();
+        await requestPermissions().catch(() => false);
       }
+
+      // Re-sync with the latest preferences. The diff touches only what changed
+      // (e.g. a sound toggle swaps channels; a pre-alert change rewrites those
+      // items), and turning everything off cancels our schedule.
+      await this.syncSchedule().catch(() => {});
     } catch {}
   },
 
@@ -290,6 +397,7 @@ export const NotificationService = {
     const granted = await requestPermissions();
     if (!granted) return false;
 
+    await setupChannels();
     const prefs = await this.getPreferences();
     prefs.enabled = true;
     await this.savePreferences(prefs);
@@ -300,448 +408,186 @@ export const NotificationService = {
     const prefs = await this.getPreferences();
     prefs.enabled = false;
     await this.savePreferences(prefs);
-    await this.cancelAll();
   },
 
   // ══════════════════════════════════════════
-  // SCHEDULE PRAYER NOTIFICATIONS
-  // Call this whenever:
-  //   1. App launches with notifications enabled
-  //   2. User enables notifications
-  //   3. Prayer times are fetched/updated
-  //   4. User changes notification preferences
-  //   5. Background task runs at midnight
+  // THE SCHEDULER
+  // Single entry point. Safe to call as often as you like: from app start, every
+  // foreground, after a location change, after a settings change, and from the
+  // background task. Offline, idempotent, serialised.
   // ══════════════════════════════════════════
-  async schedulePrayerNotifications(
-    prayerTimes: PrayerTimeEntry[]
-  ): Promise<number> {
-    if (!loadModules()) return 0;
-    const prefs = await this.getPreferences();
-    if (!prefs.enabled) return 0;
+  async syncSchedule(coords?: LatLng): Promise<SyncResult> {
+    if (!loadModules()) return { ok: false, reason: 'unavailable', changed: false, count: 0, through: null };
 
-    // Cancel all existing prayer notifications first
-    await this.cancelPrayerNotifications();
+    return runExclusive(async (): Promise<SyncResult> => {
+      try {
+        // Remember the location regardless of whether alerts are on, so that
+        // turning them on later always has coordinates ready.
+        if (coords && isValidCoords(coords)) {
+          await PrayerTimesService.saveLocation(coords.lat, coords.lng);
+        }
 
-    const now = new Date();
-    let scheduled = 0;
+        const prefs = await this.getPreferences();
+        // Azans follow the master toggle; the Salah-tracker / Quran reminders
+        // have their own switches and work even with the master off.
+        const anyDaily = prefs.salahTrackerReminder || prefs.quranReminder;
+        if (!prefs.enabled && !anyDaily) {
+          const removed = await this._cancelOurs();
+          return { ok: true, reason: 'disabled', changed: removed > 0, count: 0, through: null };
+        }
 
-    for (const prayer of prayerTimes) {
-      // Skip if this prayer is disabled
-      if (!prefs.prayerAlerts[prayer.name]) continue;
+        const perm = await Notifications.getPermissionsAsync();
+        if (perm?.status !== 'granted') {
+          return { ok: false, reason: 'permission', changed: false, count: 0, through: null };
+        }
 
-      // Skip sunrise (not a salah)
-      if (prayer.name === 'sunrise') continue;
-
-      const prayerTime = new Date(prayer.time);
-
-      // ── Main azan notification (at prayer time) ──
-      if (prayerTime > now) {
-        const isFajr = prayer.name === 'fajr';
-        const soundFile = isFajr && prefs.fajrSpecialSound
-          ? 'azan_fajr.wav'
-          : prefs.azanSound ? 'azan.wav' : undefined;
-
-        const channelId = isFajr ? 'prayer-fajr' : 'prayer-azan';
-
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: `${prayer.label} Prayer Time`,
-            body: this._getPrayerBody(prayer.name),
-            sound: soundFile || undefined,
-            data: {
-              type: 'prayer',
-              prayer: prayer.name,
-              action: 'azan',
-            },
-            ...(Platform.OS === 'android' && { channelId }),
-            // iOS critical alert (if entitled):
-            // interruptionLevel: 'timeSensitive',
-          },
-          trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.DATE,
-            date: prayerTime,
-          },
-          identifier: `prayer-${prayer.name}`,
-        });
-        scheduled++;
-
-        // ── Pre-alert notification (X minutes before) ──
-        if (prefs.preAlertMinutes > 0) {
-          const preTime = new Date(prayerTime.getTime() - prefs.preAlertMinutes * 60000);
-          if (preTime > now) {
-            await Notifications.scheduleNotificationAsync({
-              content: {
-                title: `${prayer.label} in ${prefs.preAlertMinutes} minutes`,
-                body: `Prepare for ${prayer.label} prayer`,
-                sound: 'reminder.wav',
-                data: {
-                  type: 'prayer-reminder',
-                  prayer: prayer.name,
-                  action: 'pre-alert',
-                },
-                ...(Platform.OS === 'android' && { channelId: 'prayer-reminder' }),
-              },
-              trigger: {
-                type: Notifications.SchedulableTriggerInputTypes.DATE,
-                date: preTime,
-              },
-              identifier: `prayer-pre-${prayer.name}`,
-            });
-            scheduled++;
+        const now = new Date();
+        const budget = platformBudget(Platform.OS);
+        let days: Awaited<ReturnType<typeof PrayerTimesService.getUpcomingDays>> = [];
+        if (prefs.enabled) {
+          const loc = await PrayerTimesService.getSchedulingCoords();
+          if (!loc && !anyDaily) {
+            return { ok: false, reason: 'no-location', changed: false, count: 0, through: null };
+          }
+          if (loc) {
+            days = await PrayerTimesService.getUpcomingDays(loc.lat, loc.lng, budget.maxDays, now);
+            if (!days.length && !anyDaily) {
+              return { ok: false, reason: 'no-times', changed: false, count: 0, through: null };
+            }
           }
         }
-      }
-    }
 
-    // ── Salah Tracker Reminder (Fixed at 10:00 PM with smart messages) ──
-    if (prefs.salahTrackerReminder) {
-      const trackerTime = new Date();
-      trackerTime.setHours(22, 0, 0, 0); // Fixed at 10:00 PM
-
-      if (trackerTime > now) {
-        // Get smart notification content based on today's prayer data
-        const { title, body } = await this._getSmartTrackerNotification();
-        
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title,
-            body,
-            sound: 'reminder.wav',
-            data: { type: 'tracker-reminder', action: 'open-tracker' },
-            ...(Platform.OS === 'android' && { channelId: 'daily-reminder' }),
-          },
-          trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.DATE,
-            date: trackerTime,
-          },
-          identifier: 'salah-tracker-reminder',
+        const result = buildSchedule({
+          days: days.map((d) => ({ dateKey: d.dateKey, date: d.date, times: d.instants })),
+          prefs,
+          now,
+          budget,
         });
-        scheduled++;
+
+        const changed = await this._apply(result);
+
+        const through = result.windowEnd ? result.windowEnd.getTime() : null;
+        await AsyncStorage.setItem(
+          KEYS.SCHEDULE_META,
+          JSON.stringify({ at: now.getTime(), through, count: result.total, daysCovered: result.daysCovered }),
+        ).catch(() => {});
+
+        return { ok: true, changed, count: result.total, through };
+      } catch (e) {
+        if (__DEV__) console.warn('[Sukoon] syncSchedule failed:', e);
+        return { ok: false, reason: 'error', changed: false, count: 0, through: null };
       }
-    }
-
-    // ── Quran Reading Reminder ──
-    if (prefs.quranReminder) {
-      const [h, m] = prefs.quranReminderTime.split(':').map(Number);
-      const quranTime = new Date();
-      quranTime.setHours(h, m, 0, 0);
-
-      if (quranTime > now) {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: 'Daily Quran Reading 📖',
-            body: 'Take a moment to connect with the Quran today',
-            sound: 'reminder.wav',
-            data: { type: 'quran-reminder', action: 'open-quran' },
-            ...(Platform.OS === 'android' && { channelId: 'daily-reminder' }),
-          },
-          trigger: {
-            type: Notifications.SchedulableTriggerInputTypes.DATE,
-            date: quranTime,
-          },
-          identifier: 'quran-reading-reminder',
-        });
-        scheduled++;
-      }
-    }
-
-    // Mark today as scheduled
-    await AsyncStorage.setItem(KEYS.LAST_SCHEDULED, new Date().toDateString());
-
-    console.log(`[Sukoon] Scheduled ${scheduled} notifications for today`);
-    return scheduled;
+    });
   },
 
-  // ── Helper: prayer body messages ──
-  _getPrayerBody(prayer: PrayerName): string {
-    const messages: Record<PrayerName, string> = {
-      fajr:    'Rise for Fajr — the angels witness this prayer 🌅',
-      sunrise: 'The sun has risen',
-      dhuhr:   'It\'s time for Dhuhr prayer 🕐',
-      asr:     'Asr prayer time has arrived ☀️',
-      maghrib: 'Break your fast (if fasting) and pray Maghrib 🌅',
-      isha:    'Complete your day with Isha prayer 🌙',
-    };
-    return messages[prayer] || `It's time for ${prayer} prayer`;
+  /** Back-compat: re-run the scheduler. Returns true if a schedule is in place. */
+  async scheduleRollingWindow(coords?: LatLng): Promise<boolean> {
+    const r = await this.syncSchedule(coords);
+    return r.ok && r.reason !== 'disabled';
   },
 
-  /**
-   * ═══════════════════════════════════════════════════════════════════════════
-   * SMART SALAH TRACKER NOTIFICATION
-   * Evaluates today's prayer tracking data and returns appropriate message:
-   * - All 5 prayers completed → Congratulatory message
-   * - Some prayers completed → Motivational reminder
-   * - No prayers tracked → Gentle reminder to start
-   * ═══════════════════════════════════════════════════════════════════════════
-   */
-  async _getSmartTrackerNotification(): Promise<{ title: string; body: string }> {
-    try {
-      // Get today's date key (YYYY-MM-DD format)
-      const today = new Date();
-      const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-      const storageKey = `sukoon_salah_${dateKey}`;
-      
-      // Fetch today's prayer data
-      const stored = await AsyncStorage.getItem(storageKey);
-      const dayData = stored ? JSON.parse(stored) : null;
-      
-      // Count completed prayers (prayed, jamaah, or qasr count as completed)
-      let completedCount = 0;
-      if (dayData) {
-        const prayers = ['fajr', 'zuhr', 'asr', 'maghrib', 'isha'];
-        for (const prayer of prayers) {
-          const status = dayData[prayer];
-          if (status === 'prayed' || status === 'jamaah' || status === 'qasr') {
-            completedCount++;
-          }
-        }
-      }
-      
-      // ═══ Case 1: All 5 prayers completed ═══
-      if (completedCount === 5) {
-        const congratsMessages = [
-          {
-            title: '🌟 MashaAllah! All Prayers Complete',
-            body: 'You completed all your Salah today.\n"Whoever guards the five prayers, they will be a light for him on the Day of Judgment."',
-          },
-          {
-            title: '🤍 Beautiful Consistency!',
-            body: '"Indeed, the prayer has been decreed upon the believers at fixed times." (Quran 4:103)',
-          },
-          {
-            title: '✨ All Five Prayers Done!',
-            body: 'May Allah accept and elevate your rank. Keep up this beautiful devotion.',
-          },
-        ];
-        return congratsMessages[Math.floor(Math.random() * congratsMessages.length)];
-      }
-      
-      // ═══ Case 2: Some prayers completed (1-4) ═══
-      if (completedCount > 0) {
-        const motivationalMessages = [
-          {
-            title: '🌿 Keep Going!',
-            body: `You prayed ${completedCount}/5 today. Keep striving!\n"Indeed, prayer restrains from immorality and wrongdoing." (Quran 29:45)`,
-          },
-          {
-            title: '🤲 Every Prayer Matters',
-            body: `${completedCount} prayer${completedCount > 1 ? 's' : ''} tracked. Don't miss the rest.\n"The first matter that the slave will be brought to account for is the prayer."`,
-          },
-          {
-            title: '🌙 Almost There!',
-            body: `${completedCount}/5 prayers completed. Allah loves consistency, even if small. Complete the rest 🤍`,
-          },
-        ];
-        return motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
-      }
-      
-      // ═══ Case 3: No prayers tracked today ═══
-      const reminderMessages = [
-        {
-          title: "🌙 Don't Forget Your Salah",
-          body: '"Establish prayer for My remembrance." (Quran 20:14)\nTrack your prayers now.',
-        },
-        {
-          title: '🤍 Connect with Allah',
-          body: 'Salah is your daily connection with Allah. Start now — even one prayer matters.',
-        },
-        {
-          title: "🌿 It's Never Too Late",
-          body: "It's never too late to return to prayer. Open the tracker and log your Salah today.",
-        },
-      ];
-      return reminderMessages[Math.floor(Math.random() * reminderMessages.length)];
-      
-    } catch (error) {
-      // Fallback message if something goes wrong
-      console.warn('[Sukoon] Error getting smart notification:', error);
-      return {
-        title: 'Log Your Prayers 🕌',
-        body: 'Have you tracked all your prayers today?',
-      };
-    }
+  /** Back-compat alias used by background/boot paths. */
+  async rescheduleFromCache(): Promise<void> {
+    await this.syncSchedule();
   },
 
-  // ══════════════════════════════════════════
-  // ROLLING MULTI-DAY WINDOW (primary scheduler)
-  // Lays down prayer/reminder notifications for the next WINDOW_DAYS days so
-  // alerts keep firing even if the app isn't opened for several days. Re-run on
-  // every app open, foreground (new day), prayer-times fetch, and background tick.
-  //
-  // Returns true if it successfully scheduled from multi-day data; false when it
-  // couldn't (no coords / offline) so callers can fall back to a single day.
-  // ══════════════════════════════════════════
-  async scheduleRollingWindow(coords?: { lat: number; lng: number }): Promise<boolean> {
-    if (!loadModules()) return false;
-    const prefs = await this.getPreferences();
-    if (!prefs.enabled) return false;
+  /** Diff the desired plan against what is pending and apply only the delta. */
+  async _apply(result: ScheduleResult): Promise<boolean> {
+    const scheduled: any[] = (await Notifications.getAllScheduledNotificationsAsync()) ?? [];
+    const existing = scheduled.map((n) => ({
+      identifier: n.identifier as string,
+      sig: n.content?.data?.sig as string | undefined,
+    }));
 
-    let lat: number;
-    let lng: number;
-    if (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
-      lat = coords.lat;
-      lng = coords.lng;
-      // Remember coords so background/init can reschedule without the prayer screen.
-      await PrayerTimesService.cacheSchedulingCoords(lat, lng);
-    } else {
-      const c = await PrayerTimesService.getSchedulingCoords();
-      if (!c) return false;
-      lat = c.lat;
-      lng = c.lng;
+    const desired = [
+      ...result.dailies.map((d) => ({ id: d.id, sig: dailySig(d) })),
+      ...result.specs.map((s) => ({ id: s.id, sig: s.data.sig as string })),
+    ];
+    const { cancel, add } = diffSchedule(desired, existing);
+
+    for (const id of cancel) {
+      await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
     }
 
-    const days = await PrayerTimesService.getUpcomingDays(lat, lng, WINDOW_DAYS);
-    if (!days.length) return false;
-
-    // Replace the whole window atomically-ish: clear then re-lay.
-    await this.cancelPrayerNotifications();
-
-    const now = new Date();
-    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    let total = 0;
-    for (const day of days) {
-      total += await this._scheduleDay(day, prefs, now, day.dateKey === todayKey);
-    }
-
-    await AsyncStorage.setItem(KEYS.LAST_SCHEDULED, now.toDateString());
-    console.log(`[Sukoon] Rolling window: scheduled ${total} notifications across ${days.length} days`);
-    return true;
-  },
-
-  /**
-   * Schedule one calendar day's prayer + reminder notifications. Identifiers are
-   * suffixed with the date so days never collide and re-scheduling is idempotent.
-   */
-  async _scheduleDay(
-    day: { dateKey: string; date: Date; times: any },
-    prefs: NotificationPreferences,
-    now: Date,
-    isToday: boolean,
-  ): Promise<number> {
-    if (!Notifications) return 0;
-    const { dateKey, date, times } = day;
-    let scheduled = 0;
-
-    const order: { name: PrayerName; label: string; raw: string }[] = [
-      { name: 'fajr',    label: 'Fajr',    raw: times.Fajr },
-      { name: 'dhuhr',   label: 'Dhuhr',   raw: times.Dhuhr },
-      { name: 'asr',     label: 'Asr',     raw: times.Asr },
-      { name: 'maghrib', label: 'Maghrib', raw: times.Maghrib },
-      { name: 'isha',    label: 'Isha',    raw: times.Isha },
+    const toAdd = new Set(add);
+    // Soonest first: if the OS gives us little time (background run), the
+    // notifications that matter most are already in place.
+    const ordered: (DailySpec | DateSpec)[] = [
+      ...result.dailies.filter((d) => toAdd.has(d.id)),
+      ...result.specs.filter((s) => toAdd.has(s.id)),
     ];
 
-    for (const p of order) {
-      if (!prefs.prayerAlerts[p.name]) continue;
-      if (!p.raw) continue;
-      const prayerTime = atTimeOnDate(date, p.raw);
-      if (prayerTime <= now) continue;
-
-      const isFajr = p.name === 'fajr';
-      const soundFile = isFajr && prefs.fajrSpecialSound
-        ? 'azan_fajr.wav'
-        : prefs.azanSound ? 'azan.wav' : undefined;
-      const channelId = isFajr ? 'prayer-fajr' : 'prayer-azan';
-
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: `${p.label} Prayer Time`,
-          body: this._getPrayerBody(p.name),
-          sound: soundFile || undefined,
-          data: { type: 'prayer', prayer: p.name, action: 'azan' },
-          ...(Platform.OS === 'android' && { channelId }),
-        },
-        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: prayerTime },
-        identifier: `prayer-${p.name}-${dateKey}`,
-      });
-      scheduled++;
-
-      if (prefs.preAlertMinutes > 0) {
-        const preTime = new Date(prayerTime.getTime() - prefs.preAlertMinutes * 60000);
-        if (preTime > now) {
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              title: `${p.label} in ${prefs.preAlertMinutes} minutes`,
-              body: `Prepare for ${p.label} prayer`,
-              sound: 'reminder.wav',
-              data: { type: 'prayer-reminder', prayer: p.name, action: 'pre-alert' },
-              ...(Platform.OS === 'android' && { channelId: 'prayer-reminder' }),
-            },
-            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: preTime },
-            identifier: `prayer-pre-${p.name}-${dateKey}`,
-          });
-          scheduled++;
-        }
+    let failures = 0;
+    for (const spec of ordered) {
+      try {
+        await this._scheduleSpec(spec);
+      } catch (e) {
+        failures++;
+        if (__DEV__) console.warn('[Sukoon] schedule failed:', spec.id, e);
+        // Stop hammering the OS if it is refusing (e.g. alarm cap reached).
+        if (failures >= 5) break;
       }
     }
-
-    // Salah tracker reminder at 22:00. Today uses the smart (data-aware) message;
-    // future days use a generic nudge since we can't know their prayer counts yet.
-    if (prefs.salahTrackerReminder) {
-      const trackerTime = atTimeOnDate(date, '22:00');
-      if (trackerTime > now) {
-        const { title, body } = isToday
-          ? await this._getSmartTrackerNotification()
-          : this._getGenericTrackerNotification();
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title,
-            body,
-            sound: 'reminder.wav',
-            data: { type: 'tracker-reminder', action: 'open-tracker' },
-            ...(Platform.OS === 'android' && { channelId: 'daily-reminder' }),
-          },
-          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: trackerTime },
-          identifier: `salah-tracker-reminder-${dateKey}`,
-        });
-        scheduled++;
-      }
-    }
-
-    if (prefs.quranReminder) {
-      const quranTime = atTimeOnDate(date, prefs.quranReminderTime);
-      if (quranTime > now) {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: 'Daily Quran Reading 📖',
-            body: 'Take a moment to connect with the Quran today',
-            sound: 'reminder.wav',
-            data: { type: 'quran-reminder', action: 'open-quran' },
-            ...(Platform.OS === 'android' && { channelId: 'daily-reminder' }),
-          },
-          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: quranTime },
-          identifier: `quran-reading-reminder-${dateKey}`,
-        });
-        scheduled++;
-      }
-    }
-
-    return scheduled;
+    return cancel.length + add.length > 0;
   },
 
-  /** Generic tracker reminder used for future days (no prayer data yet). */
-  _getGenericTrackerNotification(): { title: string; body: string } {
-    return {
-      title: '🌙 Track Your Salah',
-      body: 'Have you logged all five prayers today? Open the tracker to keep your streak alive.',
-    };
+  async _scheduleSpec(spec: DailySpec | DateSpec): Promise<void> {
+    const N = Notifications;
+    const isAndroid = Platform.OS === 'android';
+    // Channel goes on the TRIGGER (see file header). iOS ignores it.
+    const channelId = CHANNEL_ID[spec.channel];
+    const isDaily = 'hour' in spec;
+
+    const data: Record<string, any> = { ...spec.data };
+    if (isDaily) data.sig = dailySig(spec as DailySpec);
+
+    const trigger = isDaily
+      ? {
+          type: N.SchedulableTriggerInputTypes.DAILY,
+          hour: (spec as DailySpec).hour,
+          minute: (spec as DailySpec).minute,
+          ...(isAndroid && { channelId }),
+        }
+      : {
+          type: N.SchedulableTriggerInputTypes.DATE,
+          date: (spec as DateSpec).fireAt,
+          ...(isAndroid && { channelId }),
+        };
+
+    await N.scheduleNotificationAsync({
+      identifier: spec.id,
+      content: {
+        title: spec.title,
+        body: spec.body,
+        // iOS plays this file; on Android the channel owns the sound.
+        sound: spec.sound ?? false,
+        data,
+        // iOS: 'timeSensitive' needs the Time Sensitive entitlement — enable it
+        // together with the capability, not before.
+      },
+      trigger,
+    });
+  },
+
+  /** Cancel every notification owned by this scheduler. Returns how many. */
+  async _cancelOurs(): Promise<number> {
+    if (!Notifications) return 0;
+    const all: any[] = (await Notifications.getAllScheduledNotificationsAsync()) ?? [];
+    let n = 0;
+    for (const notif of all) {
+      const id: string = notif.identifier ?? '';
+      if (isOurId(id)) {
+        await Notifications.cancelScheduledNotificationAsync(id).catch(() => {});
+        n++;
+      }
+    }
+    return n;
   },
 
   // ── Cancel helpers ──
   async cancelPrayerNotifications(): Promise<void> {
-    if (!Notifications) return;
-    const all = await Notifications.getAllScheduledNotificationsAsync();
-    for (const notif of all) {
-      const id: string = notif.identifier ?? '';
-      // Matches both legacy ids (e.g. 'salah-tracker-reminder') and the new
-      // date-suffixed ids (e.g. 'salah-tracker-reminder-2026-06-22').
-      if (
-        id.startsWith('prayer-') ||
-        id.startsWith('salah-tracker-reminder') ||
-        id.startsWith('quran-reading-reminder')
-      ) {
-        await Notifications.cancelScheduledNotificationAsync(id);
-      }
-    }
+    if (!loadModules()) return;
+    await this._cancelOurs();
   },
 
   async cancelAll(): Promise<void> {
@@ -751,8 +597,63 @@ export const NotificationService = {
 
   // ── Debug: list all scheduled ──
   async getScheduledNotifications(): Promise<any[]> {
-    if (!Notifications) return [];
+    if (!loadModules()) return [];
     return Notifications.getAllScheduledNotificationsAsync();
+  },
+
+  // ══════════════════════════════════════════
+  // HEALTH CHECK
+  // What the user (and support) needs to know: is permission granted, how far
+  // ahead are alerts actually pending, is a channel muted in system settings.
+  // ══════════════════════════════════════════
+  async getScheduleHealth(): Promise<ScheduleHealth> {
+    const base: ScheduleHealth = {
+      available: false,
+      permission: 'undetermined',
+      scheduledCount: 0,
+      azanCount: 0,
+      nextAzanAt: null,
+      lastAzanAt: null,
+      blockedChannels: [],
+    };
+    if (!loadModules()) return base;
+
+    try {
+      const perm = await Notifications.getPermissionsAsync();
+      const status: ScheduleHealth['permission'] =
+        perm?.status === 'granted' ? 'granted' : perm?.status === 'denied' ? 'denied' : 'undetermined';
+
+      const all: any[] = (await Notifications.getAllScheduledNotificationsAsync()) ?? [];
+      const ours = all.filter((n) => isOurId(n.identifier ?? ''));
+      const azanTimes = ours
+        .filter((n) => n.content?.data?.action === 'azan')
+        .map((n) => Number(n.content?.data?.fireAt))
+        .filter((t) => Number.isFinite(t))
+        .sort((a, b) => a - b);
+
+      const blocked: string[] = [];
+      if (Platform.OS === 'android') {
+        try {
+          const chans: any[] = (await Notifications.getNotificationChannelsAsync()) ?? [];
+          const ours2 = new Set<string>(Object.values(CHANNEL_ID));
+          for (const c of chans) {
+            if (ours2.has(c.id) && c.importance === Notifications.AndroidImportance.NONE) blocked.push(c.name ?? c.id);
+          }
+        } catch {}
+      }
+
+      return {
+        available: true,
+        permission: status,
+        scheduledCount: ours.length,
+        azanCount: azanTimes.length,
+        nextAzanAt: azanTimes[0] ?? null,
+        lastAzanAt: azanTimes.length ? azanTimes[azanTimes.length - 1] : null,
+        blockedChannels: blocked,
+      };
+    } catch {
+      return base;
+    }
   },
 
   // ══════════════════════════════════════════
@@ -774,7 +675,8 @@ export const NotificationService = {
 
       // When user taps an azan notification:
       // 1. If azan is already playing (foreground), stop it (user acknowledged)
-      // 2. If azan is NOT playing (came from background/killed), play it now
+      // 2. Otherwise, play it only if the prayer time is still fresh
+      //    (AzanPlayer ignores taps on stale notifications).
       if (data?.action === 'azan') {
         if (AzanPlayer.playing) {
           AzanPlayer.stop().catch(() => {});
@@ -797,6 +699,9 @@ export const NotificationService = {
         case 'open-tracker':
           router.push('/tools/salah-tracker');
           break;
+        case 'open-prayer':
+          router.push('/tools/prayer');
+          break;
         case 'open-quran':
           // Open last-read position or surah list
           router.push('/(tabs)/quran');
@@ -805,43 +710,6 @@ export const NotificationService = {
           break;
       }
     });
-  },
-
-  // ══════════════════════════════════════════
-  // RESCHEDULE FROM CACHED PRAYER TIMES
-  // Used by background task and on app init when prayer times
-  // haven't been fetched yet (before the user opens prayer screen).
-  // Reads last cached prayer times from AsyncStorage and schedules.
-  // ══════════════════════════════════════════
-  async rescheduleFromCache(): Promise<void> {
-    // Preferred path: lay down the full multi-day rolling window using the
-    // persistently-cached coordinates. Only if that fails (no coords / offline)
-    // do we fall back to scheduling just today from the cached prayer times.
-    try {
-      if (await this.scheduleRollingWindow()) return;
-    } catch (e) {
-      if (__DEV__) console.warn('[Sukoon] rolling window failed, falling back to single-day:', e);
-    }
-
-    try {
-      const raw = await AsyncStorage.getItem('sukoon_prayer_cache');
-      if (!raw) return;
-      const cached = JSON.parse(raw);
-      // Validate cache is for today (format: YYYY-MM-DD)
-      const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-      if (cached.date !== todayStr) return; // stale cache — skip
-
-      const data = cached.data;
-      if (!data?.Fajr) return; // invalid cache
-
-      // Import bridge inline to avoid circular deps
-      const { convertToNotifFormat } = require('./prayerTimeNotifBridge');
-      const entries = convertToNotifFormat(data);
-      await this.schedulePrayerNotifications(entries);
-    } catch (e) {
-      if (__DEV__) console.warn('[Sukoon] rescheduleFromCache error:', e);
-    }
   },
 
   // ══════════════════════════════════════════
@@ -891,98 +759,95 @@ export const NotificationService = {
   },
 
   // ══════════════════════════════════════════
-  // BACKGROUND RESCHEDULING
-  // Runs daily to reschedule prayer notifications
-  // for the new day (prayer times change daily)
+  // BACKGROUND TOP-UP
+  // The task itself is DEFINED at module scope in lib/prayerBackgroundTask.ts
+  // (expo-task-manager requires that — a background launch mounts no React
+  // tree, so a definition inside a component/effect is never seen and the OS
+  // unregisters the task). Here we only REGISTER it. It is a bonus: the 30-day
+  // (Android) / multi-day (iOS) window already covers an unopened app.
   // ══════════════════════════════════════════
   async registerBackgroundTask(): Promise<void> {
     if (!loadModules() || !TaskManager || !BackgroundFetch) return;
     try {
-      // Define the task handler first (must happen before register)
-      TaskManager.defineTask(BACKGROUND_TASK_NAME, async () => {
-        try {
-          const prefs = await NotificationService.getPreferences();
-          if (!prefs.enabled) return BackgroundFetch.BackgroundFetchResult.NoData;
+      const status = await BackgroundFetch.getStatusAsync?.();
+      if (
+        status === BackgroundFetch.BackgroundFetchStatus?.Restricted ||
+        status === BackgroundFetch.BackgroundFetchStatus?.Denied
+      ) {
+        return;
+      }
 
-          // Actually reschedule from cached prayer times
-          await NotificationService.rescheduleFromCache();
-          console.log('[Sukoon] Background: rescheduled notifications');
-          return BackgroundFetch.BackgroundFetchResult.NewData;
-        } catch {
-          return BackgroundFetch.BackgroundFetchResult.Failed;
-        }
-      });
-
-      const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_TASK_NAME);
+      const isRegistered = await TaskManager.isTaskRegisteredAsync(PRAYER_TASK_NAME);
       if (isRegistered) return;
 
-      await BackgroundFetch.registerTaskAsync(BACKGROUND_TASK_NAME, {
-        minimumInterval: 60 * 60 * 6,  // every 6 hours
+      await BackgroundFetch.registerTaskAsync(PRAYER_TASK_NAME, {
+        minimumInterval: 60 * 60 * 6, // hint only; the OS decides
         stopOnTerminate: false,
         startOnBoot: true,
       });
-
-      console.log('[Sukoon] Background task registered');
     } catch (e) {
       if (__DEV__) console.warn('[Sukoon] Background task registration failed:', e);
     }
   },
 
   async unregisterBackgroundTask(): Promise<void> {
-    if (!TaskManager) return;
+    if (!loadModules() || !TaskManager || !BackgroundFetch) return;
     try {
-      const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_TASK_NAME);
-      if (isRegistered) {
-        await BackgroundFetch.unregisterTaskAsync(BACKGROUND_TASK_NAME);
-      }
+      const isRegistered = await TaskManager.isTaskRegisteredAsync(PRAYER_TASK_NAME);
+      if (isRegistered) await BackgroundFetch.unregisterTaskAsync(PRAYER_TASK_NAME);
     } catch {}
   },
 
   // ══════════════════════════════════════════
-  // TEST AZAN NOTIFICATION
-  // Schedules a test azan notification after `delaySec` seconds.
-  // Also saves the notification to persistent storage.
-  // ── TEST ONLY — remove before production release ──
+  // TEST AZAN
+  // Schedules a real azan notification `delaySec` seconds from now through the
+  // same channel/sound the user's preferences select. Used by the Reliability
+  // section in Salah settings so people can verify sound, DND and battery
+  // behaviour on their own device.
   // ══════════════════════════════════════════
   async scheduleTestAzan(delaySec: number = 5): Promise<boolean> {
     if (!loadModules()) return false;
 
     const granted = await requestPermissions();
     if (!granted) return false;
+    await setupChannels();
 
+    const prefs = await this.getPreferences();
+    const { channel, sound } = azanChannelAndSound('dhuhr', prefs);
     const triggerDate = new Date(Date.now() + delaySec * 1000);
-    const prayerName = 'dhuhr'; // Use Dhuhr for test
+    const title = 'Test Azan';
+    const body = prayerBody('dhuhr');
 
     try {
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: 'Dhuhr Prayer Time (TEST)',
-          body: this._getPrayerBody('dhuhr'),
-          sound: 'azan.wav',
+          title,
+          body,
+          sound: sound ?? false,
           data: {
             type: 'prayer',
-            prayer: prayerName,
+            prayer: 'dhuhr',
             action: 'azan',
-            isTest: true, // Flag so we know it's a test
+            fireAt: triggerDate.getTime(),
+            isTest: true,
           },
-          ...(Platform.OS === 'android' && { channelId: 'prayer-azan' }),
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,
           date: triggerDate,
+          ...(Platform.OS === 'android' && { channelId: CHANNEL_ID[channel] }),
         },
         identifier: `test-azan-${Date.now()}`,
       });
 
       // Save to persistent notification storage immediately
       await NotificationStorage.addManual({
-        title: 'Dhuhr Prayer Time (TEST)',
-        message: this._getPrayerBody('dhuhr'),
+        title,
+        message: body,
         type: 'azan',
-        data: { prayer: prayerName, action: 'azan', isTest: true },
+        data: { prayer: 'dhuhr', action: 'azan', isTest: true },
       });
 
-      console.log(`[Sukoon] Test azan scheduled in ${delaySec}s`);
       return true;
     } catch (e) {
       console.error('[Sukoon] scheduleTestAzan error:', e);
@@ -992,7 +857,7 @@ export const NotificationService = {
 
   // ══════════════════════════════════════════════════════════════
   // END-OF-DAY UNTRACKED PRAYER REMINDER
-  // NEW: Send notification after Isha if any prayer is untracked today.
+  // Send notification after Isha if any prayer is untracked today.
   // Only sends once per day.
   // ══════════════════════════════════════════════════════════════
   async sendEndOfDayReminder(untrackedCount: number): Promise<boolean> {
@@ -1003,10 +868,7 @@ export const NotificationService = {
       // Check if already sent today
       const today = new Date().toDateString();
       const lastSent = await AsyncStorage.getItem(KEYS.EOD_REMINDER_SENT);
-      if (lastSent === today) {
-        console.log('[Sukoon] End-of-day reminder already sent today');
-        return false;
-      }
+      if (lastSent === today) return false;
 
       const granted = await requestPermissions();
       if (!granted) return false;
@@ -1024,9 +886,9 @@ export const NotificationService = {
             action: 'open-tracker',
             untrackedCount,
           },
-          ...(Platform.OS === 'android' && { channelId: 'daily-reminder' }),
         },
-        trigger: null, // Send immediately
+        // Immediate delivery. On Android the channel is carried by the trigger.
+        trigger: Platform.OS === 'android' ? { channelId: CHANNEL_ID.daily } : null,
         identifier: 'eod-prayer-reminder',
       });
 
@@ -1040,70 +902,9 @@ export const NotificationService = {
 
       // Mark as sent for today
       await AsyncStorage.setItem(KEYS.EOD_REMINDER_SENT, today);
-      console.log(`[Sukoon] End-of-day reminder sent (${untrackedCount} untracked)`);
       return true;
     } catch (e) {
       console.error('[Sukoon] sendEndOfDayReminder error:', e);
-      return false;
-    }
-  },
-
-  // ══════════════════════════════════════════════════════════════
-  // INTERNET OFF NOTIFICATION
-  // NEW: Send notification when internet is off and reminders are enabled.
-  // Only sends once per day to avoid spam.
-  // ══════════════════════════════════════════════════════════════
-  async sendInternetOffNotification(): Promise<boolean> {
-    if (!loadModules()) return false;
-
-    try {
-      // Check if reminders are enabled
-      const prefs = await this.getPreferences();
-      if (!prefs.enabled) return false; // Notifications disabled, no need to warn
-
-      // Check if already sent today
-      const today = new Date().toDateString();
-      const lastSent = await AsyncStorage.getItem(KEYS.INTERNET_NOTIF_SENT);
-      if (lastSent === today) {
-        console.log('[Sukoon] Internet off notification already sent today');
-        return false;
-      }
-
-      const granted = await requestPermissions();
-      if (!granted) return false;
-
-      const internetTitle = '⚠️ Internet Required';
-      const internetBody = 'Turn on internet to receive Salah reminders.';
-
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: internetTitle,
-          body: internetBody,
-          sound: 'reminder.wav',
-          data: {
-            type: 'internet-warning',
-            action: 'none',
-          },
-          ...(Platform.OS === 'android' && { channelId: 'daily-reminder' }),
-        },
-        trigger: null, // Send immediately
-        identifier: 'internet-off-warning',
-      });
-
-      // Persist to notification storage so it appears on the Notifications screen
-      await NotificationStorage.addManual({
-        title: internetTitle,
-        message: internetBody,
-        type: 'general',
-        data: { type: 'internet-warning', action: 'none' },
-      });
-
-      // Mark as sent for today
-      await AsyncStorage.setItem(KEYS.INTERNET_NOTIF_SENT, today);
-      console.log('[Sukoon] Internet off notification sent');
-      return true;
-    } catch (e) {
-      console.error('[Sukoon] sendInternetOffNotification error:', e);
       return false;
     }
   },
@@ -1114,15 +915,9 @@ export const NotificationService = {
       const today = new Date().toDateString();
       const lastReset = await AsyncStorage.getItem('sukoon_last_flag_reset');
       if (lastReset !== today) {
-        await AsyncStorage.multiRemove([KEYS.EOD_REMINDER_SENT, KEYS.INTERNET_NOTIF_SENT]);
+        await AsyncStorage.multiRemove([KEYS.EOD_REMINDER_SENT]);
         await AsyncStorage.setItem('sukoon_last_flag_reset', today);
       }
     } catch {}
   },
 };
-
-// ══════════════════════════════════════════════
-// BACKGROUND TASK DEFINITION
-// Registered lazily inside registerBackgroundTask()
-// No module-level defineTask — prevents crash when TaskManager is null
-// ══════════════════════════════════════════════
