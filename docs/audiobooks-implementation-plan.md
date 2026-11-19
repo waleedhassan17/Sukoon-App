@@ -1,5 +1,17 @@
 # Sukoon Audiobooks ("Listen") — Implementation Plan
 
+> **Update (Nov 2026).** Two product decisions supersede parts of this plan:
+>
+> - **Listen is no longer a bottom tab.** The app has the standard five tabs
+>   (Home · Books · Saved · More · Settings). Listen is a pushed screen
+>   (`app/listen/index.tsx`, route `/listen`) opened from the Home *Quick Access* row
+>   and a card in the Books tab; it has its own back button.
+> - **Original narrations only.** The library shows human narrations (LibriVox,
+>   podcasts) and recitations; AI/TTS voice-overs are excluded everywhere. The rule is
+>   fail-closed and lives at the single catalog choke point
+>   (`isOriginalNarration` in `lib/audiobooks/catalog.ts`), so it also hides AI books that
+>   still exist in Firestore or in an on-device cache. See `docs/content-ops.md`.
+
 ## Phase 0 findings
 
 | Assumption in the brief | Reality in this repo | Adaptation |

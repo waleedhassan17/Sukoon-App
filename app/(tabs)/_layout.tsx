@@ -3,21 +3,25 @@ import { View, StyleSheet, Platform } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
+import { TAB_BAR_HEIGHT } from '@/constants/theme';
+import { t, useLocale } from '@/lib/i18n';
 import React from 'react';
 
+// Five tabs — the platform-standard maximum. Listen (audiobooks) is deliberately
+// NOT a tab: it is a pushed screen reached from Home and the Books library.
 const TAB_ITEMS = [
-  { name: 'index', title: 'Home', icon: 'home' },
-  { name: 'quran', title: 'Books', icon: 'library' },
-  { name: 'listen', title: 'Listen', icon: 'headset' },
-  { name: 'saved', title: 'Saved', icon: 'bookmark' },
-  { name: 'others', title: 'More', icon: 'grid' },
-  { name: 'settings', title: 'Settings', icon: 'settings' },
+  { name: 'index', titleKey: 'tabs.home', icon: 'home' },
+  { name: 'quran', titleKey: 'tabs.books', icon: 'library' },
+  { name: 'saved', titleKey: 'tabs.saved', icon: 'bookmark' },
+  { name: 'others', titleKey: 'tabs.more', icon: 'grid' },
+  { name: 'settings', titleKey: 'tabs.settings', icon: 'settings' },
 ] as const;
 
 type IconName = typeof TAB_ITEMS[number]['icon'];
 
 export default function TabLayout() {
   const { theme, mode } = useTheme();
+  useLocale(); // re-render tab labels on language change
   const isDark = mode === 'dark';
   const insets = useSafeAreaInsets();
 
@@ -37,7 +41,7 @@ export default function TabLayout() {
           bottom: 0,
           left: 0,
           right: 0,
-          height: 60 + safeBottom,
+          height: TAB_BAR_HEIGHT + safeBottom,
           backgroundColor: theme.tabBarBg,
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: isDark
@@ -79,12 +83,12 @@ export default function TabLayout() {
         },
       }}
     >
-      {TAB_ITEMS.map(({ name, title, icon }) => (
+      {TAB_ITEMS.map(({ name, titleKey, icon }) => (
         <Tabs.Screen
           key={name}
           name={name}
           options={{
-            title,
+            title: t(titleKey),
             tabBarIcon: ({ color, focused }) => (
               <View
                 style={[

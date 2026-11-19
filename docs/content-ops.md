@@ -26,6 +26,15 @@ Audio that already exists legally on the open web. Add a catalog entry in
 
 ### 2. TTS-generated (generate once, store forever)
 
+> **Not shown in the app any more.** The client now surfaces *original* narrations only
+> (`narrationType` of `human` or `recitation`, no `ttsVoice`, `source` not `own`) — see
+> `isOriginalNarration` in `lib/audiobooks/catalog.ts`. The TTS agent still runs, but
+> anything it publishes — to the seed **or** to Firestore `audiobooksCatalog` — is filtered
+> out on every device, including ones with a cached catalog. The filter is fail-closed: a
+> book with a missing or unknown `narrationType` is hidden too. Use this pipeline only if
+> that product decision is reversed. The 16 AI books were removed from `seed/catalog.json`
+> and the bundled hadith audio (~34 MB) was deleted; the original docs are in git history.
+
 Public-domain texts converted by `tools/tts_agent` (repo root):
 
 1. Add the book to **both** `seed/catalog.json` (with `status: "pending"`,

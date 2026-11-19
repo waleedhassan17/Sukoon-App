@@ -2,6 +2,10 @@
  * Listen home — Islamic audiobook library.
  * Hero carousel · Jump back in · Browse by category · curated shelves · Kids.
  * Chaptrs-inspired information architecture rendered in Sukoon's design system.
+ *
+ * A pushed screen (not a bottom tab): reached from the Home Quick Access card
+ * and the Books library. The catalog only ever contains original (human /
+ * recitation) narrations — see CatalogService.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -13,10 +17,12 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
+  I18nManager,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { RADIUS, SPACING, TYPOGRAPHY } from '@/constants/theme';
@@ -26,6 +32,7 @@ import { Book, BookCategory, BookProgress, CATEGORY_LABEL_KEYS } from '@/lib/aud
 import { CatalogService } from '@/lib/audiobooks/catalog';
 import { ChapterResolver } from '@/lib/audiobooks/chapterResolver';
 import { ListenProgress } from '@/lib/audiobooks/progress';
+import { cleanupRemovedBooks } from '@/lib/audiobooks/removedBooks';
 import { formatRemaining } from '@/lib/audiobooks/streaks';
 import { audiobookControls } from '@/contexts/AudiobookPlayerContext';
 import HeroCarousel from '@/components/listen/HeroCarousel';
@@ -42,6 +49,7 @@ interface ResumeItem {
 export default function ListenScreen() {
   const { theme } = useTheme();
   const router = useRouter();
+  const goBack = useSafeBack('/');
   const insets = useSafeAreaInsets();
   useLocale(); // re-render on language change
 
@@ -57,9 +65,12 @@ export default function ListenScreen() {
       setBooks(all);
 
       // "Jump back in" — recent in-progress books with remaining-time labels.
-      const recents = await ListenProgress.getRecent(6);
+      // Fetch generously and cap AFTER joining with the catalog: entries for books
+      // that are no longer in the catalog must not push valid ones out of the shelf.
+      const recents = await ListenProgress.getRecent(30);
       const items: ResumeItem[] = [];
       for (const p of recents) {
+        if (items.length >= 6) break;
         const book = all.find((b) => b.id === p.bookId);
         if (!book) continue;
         let remainingLabel = '';
@@ -79,9 +90,11 @@ export default function ListenScreen() {
 
   useEffect(() => {
     load();
+    // One-time: free disk used by previously downloaded (now removed) AI books.
+    cleanupRemovedBooks().catch(() => {});
   }, [load]);
 
-  // Refresh "Jump back in" whenever the tab regains focus.
+  // Refresh "Jump back in" whenever the screen regains focus.
   useFocusEffect(
     useCallback(() => {
       if (books) load();
@@ -149,6 +162,14 @@ export default function ListenScreen() {
         style={[styles.header, { paddingTop: insets.top + SPACING.lg }]}
       >
         <View style={styles.headerRow}>
+          <TouchableOpacity
+            onPress={() => goBack()}
+            style={[styles.searchBtn, styles.backBtn]}
+            accessibilityRole="button"
+            accessibilityLabel={t('listen.back')}
+          >
+            <Ionicons name={I18nManager.isRTL ? 'chevron-forward' : 'chevron-back'} size={22} color="#FFF" />
+          </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={styles.headerTitle}>{t('listen.title')}</Text>
             <Text style={styles.headerSubtitle}>{t('listen.subtitle')}</Text>
@@ -281,6 +302,9 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.72)',
     fontSize: 13,
     marginTop: 3,
+  },
+  backBtn: {
+    marginEnd: SPACING.md,
   },
   searchBtn: {
     width: 44,

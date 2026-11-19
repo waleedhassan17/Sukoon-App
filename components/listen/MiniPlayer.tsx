@@ -11,13 +11,17 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
-import { RADIUS, SHADOWS } from '@/constants/theme';
+import { RADIUS, SHADOWS, TAB_BAR_HEIGHT } from '@/constants/theme';
 import { t } from '@/lib/i18n';
 import { audiobookControls, useAudiobookPlayer } from '@/contexts/AudiobookPlayerContext';
 import BookCover from './BookCover';
 
-const TAB_BAR_HEIGHT = 60; // keep in sync with app/(tabs)/_layout.tsx
-const TAB_ROUTES = new Set(['/', '/listen', '/quran', '/saved', '/others', '/settings']);
+// Routes that show the bottom tab bar. `/listen` is NOT one of them any more —
+// Listen is a pushed screen, so the player sits at the bottom edge there.
+const TAB_ROUTES = new Set(['/', '/quran', '/saved', '/others', '/settings']);
+// Home floats a mic dock above the tab bar (see HOME_MIC_DOCK); lift the player
+// clear of it so the two never overlap.
+const HOME_MIC_DOCK = 72;
 
 export default function MiniPlayer() {
   const { theme } = useTheme();
@@ -34,7 +38,9 @@ export default function MiniPlayer() {
 
   const chapter = chapters[chapterIndex];
   const onTabScreen = TAB_ROUTES.has(pathname);
-  const bottom = onTabScreen ? TAB_BAR_HEIGHT + insets.bottom + 8 : insets.bottom + 12;
+  const bottom = onTabScreen
+    ? TAB_BAR_HEIGHT + insets.bottom + 8 + (pathname === '/' ? HOME_MIC_DOCK : 0)
+    : insets.bottom + 12;
   const progress = durationMs > 0 ? Math.min(1, positionMs / durationMs) : 0;
 
   return (

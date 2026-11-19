@@ -4,8 +4,9 @@
  * Offline-first, matching the app-wide pattern (see dataSyncService.ts):
  *   1. The bundled `seed/catalog.json` always works, even fully offline.
  *   2. An optional Firestore `audiobooksCatalog` collection can add books or
- *      override seed entries (matched by id) without an app release — e.g. when
- *      the TTS agent publishes new chapters. Failures are silent; the seed wins.
+ *      override seed entries (matched by id) without an app release. Failures
+ *      are silent; the seed wins. Only ORIGINAL (human / recitation) narrations
+ *      are ever surfaced — see `isOriginalNarration`.
  *
  * Remote results are cached in AsyncStorage so the last-known catalog is
  * available offline.
@@ -51,11 +52,35 @@ export function isValidBook(b: any): b is Book {
   );
 }
 
-/** Merge remote entries over the seed (by id). Pure, unit-tested. */
+/**
+ * The library contains ORIGINAL narrations only: a real human reading (LibriVox,
+ * podcasts, …) or a real reciter. AI/text-to-speech voice-overs are excluded —
+ * everywhere, no matter where they come from.
+ *
+ * This is deliberately FAIL-CLOSED and applied at the single choke point every
+ * consumer reads through (see `mergeCatalog`), to both the bundled seed and the
+ * remote Firestore collection. That matters because the AI books were also
+ * published to Firestore and cached on devices: pruning the seed alone would
+ * leave them visible after the next remote refresh. A book is kept only if it
+ * positively declares a human/recitation narration and carries no TTS marker;
+ * a missing or unknown `narrationType` is excluded rather than assumed original.
+ * Pure, unit-tested.
+ */
+export function isOriginalNarration(b: any): boolean {
+  if (!b) return false;
+  if (b.narrationType !== 'human' && b.narrationType !== 'recitation') return false;
+  if (b.source === 'own') return false; // 'own' = Sukoon-generated (TTS) content
+  if (b.ttsVoice) return false; // any synthetic-voice marker
+  return true;
+}
+
+/** Merge remote entries over the seed (by id), keeping only original narrations. Pure, unit-tested. */
 export function mergeCatalog(seed: Book[], remote: Book[]): Book[] {
   const byId = new Map<string, Book>();
-  for (const b of seed) if (isValidBook(b)) byId.set(b.id, b);
-  for (const b of remote) if (isValidBook(b)) byId.set(b.id, b);
+  for (const b of seed) if (isValidBook(b) && isOriginalNarration(b)) byId.set(b.id, b);
+  // A remote entry can also *override* a seed id — if the override is an AI
+  // book it must not replace the original, so it is simply skipped.
+  for (const b of remote) if (isValidBook(b) && isOriginalNarration(b)) byId.set(b.id, b);
   return [...byId.values()];
 }
 
@@ -130,7 +155,8 @@ export const CatalogService = {
         const remote: Book[] = [];
         snap.forEach((doc: any) => {
           const data = { id: doc.id, ...doc.data() };
-          if (isValidBook(data)) remote.push(data as Book);
+          // Never even cache AI/TTS entries (they are filtered on read as well).
+          if (isValidBook(data) && isOriginalNarration(data)) remote.push(data as Book);
         });
         if (remote.length > 0) {
           inMemory = mergeCatalog(seedCatalog.books, remote);

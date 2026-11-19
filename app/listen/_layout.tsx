@@ -11,6 +11,7 @@ export default function ListenLayout() {
         animation: 'slide_from_right',
       }}
     >
+      <Stack.Screen name="index" />
       <Stack.Screen name="book/[id]" />
       <Stack.Screen name="category/[cat]" />
       <Stack.Screen name="search" />

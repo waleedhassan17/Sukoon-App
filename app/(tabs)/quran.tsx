@@ -25,6 +25,7 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '@/contexts/ThemeContext';
+import { t, useLocale } from '@/lib/i18n';
 
 interface LibraryCard {
   key: string;
@@ -45,6 +46,7 @@ export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const { theme, mode, toggleTheme } = useTheme();
   const router = useRouter();
+  useLocale();
 
   const headerFade = useRef(new Animated.Value(0)).current;
   const headerSlide = useRef(new Animated.Value(24)).current;
@@ -99,7 +101,7 @@ export default function LibraryScreen() {
               </View>
             </View>
             <Text style={styles.headerTitle}>Library</Text>
-            <Text style={styles.headerSub}>The Quran & authentic Ahadees</Text>
+            <Text style={styles.headerSub}>{t('library.sub')}</Text>
           </View>
           <TouchableOpacity onPress={toggleTheme} style={styles.themeBtn} activeOpacity={0.7}>
             <Ionicons name={mode === 'dark' ? 'sunny-outline' : 'moon-outline'} size={18} color="rgba(255,255,255,0.85)" />
@@ -107,6 +109,26 @@ export default function LibraryScreen() {
         </View>
       </Animated.View>
     </LinearGradient>
+  );
+
+  // Listen (audiobooks) lives here now that it is no longer a bottom tab.
+  const listFooter = (
+    <TouchableOpacity
+      style={[styles.listenCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}
+      activeOpacity={0.8}
+      onPress={() => router.push('/listen')}
+      accessibilityRole="button"
+      accessibilityLabel={`${t('listen.title')}. ${t('library.listenSub')}`}
+    >
+      <LinearGradient colors={theme.headerGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.listenIcon}>
+        <Ionicons name="headset" size={24} color="#fff" />
+      </LinearGradient>
+      <View style={styles.listenText}>
+        <Text style={[styles.listenTitle, { color: theme.text }]}>{t('listen.title')}</Text>
+        <Text style={[styles.listenSub, { color: theme.textSecondary }]}>{t('library.listenSub')}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={20} color={theme.textTertiary} />
+    </TouchableOpacity>
   );
 
   return (
@@ -117,6 +139,7 @@ export default function LibraryScreen() {
         renderItem={renderItem}
         numColumns={2}
         ListHeaderComponent={listHeader}
+        ListFooterComponent={listFooter}
         contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
         showsVerticalScrollIndicator={false}
         columnWrapperStyle={styles.rowWrapper}
@@ -178,5 +201,18 @@ const styles = StyleSheet.create({
   bookInfo: { alignItems: 'center', justifyContent: 'center' },
   bookArabic: { fontSize: 26, fontWeight: '500', textAlign: 'center', marginBottom: 10, lineHeight: 40, fontFamily: 'AlQalamQuran' },
   bookName: { fontSize: 14, fontWeight: '700', textAlign: 'center', marginBottom: 8, letterSpacing: -0.2 },
+  listenCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    marginHorizontal: 18, marginTop: 10, padding: 16,
+    borderRadius: 12, borderWidth: 1,
+    ...Platform.select({
+      ios: { shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
+      android: { elevation: 2 },
+    }),
+  },
+  listenIcon: { width: 52, height: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  listenText: { flex: 1 },
+  listenTitle: { fontSize: 17, fontWeight: '700' },
+  listenSub: { fontSize: 13, marginTop: 2 },
   bookStatus: { fontSize: 11, fontWeight: '600', textAlign: 'center', textTransform: 'uppercase', letterSpacing: 0.5 },
 });
