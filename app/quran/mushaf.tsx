@@ -19,7 +19,8 @@ import {
   Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -65,7 +66,7 @@ export default function MushafScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const { sizes } = useFontSize();
-  const router = useRouter();
+  const goBack = useSafeBack('/quran');
   const params = useLocalSearchParams();
 
   const linesPerPage = one(params.lines) === '16' ? 16 : 15;
@@ -206,7 +207,7 @@ export default function MushafScreen() {
         style={[styles.header, { paddingTop: insets.top + 12 }]}
       >
         <View style={styles.headerBar}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} activeOpacity={0.7} accessibilityLabel="Back">
+          <TouchableOpacity onPress={() => goBack()} style={styles.iconBtn} activeOpacity={0.7} accessibilityLabel="Back">
             <Ionicons name="chevron-back" size={20} color="#fff" />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>

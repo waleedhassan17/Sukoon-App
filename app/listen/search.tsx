@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { RADIUS, SPACING } from '@/constants/theme';
@@ -19,6 +20,7 @@ import NarrationBadge from '@/components/listen/NarrationBadge';
 export default function ListenSearchScreen() {
   const { theme } = useTheme();
   const router = useRouter();
+  const goBack = useSafeBack('/listen');
   const insets = useSafeAreaInsets();
   useLocale();
 
@@ -39,7 +41,7 @@ export default function ListenSearchScreen() {
     <View style={{ flex: 1, backgroundColor: theme.background, paddingTop: insets.top + 8 }}>
       <View style={styles.searchRow}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => goBack()}
           style={styles.backBtn}
           accessibilityRole="button"
           accessibilityLabel={t('common.back')}

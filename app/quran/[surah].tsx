@@ -18,7 +18,8 @@ import {
   Animated, PanResponder, LayoutAnimation, UIManager,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -724,7 +725,7 @@ export default function SurahScreen() {
   const isDark = mode === 'dark';
   const { saveVerse, removeVerse, isVerseSaved } = useSavedVerses();
   const params = useLocalSearchParams();
-  const router = useRouter();
+  const goBack = useSafeBack('/quran');
   const insets = useSafeAreaInsets();
 
   const surahNumber = Number(params.surah);
@@ -1349,7 +1350,7 @@ export default function SurahScreen() {
   }, [autoScrollActive, stopAS]);
 
   // Memoize onBack to prevent SurahHeader re-renders
-  const handleBack = useCallback(() => router.back(), [router]);
+  const handleBack = goBack;
 
   if (loading) {
     return (
@@ -1381,7 +1382,7 @@ export default function SurahScreen() {
       <View style={[s.container, { backgroundColor: theme.surface }]}>
         <View style={[s.loadWrap, { paddingBottom: 0 }]}>
           <TouchableOpacity 
-            onPress={() => router.back()} 
+            onPress={() => goBack()} 
             style={[s.headerBtn, { marginTop: insets.top + 6, marginHorizontal: 20 }]} 
             activeOpacity={0.7}
           >

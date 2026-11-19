@@ -17,6 +17,7 @@ import {
   Alert, Linking, Platform, Share, ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -33,6 +34,7 @@ import SalahTopTabs from '@/components/friends/SalahTopTabs';
 export default function SalahInvitesScreen() {
   const { theme } = useTheme();
   const router = useRouter();
+  const goBack = useSafeBack('/tools/salah-tracker');
   const insets = useSafeAreaInsets();
   useLocale();
 
@@ -140,7 +142,7 @@ export default function SalahInvitesScreen() {
       >
         <View style={st.headerTop}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => goBack()}
             style={st.headerBtn}
             accessibilityRole="button"
             accessibilityLabel={t('common.cancel')}

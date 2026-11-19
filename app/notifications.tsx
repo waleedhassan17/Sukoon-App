@@ -25,7 +25,8 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
@@ -138,7 +139,7 @@ function formatTime(isoString: string): string {
 export default function NotificationsScreen() {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const goBack = useSafeBack('/');
   const [notifications, setNotifications] = useState<StoredNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [notifEnabled, setNotifEnabled] = useState(false);
@@ -366,7 +367,7 @@ export default function NotificationsScreen() {
       >
         <View style={styles.headerBar}>
           {/* Back */}
-          <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => goBack()} activeOpacity={0.7}>
             <Ionicons name="chevron-back" size={22} color="#fff" />
           </TouchableOpacity>
 

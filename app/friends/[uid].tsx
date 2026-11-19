@@ -16,7 +16,8 @@ import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Image, Alert, ActivityIndicator, Platform,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -42,7 +43,7 @@ interface Detail {
 
 export default function FriendDetailScreen() {
   const { theme } = useTheme();
-  const router = useRouter();
+  const goBack = useSafeBack('/tools/salah-friends');
   const insets = useSafeAreaInsets();
   useLocale();
   const params = useLocalSearchParams<{ uid: string }>();
@@ -95,7 +96,7 @@ export default function FriendDetailScreen() {
             setBusy('remove');
             try {
               await InviteService.removeFriend(partnerUid);
-              router.back();
+              goBack();
             } catch (e) {
               setBusy(null);
               Alert.alert(t('common.error'), toFriendsError(e).message);
@@ -119,7 +120,7 @@ export default function FriendDetailScreen() {
             setBusy('block');
             try {
               await InviteService.blockFriend(partnerUid);
-              router.back();
+              goBack();
             } catch (e) {
               setBusy(null);
               Alert.alert(t('common.error'), toFriendsError(e).message);
@@ -142,7 +143,7 @@ export default function FriendDetailScreen() {
     return (
       <View style={[st.root, { backgroundColor: theme.surface, padding: 24, justifyContent: 'center' }]}>
         <Text style={[st.errTxt, { color: theme.text }]}>{error ?? t('common.error')}</Text>
-        <TouchableOpacity onPress={() => router.back()} style={[st.primaryBtn, { backgroundColor: theme.primary }]}>
+        <TouchableOpacity onPress={() => goBack()} style={[st.primaryBtn, { backgroundColor: theme.primary }]}>
           <Text style={st.primaryBtnText}>{t('common.cancel')}</Text>
         </TouchableOpacity>
       </View>
@@ -164,7 +165,7 @@ export default function FriendDetailScreen() {
         style={[st.header, { paddingTop: insets.top + 6 }]}
       >
         <View style={st.headerTop}>
-          <TouchableOpacity onPress={() => router.back()} style={st.headerBtn} accessibilityLabel={t('common.cancel')}>
+          <TouchableOpacity onPress={() => goBack()} style={st.headerBtn} accessibilityLabel={t('common.cancel')}>
             <Ionicons name="chevron-back" size={20} color="#fff" />
           </TouchableOpacity>
           <Text style={st.headerTitle} numberOfLines={1}>{detail.partner.displayName}</Text>

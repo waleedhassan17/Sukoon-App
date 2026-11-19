@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -29,6 +30,7 @@ export default function HadithChaptersScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const router = useRouter();
+  const goBack = useSafeBack('/quran/hadith');
   const params = useLocalSearchParams<{ book: string; name?: string }>();
   const bookId = (Array.isArray(params.book) ? params.book[0] : params.book) ?? '';
   const initialName = (Array.isArray(params.name) ? params.name[0] : params.name) ?? '';
@@ -130,7 +132,7 @@ export default function HadithChaptersScreen() {
         </View>
         <Animated.View style={{ opacity: headerFade, transform: [{ translateY: headerSlide }] }}>
           {/* Back button row */}
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7} accessibilityLabel="Back">
+          <TouchableOpacity onPress={() => goBack()} style={styles.backBtn} activeOpacity={0.7} accessibilityLabel="Back">
             <Ionicons name="chevron-back" size={20} color="#fff" />
           </TouchableOpacity>
 

@@ -21,7 +21,8 @@ import {
   Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
@@ -55,7 +56,7 @@ export default function HadithReaderScreen() {
   const { theme } = useTheme();
   const { sizes } = useFontSize();
   const { saveHadith, removeHadith, isHadithSaved } = useSavedHadiths();
-  const router = useRouter();
+  const goBack = useSafeBack('/quran/hadith');
   const params = useLocalSearchParams();
 
   const bookId = one(params.book);
@@ -243,7 +244,7 @@ export default function HadithReaderScreen() {
         </View>
         <Animated.View style={{ opacity: headerFade, transform: [{ translateY: headerSlide }] }}>
           {/* Back button */}
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7} accessibilityLabel="Back">
+          <TouchableOpacity onPress={() => goBack()} style={styles.backBtn} activeOpacity={0.7} accessibilityLabel="Back">
             <Ionicons name="chevron-back" size={20} color="#fff" />
           </TouchableOpacity>
 

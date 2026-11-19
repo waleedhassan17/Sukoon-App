@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { RADIUS, SPACING } from '@/constants/theme';
@@ -33,7 +33,7 @@ const SLEEP_PRESETS = [10, 20, 30, 45, 60];
 
 export default function FullPlayerScreen() {
   const { theme } = useTheme();
-  const router = useRouter();
+  const goBack = useSafeBack('/listen');
   const insets = useSafeAreaInsets();
   const state = useAudiobookPlayer();
   useLocale();
@@ -64,7 +64,7 @@ export default function FullPlayerScreen() {
     // Player opened with nothing loaded (e.g. after stop) — return to Listen.
     return (
       <View style={[styles.center, { backgroundColor: theme.background }]}>
-        <TouchableOpacity onPress={() => router.back()} accessibilityRole="button">
+        <TouchableOpacity onPress={() => goBack()} accessibilityRole="button">
           <Text style={{ color: theme.primaryMuted, fontWeight: '600' }}>{t('common.back')}</Text>
         </TouchableOpacity>
       </View>
@@ -94,7 +94,7 @@ export default function FullPlayerScreen() {
         {/* Top bar */}
         <View style={styles.topBar}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => goBack()}
             style={styles.topBtn}
             accessibilityRole="button"
             accessibilityLabel={t('listen.player.minimize')}

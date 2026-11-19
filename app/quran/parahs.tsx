@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -32,6 +33,7 @@ export default function ParahListScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const router = useRouter();
+  const goBack = useSafeBack('/quran');
   const params = useLocalSearchParams();
 
   const linesPerPage = one(params.lines) === '16' ? 16 : 15;
@@ -97,7 +99,7 @@ export default function ParahListScreen() {
         ))}
       </View>
       <Animated.View style={{ opacity: headerFade, transform: [{ translateY: headerSlide }] }}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7} accessibilityLabel="Back">
+        <TouchableOpacity onPress={() => goBack()} style={styles.backBtn} activeOpacity={0.7} accessibilityLabel="Back">
           <Ionicons name="chevron-back" size={20} color="#fff" />
         </TouchableOpacity>
         <View style={styles.headerIconRow}>

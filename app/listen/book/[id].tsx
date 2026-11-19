@@ -16,6 +16,7 @@ import {
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { RADIUS, SPACING } from '@/constants/theme';
@@ -36,6 +37,7 @@ export default function BookDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { theme } = useTheme();
   const router = useRouter();
+  const goBack = useSafeBack('/listen');
   const insets = useSafeAreaInsets();
   const playerState = useAudiobookPlayer();
   useLocale();
@@ -158,7 +160,7 @@ export default function BookDetailScreen() {
         style={[styles.hero, { paddingTop: insets.top + 8 }]}
       >
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => goBack()}
           style={styles.backBtn}
           accessibilityRole="button"
           accessibilityLabel={t('common.back')}

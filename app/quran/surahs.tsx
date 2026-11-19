@@ -27,6 +27,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useNavigation } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -58,6 +59,7 @@ export default function SurahListScreen() {
   const insets = useSafeAreaInsets();
   const { theme, mode, toggleTheme } = useTheme();
   const router = useRouter();
+  const goBack = useSafeBack('/quran');
   const navigation = useNavigation();
 
   const [surahs, setSurahs] = useState<SurahMeta[]>([]);
@@ -290,7 +292,7 @@ export default function SurahListScreen() {
           <View style={styles.headerTopRow}>
             <View style={styles.headerTitleWrap}>
               <TouchableOpacity
-                onPress={() => router.back()}
+                onPress={() => goBack()}
                 style={styles.backBtn}
                 activeOpacity={0.7}
                 accessibilityRole="button"

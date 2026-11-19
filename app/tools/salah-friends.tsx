@@ -17,6 +17,7 @@ import {
   TouchableOpacity, ActivityIndicator, Platform,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -39,6 +40,7 @@ type ScreenState =
 export default function SalahFriendsScreen() {
   const { theme } = useTheme();
   const router = useRouter();
+  const goBack = useSafeBack('/tools/salah-tracker');
   const insets = useSafeAreaInsets();
   useLocale();
 
@@ -132,7 +134,7 @@ export default function SalahFriendsScreen() {
       >
         <View style={st.headerTop}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => goBack()}
             style={st.headerBtn}
             accessibilityRole="button"
             accessibilityLabel={t('common.cancel')}

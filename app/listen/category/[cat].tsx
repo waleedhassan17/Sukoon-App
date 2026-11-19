@@ -8,7 +8,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, useWindowDimensions } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { RADIUS, SPACING } from '@/constants/theme';
@@ -20,7 +21,7 @@ import { BookTile } from '@/components/listen/Shelf';
 export default function CategoryScreen() {
   const { cat } = useLocalSearchParams<{ cat: string }>();
   const { theme } = useTheme();
-  const router = useRouter();
+  const goBack = useSafeBack('/listen');
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   useLocale();
@@ -43,7 +44,7 @@ export default function CategoryScreen() {
     <View style={{ flex: 1, backgroundColor: theme.background }}>
       <LinearGradient colors={gradientColors} style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => goBack()}
           style={styles.backBtn}
           accessibilityRole="button"
           accessibilityLabel={t('common.back')}

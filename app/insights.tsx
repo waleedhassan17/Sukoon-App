@@ -16,6 +16,7 @@ import {
   Dimensions, Platform, LayoutAnimation, UIManager,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -173,6 +174,7 @@ function QuoteCard() {
 export default function InsightsScreen() {
   const { theme } = useTheme();
   const router = useRouter();
+  const goBack = useSafeBack('/');
   const insets = useSafeAreaInsets();
   const { getSavedCount, getTodaySavedCount } = useSavedVerses();
 
@@ -217,7 +219,7 @@ export default function InsightsScreen() {
 
 
           <View style={st.hdrTop}>
-            <TouchableOpacity style={st.hdrBtn} onPress={() => router.back()} activeOpacity={0.7}>
+            <TouchableOpacity style={st.hdrBtn} onPress={() => goBack()} activeOpacity={0.7}>
               <Ionicons name="chevron-back" size={20} color="#fff" />
             </TouchableOpacity>
             <Text style={st.hdrTitle}>Insights</Text>

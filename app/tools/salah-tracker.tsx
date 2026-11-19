@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -407,6 +408,7 @@ class SalahErrorBoundary extends React.Component<
 export default function SalahTrackerScreen() {
   const { theme } = useTheme();
   const router = useRouter();
+  const goBack = useSafeBack('/');
   const insets = useSafeAreaInsets();
 
   return (
@@ -419,7 +421,7 @@ export default function SalahTrackerScreen() {
             The Salah Tracker encountered an error. Please go back and try again.
           </Text>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => goBack()}
             style={{ marginTop: 24, backgroundColor: theme.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 }}
           >
             <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>Go Back</Text>
@@ -436,6 +438,7 @@ function SalahTrackerInner() {
   const { theme, mode } = useTheme();
   const isDark = mode === 'dark';
   const router = useRouter();
+  const goBack = useSafeBack('/');
   const insets = useSafeAreaInsets();
   const isMounted = useRef(true);
 
@@ -805,7 +808,7 @@ function SalahTrackerInner() {
 
 
           <View style={st.hdrTop}>
-            <TouchableOpacity style={st.hdrBtn} onPress={() => router.back()} activeOpacity={0.7}>
+            <TouchableOpacity style={st.hdrBtn} onPress={() => goBack()} activeOpacity={0.7}>
               <Ionicons name="chevron-back" size={20} color="#fff" />
             </TouchableOpacity>
             <Text style={st.hdrTitle}>Salah Tracker</Text>
