@@ -3,7 +3,7 @@
  * Refined design matching Sukoon aesthetic system
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,8 @@ import {
   Platform,
   Dimensions,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useSafeBack } from '@/lib/useSafeBack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -25,7 +26,8 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { useSavedVerses } from '@/contexts/SavedVersesContext';
 import { EmotionService } from '@/lib/emotionService';
-import type { EmotionResult, VerseRecommendation, AnalysisResult } from '@/lib/emotionService';
+import type { EmotionResult, VerseRecommendation, AnalysisResult, FallbackReason } from '@/lib/emotionService';
+import { t, useLocale } from '@/lib/i18n';
 import { getStaticEmotionData } from '@/lib/staticVerses';
 import { buildAyahShareMessage } from '@/lib/shareFormat';
 import { EMOTION_MAP } from '@/constants/theme';
@@ -71,14 +73,17 @@ export default function EmotionResultScreen() {
   const { sizes } = useFontSize();
   const { saveVerse, removeVerse, isVerseSaved } = useSavedVerses();
   const params = useLocalSearchParams();
-  const router = useRouter();
+  const goBack = useSafeBack('/');
   const text = (params.text as string) || '';
   const staticEmotion = (params.staticEmotion as string) || '';
 
+  useLocale();
   const [loading, setLoading] = useState(true);
+  const [slow, setSlow] = useState(false);
   const [emotions, setEmotions] = useState<EmotionResult[]>([]);
   const [verses, setVerses] = useState<VerseRecommendation[]>([]);
   const [analysisSource, setAnalysisSource] = useState<'api' | 'fallback'>('api');
+  const [fallbackReason, setFallbackReason] = useState<FallbackReason | undefined>(undefined);
   const [modelVersion, setModelVersion] = useState('');
   const [languageDetected, setLanguageDetected] = useState('');
 
@@ -87,55 +92,98 @@ export default function EmotionResultScreen() {
   const contentFade = useRef(new Animated.Value(0)).current;
   const contentSlide = useRef(new Animated.Value(20)).current;
 
-  useEffect(() => {
-    analyzeAndFetch();
-  }, [text, staticEmotion]);
+  // Guards: only the LATEST run may touch state, and unmount aborts the request.
+  const requestId = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const analyzeAndFetch = async () => {
+  const reveal = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(contentFade, { toValue: 1, duration: 500, delay: 150, useNativeDriver: true }),
+      Animated.timing(contentSlide, { toValue: 0, duration: 500, delay: 150, useNativeDriver: true }),
+    ]).start();
+  }, [contentFade, contentSlide]);
+
+  const run = useCallback(async () => {
+    const id = ++requestId.current;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
+    setSlow(false);
+    contentFade.setValue(0);
+    contentSlide.setValue(20);
+    // After a few seconds, stop pretending it is instant and offer a way out.
+    const slowTimer = setTimeout(() => {
+      if (requestId.current === id) setSlow(true);
+    }, 6000);
+
+    const apply = (r: AnalysisResult) => {
+      if (requestId.current !== id) return;
+      setEmotions(r.emotions);
+      setVerses(r.verses);
+      setAnalysisSource(r.source);
+      setFallbackReason(r.fallbackReason);
+      setModelVersion(r.modelVersion);
+      setLanguageDetected(r.languageDetected);
+    };
+
     try {
       // ── Static emotion card path: skip API entirely ──
-      // Show the splash/loading screen for a minimum duration so the
-      // transition feels intentional and calming, matching the "Find Guidance"
-      // UX. Without this, the screen flashes briefly since curated data
-      // loads instantly (no network call).
-      if (staticEmotion) {
-        const SPLASH_MIN_MS = 1800; // 1.8s — enough to read the calming message
-        const splashTimer = new Promise(r => setTimeout(r, SPLASH_MIN_MS));
-
-        const staticData = getStaticEmotionData(staticEmotion);
-        if (staticData) {
-          // Wait for the minimum splash duration before revealing results
-          await splashTimer;
-          setEmotions(staticData.emotions);
-          setVerses(staticData.verses);
-          setAnalysisSource('api'); // show as confident
-          setModelVersion('static-curated');
-          setLanguageDetected('en');
-          Animated.parallel([
-            Animated.timing(contentFade, { toValue: 1, duration: 500, delay: 150, useNativeDriver: true }),
-            Animated.timing(contentSlide, { toValue: 0, duration: 500, delay: 150, useNativeDriver: true }),
-          ]).start();
-          return;
-        }
+      // Show the splash/loading screen for a minimum duration so the transition
+      // feels intentional and calming. Curated data loads instantly otherwise.
+      const staticData = staticEmotion ? getStaticEmotionData(staticEmotion) : null;
+      if (staticData) {
+        await new Promise((r) => setTimeout(r, 1800));
+        apply({
+          emotions: staticData.emotions,
+          verses: staticData.verses,
+          languageDetected: 'en',
+          modelVersion: 'static-curated',
+          inferenceTime: 0,
+          source: 'api', // curated, show as confident
+        });
+      } else {
+        // ── Normal path: ML API. Always settles (hard deadline) and never throws. ──
+        apply(await EmotionService.analyze(text, 5, 5, { signal: controller.signal }));
       }
-      // ── Normal path: call the ML emotion API ──
-      const result: AnalysisResult = await EmotionService.analyze(text, 5, 5);
-      setEmotions(result.emotions);
-      setVerses(result.verses);
-      setAnalysisSource(result.source);
-      setModelVersion(result.modelVersion);
-      setLanguageDetected(result.languageDetected);
-      Animated.parallel([
-        Animated.timing(contentFade, { toValue: 1, duration: 500, delay: 150, useNativeDriver: true }),
-        Animated.timing(contentSlide, { toValue: 0, duration: 500, delay: 150, useNativeDriver: true }),
-      ]).start();
-    } catch (e) {
-      if (__DEV__) console.error('Analysis error:', e);
+    } catch {
+      // analyze() does not throw, but if anything unexpected happens the user
+      // must still get guidance rather than a blank or endless screen.
+      apply(EmotionService.analyzeOffline(text, 'network'));
     } finally {
-      setLoading(false);
+      clearTimeout(slowTimer);
+      if (requestId.current === id) {
+        setLoading(false);
+        setSlow(false);
+        reveal(); // ALWAYS reveal, so no failure can leave an invisible body
+      }
     }
-  };
+  }, [text, staticEmotion, contentFade, contentSlide, reveal]);
+
+  useEffect(() => {
+    run();
+  }, [run]);
+
+  // Leaving the screen cancels any in-flight request and ignores late results.
+  useEffect(
+    () => () => {
+      requestId.current++;
+      abortRef.current?.abort();
+    },
+    [],
+  );
+
+  /** "Show offline guidance": abort the request; analyze() resolves immediately with local guidance. */
+  const useOfflineNow = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  const cancelAndLeave = useCallback(() => {
+    requestId.current++;
+    abortRef.current?.abort();
+    goBack();
+  }, [goBack]);
 
   const handleShare = async (verse: VerseRecommendation) => {
     try {
@@ -188,9 +236,30 @@ export default function EmotionResultScreen() {
                 <Ionicons name="heart-outline" size={32} color="rgba(255,255,255,0.8)" />
               </LinearGradient>
             </View>
-            <Text style={s.loadingTitle}>Analyzing your feelings…</Text>
-            <Text style={s.loadingSub}>Finding Quranic guidance for you</Text>
+            <Text style={s.loadingTitle}>{slow ? t('emotion.slow.title') : t('emotion.loading.title')}</Text>
+            <Text style={s.loadingSub}>{slow ? t('emotion.slow.body') : t('emotion.loading.sub')}</Text>
             <ActivityIndicator size="small" color="rgba(255,255,255,0.6)" style={{ marginTop: 20 }} />
+
+            {slow && !staticEmotion && (
+              <View style={s.slowActions}>
+                <TouchableOpacity
+                  onPress={useOfflineNow}
+                  activeOpacity={0.85}
+                  style={s.slowPrimary}
+                  accessibilityRole="button"
+                >
+                  <Text style={s.slowPrimaryText}>{t('emotion.slow.offline')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={cancelAndLeave}
+                  activeOpacity={0.7}
+                  style={s.slowSecondary}
+                  accessibilityRole="button"
+                >
+                  <Text style={s.slowSecondaryText}>{t('emotion.slow.cancel')}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </LinearGradient>
       </View>
@@ -231,7 +300,7 @@ export default function EmotionResultScreen() {
 
           {/* Back row */}
           <View style={s.headerBar}>
-            <TouchableOpacity style={s.headerBtn} onPress={() => router.back()} activeOpacity={0.7}>
+            <TouchableOpacity style={s.headerBtn} onPress={() => goBack()} activeOpacity={0.7}>
               <Ionicons name="chevron-back" size={20} color="#fff" />
             </TouchableOpacity>
             <Text style={s.headerBarTitle}>Guidance</Text>
@@ -257,6 +326,31 @@ export default function EmotionResultScreen() {
             { opacity: contentFade, transform: [{ translateY: contentSlide }] },
           ]}
         >
+          {/* ═══════════════ OFFLINE NOTICE ═══════════════ */}
+          {analysisSource === 'fallback' && (
+            <View
+              style={[s.notice, { backgroundColor: theme.surfaceElevated, borderColor: theme.warning + '55' }]}
+              accessibilityRole="alert"
+            >
+              <Ionicons name="cloud-offline-outline" size={20} color={theme.warning} style={{ marginTop: 1 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={[s.noticeTitle, { color: theme.text }]}>{t('emotion.offline.title')}</Text>
+                <Text style={[s.noticeBody, { color: theme.textSecondary }]}>
+                  {t(`emotion.offline.reason.${fallbackReason ?? 'network'}`)}
+                </Text>
+                <TouchableOpacity
+                  onPress={run}
+                  activeOpacity={0.8}
+                  style={[s.noticeBtn, { backgroundColor: theme.primary }]}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="refresh" size={14} color="#fff" />
+                  <Text style={s.noticeBtnText}>{t('emotion.retry')}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
           {/* ═══════════════ EMOTIONS ═══════════════ */}
           <View style={s.section}>
             <View style={s.sectionHeader}>
@@ -326,7 +420,7 @@ export default function EmotionResultScreen() {
                           style={s.verseRefBadge}
                         >
                           <Text style={s.verseRefBadgeText}>
-                            {verse.surah}:{verse.ayah}
+                            {verse.surah}:{verse.ayahLabel ?? verse.ayah}
                           </Text>
                         </LinearGradient>
                         <Text style={[s.verseRefName, { color: theme.text }]}>{verse.surahName}</Text>
@@ -406,7 +500,7 @@ export default function EmotionResultScreen() {
 
           {/* ═══════════════ NEW SEARCH ═══════════════ */}
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => goBack()}
             activeOpacity={0.8}
             style={s.newSearchWrap}
           >
@@ -448,6 +542,26 @@ export default function EmotionResultScreen() {
    ═══════════════════════════════════════════════ */
 const s = StyleSheet.create({
   container: { flex: 1 },
+
+  /* ─── Slow-loading actions + offline notice ─── */
+  slowActions: { alignSelf: 'stretch', marginTop: 28, paddingHorizontal: 32, gap: 10 },
+  slowPrimary: {
+    minHeight: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.18)', paddingHorizontal: 20,
+  },
+  slowPrimaryText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  slowSecondary: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  slowSecondaryText: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '600' },
+  notice: {
+    flexDirection: 'row', gap: 12, borderRadius: 16, borderWidth: 1, padding: 14, marginBottom: 20,
+  },
+  noticeTitle: { fontSize: 14, fontWeight: '700' },
+  noticeBody: { fontSize: 13, lineHeight: 18, marginTop: 3 },
+  noticeBtn: {
+    alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginTop: 12, minHeight: 36, paddingHorizontal: 14, borderRadius: 10,
+  },
+  noticeBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
 
   /* ─── Loading ─── */
   loadingGradient: {

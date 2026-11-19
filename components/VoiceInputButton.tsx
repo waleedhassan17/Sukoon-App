@@ -50,6 +50,18 @@ export interface VoiceInputButtonProps {
   searchText: string;
   /** Full appended text when speech is finalized */
   onTextAppended: (fullText: string) => void;
+  /**
+   * Fired once, right after `onTextAppended`, when recognition finished with real
+   * text — because the user stopped talking (silence / end of speech) or tapped
+   * stop. Never fires for errors, cancellations or empty results. Receives the
+   * full text exactly as shown in the input, so the parent can act on it at once
+   * without reading React state that has not caught up yet.
+   */
+  onFinalTranscript?: (fullText: string) => void;
+  /** Recognizer language (BCP-47, e.g. "ur-PK"). Omit for the service default. */
+  lang?: string;
+  /** Accessibility label for the idle mic (default "Start voice input"). */
+  micLabel?: string;
   /** Tapped the ✕ clear icon */
   onClear: () => void;
   /** Live interim transcript while user is speaking */
@@ -77,6 +89,9 @@ export interface VoiceInputButtonProps {
 export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
   searchText,
   onTextAppended,
+  onFinalTranscript,
+  lang,
+  micLabel,
   onClear,
   onInterimText,
   onRecordingChange,
@@ -97,6 +112,8 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
   // ── Refs: always-fresh values for async callbacks ──
   const searchTextRef = useRef(searchText);
   const onTextAppendedRef = useRef(onTextAppended);
+  const onFinalTranscriptRef = useRef(onFinalTranscript);
+  const langRef = useRef(lang);
   const onInterimTextRef = useRef(onInterimText);
   const onErrorRef = useRef(onError);
   const onRecordingChangeRef = useRef(onRecordingChange);
@@ -109,6 +126,8 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
 
   useEffect(() => { searchTextRef.current = searchText; }, [searchText]);
   useEffect(() => { onTextAppendedRef.current = onTextAppended; }, [onTextAppended]);
+  useEffect(() => { onFinalTranscriptRef.current = onFinalTranscript; }, [onFinalTranscript]);
+  useEffect(() => { langRef.current = lang; }, [lang]);
   useEffect(() => { onInterimTextRef.current = onInterimText; }, [onInterimText]);
   useEffect(() => { onErrorRef.current = onError; }, [onError]);
   useEffect(() => { onRecordingChangeRef.current = onRecordingChange; }, [onRecordingChange]);
@@ -219,8 +238,11 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
         const spoken = result.text.trim();
         if (spoken) {
           const current = searchTextRef.current.trim();
-          onTextAppendedRef.current(current ? `${current} ${spoken}` : spoken);
+          const full = current ? `${current} ${spoken}` : spoken;
+          onTextAppendedRef.current(full);
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+          // Let the parent act on the finished transcript (e.g. detect emotions).
+          onFinalTranscriptRef.current?.(full);
         }
         scheduleIdle(250);
         return;
@@ -257,7 +279,10 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
     onInterimTextRef.current?.('');
     applyStatus('listening');
     try {
-      await speechRecognitionService.startListening(handleSpeechResult);
+      await speechRecognitionService.startListening(
+        handleSpeechResult,
+        langRef.current ? { lang: langRef.current } : {},
+      );
     } catch (err) {
       applyStatus('idle');
       onErrorRef.current?.(err instanceof Error ? err.message : 'Failed to start recording');
@@ -320,7 +345,7 @@ export const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
   // ── Accessibility ──
   const accessibilityLabel = (() => {
     switch (iconMode) {
-      case 'mic':        return 'Start voice input';
+      case 'mic':        return micLabel ?? 'Start voice input';
       case 'clear':      return 'Clear input';
       case 'stop':       return 'Stop recording';
       case 'processing': return 'Processing voice, tap to cancel';
