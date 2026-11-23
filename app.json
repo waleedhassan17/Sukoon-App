@@ -8,11 +8,6 @@
     "scheme": "sukoon",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/images/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0D3B2E"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sukoon.app",
@@ -59,6 +54,15 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 120,
+          "resizeMode": "contain",
+          "backgroundColor": "#0D3B2E"
+        }
+      ],
       "expo-font",
       "expo-sensors",
       "expo-location",
