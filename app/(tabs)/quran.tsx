@@ -19,6 +19,8 @@ import {
   Animated,
   Platform,
   FlatList,
+  StyleProp,
+  ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -42,6 +44,45 @@ const CARDS: LibraryCard[] = [
   { key: 'mushaf16', arabic: '۱۶ سطری',       title: '16 Lines Quran', status: 'Read by Parah',      route: '/quran/parahs?lines=16' },
 ];
 
+interface CollectionCardProps {
+  arabic: string;
+  title: string;
+  status: string;
+  onPress: () => void;
+  accessibilityLabel: string;
+  style: StyleProp<ViewStyle>;
+}
+
+/**
+ * One library collection: corner-framed card with a calligraphy headline, an
+ * English name and a short status line (the Ahadees book-card language). Every
+ * card on this screen — grid and Listen — renders through here so they match.
+ */
+function CollectionCard({ arabic, title, status, onPress, accessibilityLabel, style }: CollectionCardProps) {
+  const { theme } = useTheme();
+  const cornerColor = theme.textTertiary;
+  return (
+    <TouchableOpacity
+      style={[styles.card, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }, style]}
+      activeOpacity={0.7}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+    >
+      <View style={[styles.corner, styles.topLeft, { borderTopColor: cornerColor, borderLeftColor: cornerColor }]} />
+      <View style={[styles.corner, styles.topRight, { borderTopColor: cornerColor, borderRightColor: cornerColor }]} />
+      <View style={[styles.corner, styles.bottomLeft, { borderBottomColor: cornerColor, borderLeftColor: cornerColor }]} />
+      <View style={[styles.corner, styles.bottomRight, { borderBottomColor: cornerColor, borderRightColor: cornerColor }]} />
+
+      <View style={styles.cardInfo}>
+        <Text style={[styles.cardArabic, { color: theme.text }]} numberOfLines={2}>{arabic}</Text>
+        <Text style={[styles.cardName, { color: theme.textSecondary }]} numberOfLines={1}>{title}</Text>
+        <Text style={[styles.cardStatus, { color: theme.primaryMuted }]} numberOfLines={1}>{status}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const { theme, mode, toggleTheme } = useTheme();
@@ -59,25 +100,14 @@ export default function LibraryScreen() {
   }, []);
 
   const renderItem = ({ item }: { item: LibraryCard }) => (
-    <TouchableOpacity
-      style={[styles.bookCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}
-      activeOpacity={0.7}
+    <CollectionCard
+      arabic={item.arabic}
+      title={item.title}
+      status={item.status}
       onPress={() => router.push(item.route as any)}
-      accessibilityRole="button"
       accessibilityLabel={item.title}
-    >
-      {/* Decorative corner accents — matches the Ahadees book cards */}
-      <View style={[styles.corner, styles.topLeft, { borderTopColor: theme.textTertiary, borderLeftColor: theme.textTertiary }]} />
-      <View style={[styles.corner, styles.topRight, { borderTopColor: theme.textTertiary, borderRightColor: theme.textTertiary }]} />
-      <View style={[styles.corner, styles.bottomLeft, { borderBottomColor: theme.textTertiary, borderLeftColor: theme.textTertiary }]} />
-      <View style={[styles.corner, styles.bottomRight, { borderBottomColor: theme.textTertiary, borderRightColor: theme.textTertiary }]} />
-
-      <View style={styles.bookInfo}>
-        <Text style={[styles.bookArabic, { color: theme.text }]} numberOfLines={2}>{item.arabic}</Text>
-        <Text style={[styles.bookName, { color: theme.textSecondary }]} numberOfLines={1}>{item.title}</Text>
-        <Text style={[styles.bookStatus, { color: theme.primaryMuted }]}>{item.status}</Text>
-      </View>
-    </TouchableOpacity>
+      style={styles.gridCard}
+    />
   );
 
   const listHeader = (
@@ -111,24 +141,17 @@ export default function LibraryScreen() {
     </LinearGradient>
   );
 
-  // Listen (audiobooks) lives here now that it is no longer a bottom tab.
+  // Listen (audiobooks) lives here now that it is no longer a bottom tab —
+  // a full-width card in the same language as the grid above.
   const listFooter = (
-    <TouchableOpacity
-      style={[styles.listenCard, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, shadowColor: theme.shadowColor }]}
-      activeOpacity={0.8}
+    <CollectionCard
+      arabic="سماعت"
+      title={t('listen.title')}
+      status={t('library.listenSub')}
       onPress={() => router.push('/listen')}
-      accessibilityRole="button"
       accessibilityLabel={`${t('listen.title')}. ${t('library.listenSub')}`}
-    >
-      <LinearGradient colors={theme.headerGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.listenIcon}>
-        <Ionicons name="headset" size={24} color="#fff" />
-      </LinearGradient>
-      <View style={styles.listenText}>
-        <Text style={[styles.listenTitle, { color: theme.text }]}>{t('listen.title')}</Text>
-        <Text style={[styles.listenSub, { color: theme.textSecondary }]}>{t('library.listenSub')}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={20} color={theme.textTertiary} />
-    </TouchableOpacity>
+      style={styles.wideCard}
+    />
   );
 
   return (
@@ -177,11 +200,13 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
 
-  /* ─── Grid (matches Ahadees books) ─── */
+  /* ─── Collection cards (match Ahadees books) ─── */
   rowWrapper: { paddingHorizontal: 12, justifyContent: 'space-between' },
-  bookCard: {
-    flex: 1,
-    margin: 6,
+  gridCard: { flex: 1, margin: 6 },
+  // 18 = row padding 12 + card margin 6, so the edges line up with the grid;
+  // the last row's bottom margin 6 + this 6 keeps the 12 dp row gap.
+  wideCard: { marginHorizontal: 18, marginTop: 6 },
+  card: {
     borderRadius: 12,
     borderWidth: 1,
     padding: 16,
@@ -198,21 +223,8 @@ const styles = StyleSheet.create({
   topRight: { top: 8, right: 8, borderTopWidth: 2, borderRightWidth: 2, borderTopRightRadius: 6 },
   bottomLeft: { bottom: 8, left: 8, borderBottomWidth: 2, borderLeftWidth: 2, borderBottomLeftRadius: 6 },
   bottomRight: { bottom: 8, right: 8, borderBottomWidth: 2, borderRightWidth: 2, borderBottomRightRadius: 6 },
-  bookInfo: { alignItems: 'center', justifyContent: 'center' },
-  bookArabic: { fontSize: 26, fontWeight: '500', textAlign: 'center', marginBottom: 10, lineHeight: 40, fontFamily: 'AlQalamQuran' },
-  bookName: { fontSize: 14, fontWeight: '700', textAlign: 'center', marginBottom: 8, letterSpacing: -0.2 },
-  listenCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
-    marginHorizontal: 18, marginTop: 10, padding: 16,
-    borderRadius: 12, borderWidth: 1,
-    ...Platform.select({
-      ios: { shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
-      android: { elevation: 2 },
-    }),
-  },
-  listenIcon: { width: 52, height: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  listenText: { flex: 1 },
-  listenTitle: { fontSize: 17, fontWeight: '700' },
-  listenSub: { fontSize: 13, marginTop: 2 },
-  bookStatus: { fontSize: 11, fontWeight: '600', textAlign: 'center', textTransform: 'uppercase', letterSpacing: 0.5 },
+  cardInfo: { alignItems: 'center', justifyContent: 'center' },
+  cardArabic: { fontSize: 26, fontWeight: '500', textAlign: 'center', marginBottom: 10, lineHeight: 40, fontFamily: 'AlQalamQuran' },
+  cardName: { fontSize: 14, fontWeight: '700', textAlign: 'center', marginBottom: 8, letterSpacing: -0.2 },
+  cardStatus: { fontSize: 11, fontWeight: '600', textAlign: 'center', textTransform: 'uppercase', letterSpacing: 0.5 },
 });
