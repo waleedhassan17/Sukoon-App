@@ -11,6 +11,7 @@ Prayer times you can rely on 🕌
 • A simpler Prayer Times screen with a live countdown to the next prayer
 • Qibla finder redesigned — a clearer compass that tells you which way to turn
 • Tasbeeh redesigned — your count is saved when you leave
+• Share any Ayah or Hadith as a beautiful image card — choose a style, post or story size, and English or Urdu
 • Speak your feelings: the mic now finds Quranic guidance as soon as you stop speaking
 • Listen features original human narrations and recitations only
 • Five tabs for easier navigation
@@ -36,6 +37,13 @@ Prayer times you can rely on 🕌
 - API call has a single hard deadline (headers + body; ≤ 20 s total, 1 retry) — previously a stalled body hung the screen forever. After 6 s the screen offers *Show offline guidance* / *Cancel*; an offline result is labelled with the reason and a Retry. Offline fallback matches whole words and understands Urdu / Roman Urdu. Ayah ranges ("5-6") no longer break save/share.
 - The in-input mic now detects emotions automatically once speech finishes (silence, end of speech or tapping stop); editing the text cancels it. Recognition language follows the app language. Endpoint overridable with `EXPO_PUBLIC_EMOTION_API_URL`.
 
+**Image sharing (Ayah & Hadith)**
+- Every Ayah / Hadith share is now a designed PNG card (1080 px wide), never plain text: leaf ornament, Arabic (AlQalamQuran), translation (serif italic or Nastaleeq), uppercase reference pill, narrator line and grade for Hadith, subtle Sukoon mark.
+- Share sheet with a live preview (exactly what gets sent): Emerald / Midnight / Ivory, Post 4:5 / Story 9:16, English / اردو; choices are remembered. Defaults to the translation the reader is showing.
+- Auto-fit type (`lib/shareCard.ts`, calibrated on the real fonts): short verses are set large, long ones shrink at most 20%, then the card grows — Quran text is never truncated.
+- Wired into the Quran reader (card + page mode), Hadith reader, Saved (verses + hadith), Emotion result (keeps verse ranges like 5-6), and a new Share button on Home's Daily Ayah. Old text builder `lib/shareFormat.ts` removed.
+- New native modules: `react-native-view-shot` 4.0.3 + `expo-sharing` ~14.0.8 (SDK 54 pins). **OTA runtime bumped `1.0.0` → `1.1.0`** in `app.json`, `android/.../strings.xml` and `ios/.../Expo.plist` (the native folders are gitignored but uploaded to EAS) so this JS can never reach a binary without the modules. Lazy-loaded, so web / Expo Go show an "update needed" note instead of crashing.
+
 **Navigation & content**
 - Five bottom tabs (Listen removed); Listen opens from Home Quick Access and the Books tab; mini-player no longer overlaps Home's mic button.
 - Original narrations only: fail-closed filter in `CatalogService` (hides AI books from the seed, Firestore and on-device caches); 16 AI books and ~34 MB of bundled audio removed; one-time cleanup of previously downloaded AI files.
@@ -43,9 +51,10 @@ Prayer times you can rely on 🕌
 
 **Housekeeping**
 - `app.json`: removed the invalid `android.useNextNotificationsApi`; `npm run start:go` (Expo Go) / `npm run start:dev` (dev build).
-- 534 tests in 20 suites (`npm test`), including an en/ur translation-integrity guard.
+- 564 tests in 21 suites (`npm test`), including an en/ur translation-integrity guard.
 
 **Before shipping / follow-ups**
+- Image sharing needs the new native build: test on a dev build / release APK (WhatsApp chat + Status, Instagram Story, Save to Photos). iOS: run `pod install` before an iOS build. Updates published for runtime `1.0.0` keep serving the current store build only.
 - Build a fresh APK/AAB — the APK in the repo (v1.2.4) predates all of this. `versionCode` differs between `app.json` (19) and `android/app/build.gradle` (17).
 - Optional admin step: delete the AI docs from Firestore `audiobooksCatalog` (hidden by the client either way).
 - Rotate the Gemini key that is in plain text in `claude.md`; set `EXPO_PUBLIC_GEMINI_API_KEY` in the EAS dashboard for cloud builds.
