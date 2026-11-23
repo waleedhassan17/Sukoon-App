@@ -10,7 +10,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Share,
   Alert,
   Animated,
   Platform,
@@ -22,13 +21,15 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { useSavedVerses } from '@/contexts/SavedVersesContext';
 import { useSavedHadiths } from '@/contexts/SavedHadithsContext';
-import { buildAyahShareMessage, buildHadithShareMessage } from '@/lib/shareFormat';
+import { useShare } from '@/contexts/ShareContext';
+import { t } from '@/lib/i18n';
 
 type Tab = 'verses' | 'hadees';
 
 export default function SavedScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
+  const { shareAyah, shareHadith } = useShare();
   const { sizes } = useFontSize();
   const { savedVerses, removeVerse, clearAllVerses } = useSavedVerses();
   const { savedHadiths, removeHadith, clearAllHadiths } = useSavedHadiths();
@@ -51,19 +52,15 @@ export default function SavedScreen() {
     ]).start();
   }, []);
 
-  const handleShare = async (verse: any) => {
-    try {
-      await Share.share({
-        message: buildAyahShareMessage({
-          surahName: verse.surahName || verse.surah,
-          surahNumber: verse.surah,
-          ayahNumber: verse.ayah,
-          arabic: verse.arabic,
-          english: verse.english,
-          urdu: verse.urdu,
-        }),
-      });
-    } catch {}
+  const handleShare = (verse: any) => {
+    shareAyah({
+      surahName: verse.surahName,
+      surahNumber: verse.surah,
+      ayahNumber: verse.ayah,
+      arabic: verse.arabic,
+      english: verse.english,
+      urdu: verse.urdu,
+    });
   };
 
   const handleRemove = (verse: any) => {
@@ -80,20 +77,15 @@ export default function SavedScreen() {
     ]);
   };
 
-  const handleShareHadith = async (hadith: any) => {
-    try {
-      await Share.share({
-        message: buildHadithShareMessage({
-          bookName: hadith.bookName,
-          arabic: hadith.arabic,
-          english: hadith.english,
-          urdu: hadith.urdu,
-          book: hadith.refBook,
-          hadith: hadith.refHadith ?? hadith.hadithNumber,
-          grade: hadith.grade,
-        }),
-      });
-    } catch {}
+  const handleShareHadith = (hadith: any) => {
+    shareHadith({
+      bookName: hadith.bookName,
+      hadithNumber: hadith.hadithNumber,
+      arabic: hadith.arabic,
+      english: hadith.english,
+      urdu: hadith.urdu,
+      grade: hadith.grade,
+    });
   };
 
   const handleRemoveHadith = (hadith: any) => {
@@ -256,6 +248,8 @@ export default function SavedScreen() {
                         onPress={() => handleShare(verse)}
                         style={[styles.verseActionBtn, { backgroundColor: theme.surfaceMuted }]}
                         activeOpacity={0.7}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('share.a11y.shareAyah')}
                       >
                         <Ionicons name="share-outline" size={16} color={theme.textTertiary} />
                       </TouchableOpacity>
@@ -387,6 +381,8 @@ export default function SavedScreen() {
                         onPress={() => handleShareHadith(hadith)}
                         style={[styles.verseActionBtn, { backgroundColor: theme.surfaceMuted }]}
                         activeOpacity={0.7}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('share.a11y.shareHadith')}
                       >
                         <Ionicons name="share-outline" size={16} color={theme.textTertiary} />
                       </TouchableOpacity>

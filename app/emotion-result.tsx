@@ -11,7 +11,6 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Share,
   Animated,
   Platform,
   Dimensions,
@@ -29,7 +28,7 @@ import { EmotionService } from '@/lib/emotionService';
 import type { EmotionResult, VerseRecommendation, AnalysisResult, FallbackReason } from '@/lib/emotionService';
 import { t, useLocale } from '@/lib/i18n';
 import { getStaticEmotionData } from '@/lib/staticVerses';
-import { buildAyahShareMessage } from '@/lib/shareFormat';
+import { useShare } from '@/contexts/ShareContext';
 import { EMOTION_MAP } from '@/constants/theme';
 
 const { width: SW } = Dimensions.get('window');
@@ -71,6 +70,7 @@ export default function EmotionResultScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const { sizes } = useFontSize();
+  const { shareAyah } = useShare();
   const { saveVerse, removeVerse, isVerseSaved } = useSavedVerses();
   const params = useLocalSearchParams();
   const goBack = useSafeBack('/');
@@ -185,19 +185,16 @@ export default function EmotionResultScreen() {
     goBack();
   }, [goBack]);
 
-  const handleShare = async (verse: VerseRecommendation) => {
-    try {
-      await Share.share({
-        message: buildAyahShareMessage({
-          surahName: verse.surahName,
-          surahNumber: verse.surah,
-          ayahNumber: verse.ayah,
-          arabic: verse.arabic,
-          english: verse.english,
-          urdu: verse.urdu,
-        }),
-      });
-    } catch {}
+  const handleShare = (verse: VerseRecommendation) => {
+    shareAyah({
+      surahName: verse.surahName,
+      surahNumber: verse.surah,
+      ayahNumber: verse.ayah,
+      ayahLabel: verse.ayahLabel,
+      arabic: verse.arabic,
+      english: verse.english,
+      urdu: verse.urdu,
+    });
   };
 
   const toggleBookmark = (verse: VerseRecommendation) => {

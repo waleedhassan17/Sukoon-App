@@ -18,7 +18,6 @@ import {
   ActivityIndicator,
   FlatList,
   Animated,
-  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
@@ -30,20 +29,8 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useFontSize } from '@/contexts/FontSizeContext';
 import { useSavedHadiths } from '@/contexts/SavedHadithsContext';
 import { HadithService, MergedHadith, HadithSection } from '@/lib/hadithService';
-import { buildHadithShareMessage as buildHadithShare } from '@/lib/shareFormat';
-
-/** Build a nicely formatted share message for a hadith. */
-function buildHadithShareMessage(item: MergedHadith, bookName: string, sectionNumber: number): string {
-  return buildHadithShare({
-    bookName,
-    arabic: item.arabic,
-    english: item.english,
-    urdu: item.urdu,
-    book: item.reference?.book ?? sectionNumber,
-    hadith: item.reference?.hadith ?? item.hadithnumber,
-    grade: item.grades?.length ? item.grades[0].grade : undefined,
-  });
-}
+import { useShare } from '@/contexts/ShareContext';
+import { t } from '@/lib/i18n';
 
 type Translation = 'urdu' | 'english';
 
@@ -54,6 +41,7 @@ function one(v: string | string[] | undefined): string {
 export default function HadithReaderScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
+  const { shareHadith } = useShare();
   const { sizes } = useFontSize();
   const { saveHadith, removeHadith, isHadithSaved } = useSavedHadiths();
   const goBack = useSafeBack('/quran/hadith');
@@ -127,9 +115,18 @@ export default function HadithReaderScreen() {
     load();
   }, [load]);
 
+  // Share as an image card in the language the reader is showing.
   const handleShare = useCallback((item: MergedHadith) => {
-    Share.share({ message: buildHadithShareMessage(item, bookName, section.number) }).catch(() => {});
-  }, [bookName, section.number]);
+    shareHadith({
+      bookName,
+      hadithNumber: item.hadithnumber,
+      arabic: item.arabic,
+      english: item.english,
+      urdu: item.urdu,
+      grade: item.grades?.[0]?.grade,
+      preferredLang: translation,
+    });
+  }, [bookName, shareHadith, translation]);
 
   const handleToggleSave = useCallback((item: MergedHadith) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -212,7 +209,7 @@ export default function HadithReaderScreen() {
               onPress={() => handleShare(item)}
               style={[styles.actionBtn, { backgroundColor: theme.surfaceMuted }]}
               activeOpacity={0.7}
-              accessibilityLabel="Share hadith"
+              accessibilityLabel={t('share.a11y.shareHadith')}
             >
               <Ionicons name="share-outline" size={16} color={theme.textTertiary} />
             </TouchableOpacity>

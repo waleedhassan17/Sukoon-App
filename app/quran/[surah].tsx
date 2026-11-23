@@ -14,7 +14,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Pressable, StyleSheet,
-  ActivityIndicator, Dimensions, Share, Platform, Modal, Alert,
+  ActivityIndicator, Dimensions, Platform, Modal, Alert,
   Animated, PanResponder, LayoutAnimation, UIManager,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -32,7 +32,8 @@ import QuranService, { Ayah, SurahData } from '@/lib/quranService';
 import audioPlayer, { PlayerState, RepeatMode } from '@/lib/audioPlayer';
 import { ReadingProgress } from '@/lib/readingProgress';
 import TafseerService, { TafseerSource } from '@/lib/tafseerService';
-import { buildAyahShareMessage } from '@/lib/shareFormat';
+import { useShare } from '@/contexts/ShareContext';
+import { t } from '@/lib/i18n';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -281,6 +282,7 @@ const PageFrame = React.memo(function PageFrame({
 }) {
   const { theme } = useTheme();
   const { sizes } = useFontSize();
+  const { shareAyah } = useShare();
   const [selected, setSelected] = useState<number | null>(null);
   const prevCurrentIndexRef = useRef<number | null>(null);
 
@@ -360,7 +362,7 @@ const PageFrame = React.memo(function PageFrame({
               <TouchableOpacity style={[s.pageActBtn, { backgroundColor: `${theme.gold}12` }]} onPress={() => onBookmark(ayahs[selected])} activeOpacity={0.7}>
                 <Ionicons name={isVerseSaved(surahNumber, ayahs[selected].numberInSurah) ? 'bookmark' : 'bookmark-outline'} size={14} color={isVerseSaved(surahNumber, ayahs[selected].numberInSurah) ? theme.gold : theme.textTertiary} />
               </TouchableOpacity>
-              <TouchableOpacity style={[s.pageActBtn, { backgroundColor: theme.surfaceMuted }]} onPress={() => Share.share({ message: buildAyahShareMessage({ surahName, surahNumber, ayahNumber: ayahs[selected].numberInSurah, arabic: ayahs[selected].text, english: ayahs[selected].translation, urdu: ayahs[selected].urduTranslation }) }).catch(() => {})} activeOpacity={0.7}>
+              <TouchableOpacity style={[s.pageActBtn, { backgroundColor: theme.surfaceMuted }]} onPress={() => shareAyah({ surahName, surahNumber, ayahNumber: ayahs[selected].numberInSurah, arabic: ayahs[selected].text, english: ayahs[selected].translation, urdu: ayahs[selected].urduTranslation })} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={t('share.a11y.shareAyah')}>
                 <Ionicons name="share-outline" size={14} color={theme.textTertiary} />
               </TouchableOpacity>
               <TouchableOpacity style={[s.pageActBtn, { backgroundColor: theme.surfaceMuted }]} onPress={() => setSelected(null)} activeOpacity={0.7}>
@@ -465,7 +467,7 @@ const VerseCard = React.memo(function VerseCard({
             <TouchableOpacity style={s.vActBtn} onPress={onBookmark} activeOpacity={0.7}>
               <Ionicons name={isBookmarked ? 'bookmark' : 'bookmark-outline'} size={16} color={isBookmarked ? theme.gold : theme.textTertiary} />
             </TouchableOpacity>
-            <TouchableOpacity style={s.vActBtn} onPress={onShare} activeOpacity={0.7}>
+            <TouchableOpacity style={s.vActBtn} onPress={onShare} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={t('share.a11y.shareAyah')}>
               <Ionicons name="share-outline" size={16} color={theme.textTertiary} />
             </TouchableOpacity>
           </View>
@@ -1324,22 +1326,21 @@ export default function SurahScreen() {
     else saveVerse({ surah: surahNumber, surahName: meta?.englishName, ayah: ay.numberInSurah, arabic: ay.text, english: ay.translation || '', urdu: ay.urduTranslation });
   }, [surahNumber, meta, isVerseSaved, saveVerse, removeVerse]);
 
-  // Share verse using the shared, WhatsApp-friendly formatter.
-  // ay.numberInSurah is now guaranteed to be correct (1-based) from QuranService
-  const shareVerse = useCallback(async (ay: Ayah, displayNumber: number) => {
-    try {
-      await Share.share({
-        message: buildAyahShareMessage({
-          surahName: meta?.englishName,
-          surahNumber,
-          ayahNumber: displayNumber,
-          arabic: ay.text,
-          english: ay.translation,
-          urdu: ay.urduTranslation,
-        }),
-      });
-    } catch {}
-  }, [meta, surahNumber]);
+  // Share verse as an image card. The card follows the translation the reader
+  // is showing (Urdu only → Urdu card), else the sheet's remembered choice.
+  // ay.numberInSurah is guaranteed to be correct (1-based) from QuranService.
+  const { shareAyah } = useShare();
+  const shareVerse = useCallback((ay: Ayah, displayNumber: number) => {
+    shareAyah({
+      surahName: meta?.englishName,
+      surahNumber,
+      ayahNumber: displayNumber,
+      arabic: ay.text,
+      english: ay.translation,
+      urdu: ay.urduTranslation,
+      preferredLang: showUrdu && !showEnglish ? 'urdu' : showEnglish && !showUrdu ? 'english' : null,
+    });
+  }, [meta, surahNumber, shareAyah, showEnglish, showUrdu]);
 
   const handleToggle = useCallback((t: 'english' | 'urdu' | 'tafseer') => {
     if (autoScrollActive) stopAS();

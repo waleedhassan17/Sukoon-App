@@ -35,7 +35,8 @@ import { formatHijri } from '@/lib/hijri';
 import { prayerNameKey } from '@/lib/prayerFormat';
 import { shouldAutoSubmitVoice, speechLangForLocale, VOICE_SUBMIT_DELAY_MS } from '@/lib/voiceSubmit';
 import { t, useLocale } from '@/lib/i18n';
-import { SHADOWS, RADIUS, SPACING, TYPOGRAPHY } from '@/constants/theme';
+import { SHADOWS, RADIUS, SPACING, TYPOGRAPHY, MIN_TOUCH } from '@/constants/theme';
+import { useShare } from '@/contexts/ShareContext';
 import { EmotionService } from '@/lib/emotionService';
 
 const { width } = Dimensions.get('window');
@@ -95,6 +96,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const { sizes } = useFontSize();
+  const { shareAyah } = useShare();
   const router = useRouter();
   const locale = useLocale();
 
@@ -652,6 +654,24 @@ export default function HomeScreen() {
                         {dailyAyah.surahName} · {dailyAyah.surah}:{dailyAyah.ayah}
                       </Text>
                     </View>
+                    <TouchableOpacity
+                      style={styles.ayahShareBtn}
+                      activeOpacity={0.7}
+                      onPress={() => shareAyah({
+                        surahName: dailyAyah.surahName,
+                        surahNumber: dailyAyah.surah,
+                        ayahNumber: dailyAyah.ayah,
+                        arabic: dailyAyah.arabic,
+                        english: dailyAyah.english,
+                        urdu: dailyAyah.urdu,
+                      })}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('share.a11y.shareAyah')}
+                    >
+                      <View style={styles.ayahShareIcon}>
+                        <Ionicons name="share-social-outline" size={16} color="rgba(255,255,255,0.85)" />
+                      </View>
+                    </TouchableOpacity>
                   </View>
                 </LinearGradient>
               </View>
@@ -1132,17 +1152,36 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   ayahFooter: {
-    alignItems: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginTop: 4,
   },
   ayahRefPill: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 1,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 20,
     paddingVertical: 6,
     paddingHorizontal: 12,
     gap: 6,
+  },
+  ayahShareBtn: {
+    width: MIN_TOUCH,
+    height: MIN_TOUCH,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginEnd: -8,
+    marginStart: 8,
+  },
+  ayahShareIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.10)',
   },
   ayahRefText: {
     fontSize: 12,
