@@ -263,5 +263,22 @@
   "tasbeeh.dhikr.allahu-akbar": "Allahu Akbar",
   "tasbeeh.dhikr.la-ilaha-illallah": "La Ilaha IllAllah",
   "tasbeeh.dhikr.astaghfirullah": "Astaghfirullah",
-  "qibla.distance": "{km} km to the Kaaba"
+  "qibla.distance": "{km} km to the Kaaba",
+  "share.titleAyah": "Share Ayah",
+  "share.titleHadith": "Share Hadith",
+  "share.close": "Close",
+  "share.style": "Style",
+  "share.size": "Size",
+  "share.translation": "Translation",
+  "share.theme.emerald": "Emerald",
+  "share.theme.midnight": "Midnight",
+  "share.theme.ivory": "Ivory",
+  "share.format.post": "Post",
+  "share.format.story": "Story",
+  "share.shareImage": "Share image",
+  "share.preparing": "Preparing image…",
+  "share.failed": "Couldn't create the image. Please try again.",
+  "share.needsUpdate": "Image sharing needs the latest version of Sukoon.",
+  "share.a11y.shareAyah": "Share this ayah",
+  "share.a11y.shareHadith": "Share this hadith"
 }

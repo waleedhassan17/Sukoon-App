@@ -17,6 +17,7 @@ import { FontSizeProvider } from '@/contexts/FontSizeContext';
 import { SavedVersesProvider } from '@/contexts/SavedVersesContext';
 import { SavedHadithsProvider } from '@/contexts/SavedHadithsContext';
 import { AudiobookPlayerProvider } from '@/contexts/AudiobookPlayerContext';
+import { ShareProvider, ShareSheetHost } from '@/contexts/ShareContext';
 import MiniPlayer from '@/components/listen/MiniPlayer';
 import { ListenProgress } from '@/lib/audiobooks/progress';
 import SukoonSplash from '@/components/SukoonSplash';
@@ -258,6 +259,9 @@ function RootLayoutInner() {
       {/* Global audiobook mini-player — docked above the bottom nav app-wide */}
       <MiniPlayer />
 
+      {/* Ayah / Hadith image-share sheet — above every screen and the mini-player */}
+      <ShareSheetHost />
+
       {/* Custom animated splash overlay — renders on top, self-removes */}
       {!splashDone && <SukoonSplash onFinish={handleSplashFinish} />}
     </View>
@@ -271,7 +275,9 @@ export default function RootLayout() {
         <SavedVersesProvider>
           <SavedHadithsProvider>
             <AudiobookPlayerProvider>
-              <RootLayoutInner />
+              <ShareProvider>
+                <RootLayoutInner />
+              </ShareProvider>
             </AudiobookPlayerProvider>
           </SavedHadithsProvider>
         </SavedVersesProvider>

@@ -263,5 +263,22 @@
   "tasbeeh.dhikr.allahu-akbar": "اللہ اکبر",
   "tasbeeh.dhikr.la-ilaha-illallah": "لا الٰہ الا اللہ",
   "tasbeeh.dhikr.astaghfirullah": "استغفر اللہ",
-  "qibla.distance": "کعبہ تک {km} کلومیٹر"
+  "qibla.distance": "کعبہ تک {km} کلومیٹر",
+  "share.titleAyah": "آیت شیئر کریں",
+  "share.titleHadith": "حدیث شیئر کریں",
+  "share.close": "بند کریں",
+  "share.style": "انداز",
+  "share.size": "سائز",
+  "share.translation": "ترجمہ",
+  "share.theme.emerald": "زمردی",
+  "share.theme.midnight": "شب",
+  "share.theme.ivory": "کریمی",
+  "share.format.post": "پوسٹ",
+  "share.format.story": "اسٹوری",
+  "share.shareImage": "تصویر شیئر کریں",
+  "share.preparing": "تصویر تیار ہو رہی ہے…",
+  "share.failed": "تصویر نہیں بن سکی۔ براہِ کرم دوبارہ کوشش کریں۔",
+  "share.needsUpdate": "تصویر شیئر کرنے کے لیے سکون کا تازہ ترین ورژن درکار ہے۔",
+  "share.a11y.shareAyah": "یہ آیت شیئر کریں",
+  "share.a11y.shareHadith": "یہ حدیث شیئر کریں"
 }
