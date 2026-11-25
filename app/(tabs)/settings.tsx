@@ -20,6 +20,7 @@ import {
   Platform,
   StyleProp,
   ViewStyle,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -565,13 +566,13 @@ export default function SettingsScreen() {
             </View>
 
             <View style={styles.credits}>
-              <View style={styles.creditsLogoWrap}>
-                <LinearGradient
-                  colors={[theme.primaryLight, theme.primary]}
-                  style={styles.creditsLogo}
-                >
-                  <Ionicons name="leaf" size={20} color="#fff" />
-                </LinearGradient>
+              <View style={[styles.creditsLogoWrap, styles.creditsLogo]}>
+                {/* Same asset as the splash (already bundled), on the logo's own green. */}
+                <Image
+                  source={require('@/assets/images/splash-icon.png')}
+                  style={styles.creditsLogoMark}
+                  accessibilityIgnoresInvertColors
+                />
               </View>
               <Text style={[styles.creditsTitle, { color: theme.text }]}>Sukoon</Text>
               <Text style={[styles.creditsSub, { color: theme.textSecondary }]}>
@@ -890,11 +891,17 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   creditsLogo: {
-    width: 48,
-    height: 48,
+    width: 56,
+    height: 56,
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+    backgroundColor: '#1F3621', // the logo's own background
+  },
+  creditsLogoMark: {
+    width: 46,
+    height: 46,
   },
   creditsTitle: {
     fontSize: 22,

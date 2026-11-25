@@ -1,8 +1,8 @@
 /**
  * SukoonSplash — the brand moment between the native splash and the app.
  *
- * The native splash (app.json → expo-splash-screen) draws the same gold mark,
- * at the same size, centred on the same emerald. This overlay starts from
+ * The native splash (app.json → expo-splash-screen) draws the same heart mark,
+ * at the same size, centred on the same forest green. This overlay starts from
  * that exact frame, so the handoff is invisible: the mark glides up, the
  * wordmark settles in beneath it, and the overlay fades to reveal the app.
  * ~1.3 s total; with Reduce Motion on, it simply holds and fades.
@@ -19,10 +19,10 @@ import {
   View,
 } from 'react-native';
 
-/** Must match expo-splash-screen `backgroundColor` in app.json. */
-const BACKGROUND = '#0D3B2E';
+/** Must match expo-splash-screen `backgroundColor` in app.json (the logo's own green). */
+const BACKGROUND = '#1F3621';
 /** Must match expo-splash-screen `imageWidth` in app.json. */
-const MARK_SIZE = 120;
+const MARK_SIZE = 150;
 const GAP = 28;
 const WORDMARK_LINE = 20;
 const TRACKING = 6;

@@ -20,7 +20,8 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#0D3B2E"
+        "monochromeImage": "./assets/images/adaptive-icon-monochrome.png",
+        "backgroundColor": "#1F3621"
       },
       "package": "com.sukoon.app",
       "versionCode": 19,
@@ -58,9 +59,9 @@
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 120,
+          "imageWidth": 150,
           "resizeMode": "contain",
-          "backgroundColor": "#0D3B2E"
+          "backgroundColor": "#1F3621"
         }
       ],
       "expo-font",
