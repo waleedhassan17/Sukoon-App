@@ -8,7 +8,8 @@ Prayer times you can rely on 🕌
 
 • Azan alerts keep arriving even if you don't open the app — they are now scheduled weeks ahead
 • Prayer times are worked out on your phone from where you are: correct anywhere in the world, even offline
-• A simpler Prayer Times screen with a live countdown to the next prayer
+• A cleaner Prayer Times screen that matches the Salah Tracker, with a live countdown to the next prayer
+• A fresh new look: new logo, app icon and splash screen
 • Qibla finder redesigned — a clearer compass that tells you which way to turn
 • Tasbeeh redesigned — your count is saved when you leave
 • Share any Ayah or Hadith as a beautiful image card — choose a style, post or story size, and English or Urdu
@@ -28,10 +29,15 @@ Prayer times you can rely on 🕌
 - Salah Settings → **Reliability** section: permission status, "scheduled through <date>", send-test-azan, exact-alarm and battery-optimisation shortcuts, OEM autostart tip. Tapping an old azan notification no longer replays the azan; Friday's Dhuhr is "Jumu'ah".
 
 **Screens**
-- Prayer Times: simple screen — gradient header, location + Gregorian/Hijri date, next-prayer card with live countdown (rolls to tomorrow's Fajr after Isha), one list with a per-prayer bell.
+- Prayer Times: restyled in the Salah Tracker's visual language so the prayer screens read as one family. Flat gradient header with the gold ornament (`components/prayer/PrayerHeader.tsx`), location and Gregorian · Hijri date line, a stats-style panel (next prayer · begins · live countdown, which rolls to tomorrow's Fajr after Isha; `NextPrayerPanel.tsx`), and Tracker-style cards with the Arabic name, an "Up next" pill and a per-prayer bell (`PrayerRow.tsx`). The Salah Tracker, Friends, Invites and Tracker Settings are unchanged.
 - Qibla: one compass (SVG face, Kaaba marker, fixed pointer), "Turn right 42°" guidance, gold "facing the Qibla" state with hysteresis, distance to the Kaaba; starts instantly from the last-known location (GPS now has a timeout), compass stops when the screen is hidden; maths in `lib/qiblahService.ts` cross-checked against an independent vector implementation.
 - Tasbeeh: real SVG progress ring, lossless rapid tapping, the open dhikr and in-progress round are saved, visible reset, translated (EN/UR), accessible.
-- Shared `ToolHero` / `ToolStateCard`; every tool screen follows the same layout.
+- Shared `ToolHero` (Qibla, Tasbeeh) / `ToolStateCard`.
+
+**New logo & splash**
+- The heart-and-flowers mark replaces the gold crescent everywhere: app icon, Android adaptive icon plus a new Android 13+ themed (monochrome) icon, native splash, Settings → About, the share-card footer and the favicon. The notification icon is now a proper white silhouette; the old one was opaque, so Android drew it as a white square.
+- One master (`assets/brand/sukoon-logo.png`) feeds every size through `tools/brand-assets.py`. It downscales only and never recolours, and places the art on the logo's own green `#1F3621` (now the splash and adaptive-icon background), so the logo looks exactly as designed. The script also prints fidelity checks (colour shift, safe zone, splash circle).
+- Splash: the mark is larger (150 dp, `imageWidth` = `MARK_SIZE`). It beats once with a soft pulse ring, then the wordmark and tagline settle in, in the logo's cream (~1.6 s). Reduce Motion just holds and fades.
 
 **Emotion detection**
 - API call has a single hard deadline (headers + body; ≤ 20 s total, 1 retry) — previously a stalled body hung the screen forever. After 6 s the screen offers *Show offline guidance* / *Cancel*; an offline result is labelled with the reason and a Retry. Offline fallback matches whole words and understands Urdu / Roman Urdu. Ayah ranges ("5-6") no longer break save/share.
@@ -55,6 +61,7 @@ Prayer times you can rely on 🕌
 
 **Before shipping / follow-ups**
 - Image sharing needs the new native build: test on a dev build / release APK (WhatsApp chat + Status, Instagram Story, Save to Photos). iOS: run `pod install` before an iOS build. Updates published for runtime `1.0.0` keep serving the current store build only.
+- New logo, splash and notification icon only show up in a new native build. EAS builds from the gitignored `android/` folder, so on the build machine run `python3 tools/brand-assets.py` and then `npx expo prebuild --platform android --no-install`, and keep only the `res/` changes: prebuild rewrites the versionCode comment in `android/app/build.gradle` and reorders `AndroidManifest.xml`, so restore those two files. Don't publish this JS as an OTA to a binary with the old native splash (the colours would clash at handoff).
 - Build a fresh APK/AAB — the APK in the repo (v1.2.4) predates all of this. `versionCode` differs between `app.json` (19) and `android/app/build.gradle` (17).
 - Optional admin step: delete the AI docs from Firestore `audiobooksCatalog` (hidden by the client either way).
 - Rotate the Gemini key that is in plain text in `claude.md`; set `EXPO_PUBLIC_GEMINI_API_KEY` in the EAS dashboard for cloud builds.
