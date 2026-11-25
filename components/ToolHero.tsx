@@ -1,10 +1,11 @@
 /**
- * ToolHero — the one header every tool screen shares (Prayer Times, Qibla,
- * Tasbeeh). A quiet gradient with rounded bottom corners, a 44 pt back button, a
- * centred title and an optional right-hand action; anything the screen wants to
- * lead with (location, status, the dhikr) goes in as children.
+ * ToolHero — the header the standalone tools share (Qibla, Tasbeeh). A quiet
+ * gradient with rounded bottom corners, a 44 pt back button, a centred title and
+ * an optional right-hand action; anything the screen wants to lead with (status,
+ * the dhikr) goes in as children.
  *
- * Keeping it in one place is what makes the tools feel like one product.
+ * Prayer Times uses components/prayer/PrayerHeader instead, so it matches the
+ * Salah Tracker family it links into.
  */
 
 import React from 'react';

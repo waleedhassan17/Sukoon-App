@@ -1,15 +1,15 @@
 /**
- * PrayerTimesScreen — deliberately simple.
+ * PrayerTimesScreen — today's times, in the Salah Tracker's visual language.
  *
- *   header      back · title · settings
- *   location    where the times are for, plus today's date
- *   next card   what is next, its time and a live countdown
- *   list        the six times; a bell per prayer toggles its azan alert
+ *   header   back · title · azan settings, the gold ornament, where the times
+ *            are for and today's Gregorian · Hijri date, and a stats-style
+ *            panel: next prayer · begins · time left
+ *   cards    the six times as Tracker-style cards; a bell per prayer toggles
+ *            its azan alert
  *
  * Nothing else — and no calculation settings: the method and Asr school are
  * worked out from the user's location (lib/prayerEngine), so the times shown are
- * simply the correct ones for where they are. The header button opens the azan &
- * reminder settings.
+ * simply the correct ones for where they are.
  *
  * Times are computed on the device, so the screen paints instantly, works
  * offline and is correct anywhere in the world. Pull down to refresh the
@@ -26,7 +26,6 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
-import { SHADOWS } from '@/constants/theme';
 import { t, useLocale } from '@/lib/i18n';
 import { usePrayerTimes } from '@/lib/usePrayerTimes';
 import { formatCoords } from '@/lib/locationName';
@@ -34,9 +33,10 @@ import { PrayerKey } from '@/lib/prayerEngine';
 import { prayerNameKey } from '@/lib/prayerFormat';
 import { NotificationService, NotificationPreferences } from '@/lib/notificationService';
 import { PrayerTimesService } from '@/lib/prayerTimes';
-import NextPrayerCard from '@/components/prayer/NextPrayerCard';
+import PrayerHeader from '@/components/prayer/PrayerHeader';
+import NextPrayerPanel, { NextPrayerPanelSkeleton } from '@/components/prayer/NextPrayerPanel';
 import PrayerRow, { RowState } from '@/components/prayer/PrayerRow';
-import ToolHero, { HeroIconButton } from '@/components/ToolHero';
+import { prayerArabicName } from '@/components/prayer/prayerStyle';
 import ToolStateCard from '@/components/ToolStateCard';
 
 const ORDER: PrayerKey[] = ['fajr', 'sunrise', 'dhuhr', 'asr', 'maghrib', 'isha'];
@@ -100,61 +100,57 @@ export default function PrayerTimesScreen() {
 
   const locationText = p.locationName
     || (p.coords ? formatCoords(p.coords.lat, p.coords.lng) : t('prayer.locating'));
+  const dateLine = times
+    ? [
+        `${times.hijriDate?.weekday ? `${times.hijriDate.weekday}, ` : ''}${times.date}`,
+        times.hijriDate?.fullDate,
+      ].filter(Boolean).join('  ·  ')
+    : '';
 
   return (
     <View style={[s.root, { backgroundColor: theme.surface }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 28 }}
         refreshControl={
           <RefreshControl
             refreshing={p.refreshing}
             onRefresh={p.refresh}
-            tintColor="#FFFFFF"
+            tintColor={theme.primary}
             colors={[theme.primary]}
             progressBackgroundColor={theme.surfaceElevated}
           />
         }
       >
         {/* ═══ HEADER ═══ */}
-        <ToolHero
+        <PrayerHeader
           title={t('prayer.title')}
           onBack={goBack}
-          right={
-            <HeroIconButton
-              icon="notifications-outline"
-              label={t('prayer.notifSettings')}
-              onPress={() => router.push('/tools/salah-settings')}
-            />
-          }
+          right={{
+            icon: 'notifications-outline',
+            label: t('prayer.notifSettings'),
+            onPress: () => router.push('/tools/salah-settings'),
+          }}
         >
-          <View style={s.chip} accessible accessibilityLabel={locationText}>
-            <Ionicons name="location" size={14} color="#F6E27A" />
-            <Text style={s.chipText} numberOfLines={1}>{locationText}</Text>
+          <View style={s.location} accessible accessibilityLabel={locationText}>
+            <Ionicons name="location" size={13} color={theme.goldLight} />
+            <Text style={s.locationText} numberOfLines={1}>{locationText}</Text>
           </View>
-
-          {times && (
-            <View style={s.dates}>
-              <Text style={s.dateMain}>
-                {times.hijriDate?.weekday ? `${times.hijriDate.weekday}, ` : ''}{times.date}
-              </Text>
-              {!!times.hijriDate?.fullDate && <Text style={s.dateHijri}>{times.hijriDate.fullDate}</Text>}
-            </View>
+          {!!dateLine && (
+            <Text style={s.dateLine} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+              {dateLine}
+            </Text>
           )}
 
-          {status === 'loading' && <View style={s.skeletonCard} />}
-          {status === 'ready' && next && <NextPrayerCard next={next} />}
-        </ToolHero>
+          {status === 'loading' && <NextPrayerPanelSkeleton />}
+          {status === 'ready' && next && <NextPrayerPanel next={next} />}
+        </PrayerHeader>
 
         {/* ═══ BODY ═══ */}
-        <View style={s.body}>
-          {status === 'loading' && (
-            <View style={[s.group, { backgroundColor: theme.surfaceElevated, borderColor: theme.border, padding: 16 }]}>
-              {ORDER.map((k) => (
-                <View key={k} style={[s.skeletonRow, { backgroundColor: theme.surfaceMuted }]} />
-              ))}
-            </View>
-          )}
+        <View style={s.list}>
+          {status === 'loading' && ORDER.map((k) => (
+            <View key={k} style={[s.skeletonCard, { backgroundColor: theme.surfaceMuted }]} />
+          ))}
 
           {(status === 'denied' || status === 'unavailable') && (
             <ToolStateCard
@@ -168,22 +164,21 @@ export default function PrayerTimesScreen() {
             />
           )}
 
-          {status === 'ready' && times && (
-            <View style={[s.group, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }, SHADOWS.sm]}>
-              {ORDER.map((key, i) => (
-                <PrayerRow
-                  key={key}
-                  prayerKey={key}
-                  label={t(prayerNameKey(key, new Date(times.ts[key])))}
-                  time={PrayerTimesService.formatInstant(times.ts[key])}
-                  state={rowState(key)}
-                  alertOn={key === 'sunrise' ? null : !!(prefs?.enabled && prefs.prayerAlerts[key])}
-                  onToggleAlert={() => toggleAlert(key)}
-                  last={i === ORDER.length - 1}
-                />
-              ))}
-            </View>
-          )}
+          {status === 'ready' && times && ORDER.map((key) => {
+            const at = new Date(times.ts[key]);
+            return (
+              <PrayerRow
+                key={key}
+                prayerKey={key}
+                label={t(prayerNameKey(key, at))}
+                arabic={prayerArabicName(key, at)}
+                time={PrayerTimesService.formatInstant(times.ts[key])}
+                state={rowState(key)}
+                alertOn={key === 'sunrise' ? null : !!(prefs?.enabled && prefs.prayerAlerts[key])}
+                onToggleAlert={() => toggleAlert(key)}
+              />
+            );
+          })}
         </View>
       </ScrollView>
     </View>
@@ -193,18 +188,15 @@ export default function PrayerTimesScreen() {
 const s = StyleSheet.create({
   root: { flex: 1 },
 
-  chip: {
-    alignSelf: 'center', flexDirection: 'row', alignItems: 'center', marginTop: 14,
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, maxWidth: '92%',
-    backgroundColor: 'rgba(255,255,255,0.12)',
+  location: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', alignSelf: 'center',
+    maxWidth: '92%', marginTop: 6,
   },
-  chipText: { marginStart: 6, fontSize: 14, fontWeight: '600', color: '#FFFFFF', flexShrink: 1 },
-  dates: { alignItems: 'center', marginTop: 12 },
-  dateMain: { fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.92)' },
-  dateHijri: { fontSize: 13, marginTop: 2, color: 'rgba(255,255,255,0.72)' },
-  skeletonCard: { height: 132, borderRadius: 22, marginTop: 20, backgroundColor: 'rgba(255,255,255,0.12)' },
+  locationText: { marginStart: 5, fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.85)', flexShrink: 1 },
 
-  body: { paddingHorizontal: 16, paddingTop: 20 },
-  group: { borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
-  skeletonRow: { height: 44, borderRadius: 12, marginBottom: 12 },
+  dateLine: { marginTop: 4, textAlign: 'center', fontSize: 12, fontWeight: '500', color: 'rgba(255,255,255,0.62)' },
+
+  // Tracker's pList, with the gap the Tracker leaves below its header.
+  list: { paddingHorizontal: 16, paddingTop: 18, gap: 8 },
+  skeletonCard: { height: 68, borderRadius: 16 },
 });

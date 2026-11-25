@@ -8,16 +8,16 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Text, TextStyle, StyleProp } from 'react-native';
+import { Text, TextProps } from 'react-native';
 import { formatCountdown, spokenCountdown } from '@/lib/prayerFormat';
 
 export default function LiveCountdown({
   target,
   style,
-}: {
+  ...textProps
+}: Omit<TextProps, 'children'> & {
   /** Epoch ms of the moment being counted down to. */
   target: number;
-  style?: StyleProp<TextStyle>;
 }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -31,6 +31,7 @@ export default function LiveCountdown({
 
   return (
     <Text
+      {...textProps}
       style={[{ fontVariant: ['tabular-nums'] }, style]}
       accessibilityRole="timer"
       // The visual ticks every second; screen readers get a calm, minute-level phrase.
