@@ -1,22 +1,40 @@
-# Unreleased — next release (draft)
+# Sukoon v1.4.0 — Release Notes
 
-## 📋 Google Play — Release Notes (draft)
+## Release Name
+**v1.4.0 — Prayer Times & New Look** (versionName 1.4.0, versionCode 35 via EAS remote auto-increment, OTA runtime 1.1.0)
+
+---
+
+## 📋 Google Play Console — Release Notes (each under Play's 500-character limit)
 
 ### English (en-US)
 ```
 Prayer times you can rely on 🕌
 
-• Azan alerts keep arriving even if you don't open the app — they are now scheduled weeks ahead
-• Prayer times are worked out on your phone from where you are: correct anywhere in the world, even offline
-• A cleaner Prayer Times screen that matches the Salah Tracker, with a live countdown to the next prayer
-• A fresh new look: new logo, app icon and splash screen
-• Qibla finder redesigned — a clearer compass that tells you which way to turn
-• Tasbeeh redesigned — your count is saved when you leave
-• Share any Ayah or Hadith as a beautiful image card — choose a style, post or story size, and English or Urdu
-• Speak your feelings: the mic now finds Quranic guidance as soon as you stop speaking
-• Listen features original human narrations and recitations only
-• Five tabs for easier navigation
-• Fixes: back buttons no longer get stuck; emotion detection no longer hangs on a slow connection
+• Azan alerts arrive on time, even if you don't open the app for days
+• Accurate prayer times anywhere in the world, even offline
+• Redesigned Prayer Times screen with a live countdown
+• Fresh new look: new logo, app icon and splash screen
+• Clearer Qibla compass and improved Tasbeeh
+• Share any Ayah or Hadith as a beautiful image card
+• Speak your feelings and get Quranic guidance instantly
+• Easier navigation with five tabs
+• Bug fixes and improvements
+```
+
+### Urdu (ur)
+```
+نماز کے اوقات جن پر بھروسا کیا جا سکے 🕌
+
+• ایپ کھولے بغیر بھی اذان کی اطلاع وقت پر ملتی رہے گی
+• دنیا میں کہیں بھی درست نماز کے اوقات، انٹرنیٹ کے بغیر بھی
+• نماز کے اوقات کی نئی اسکرین، اگلی نماز تک الٹی گنتی کے ساتھ
+• نیا لوگو، ایپ آئیکن اور اسپلیش اسکرین
+• بہتر قبلہ کمپاس اور تسبیح کاؤنٹر
+• کسی بھی آیت یا حدیث کو خوبصورت تصویر کی صورت میں شیئر کریں
+• بول کر اپنے احساسات بتائیں اور فوراً قرآنی رہنمائی پائیں
+• آسان نیویگیشن کے لیے پانچ ٹیبز
+• خرابیوں کی درستگی اور بہتر کارکردگی
 ```
 
 ### Internal changelog
@@ -62,7 +80,7 @@ Prayer times you can rely on 🕌
 **Before shipping / follow-ups**
 - Image sharing needs the new native build: test on a dev build / release APK (WhatsApp chat + Status, Instagram Story, Save to Photos). iOS: run `pod install` before an iOS build. Updates published for runtime `1.0.0` keep serving the current store build only.
 - New logo, splash and notification icon only show up in a new native build. EAS builds from the gitignored `android/` folder, so on the build machine run `python3 tools/brand-assets.py` and then `npx expo prebuild --platform android --no-install`, and keep only the `res/` changes: prebuild rewrites the versionCode comment in `android/app/build.gradle` and reorders `AndroidManifest.xml`, so restore those two files. Don't publish this JS as an OTA to a binary with the old native splash (the colours would clash at handoff).
-- Build a fresh APK/AAB — the APK in the repo (v1.2.4) predates all of this. `versionCode` differs between `app.json` (19) and `android/app/build.gradle` (17).
+- Build a fresh APK/AAB — the APK in the repo (v1.2.4) predates all of this. `versionCode` is managed remotely by EAS (`appVersionSource: remote`, last production build was 34), so the values in `app.json` (19) and `android/app/build.gradle` (17) are ignored. versionName is read from `android/app/build.gradle`, so bump it there as well as in `app.json`.
 - Optional admin step: delete the AI docs from Firestore `audiobooksCatalog` (hidden by the client either way).
 - Rotate the Gemini key that is in plain text in `claude.md`; set `EXPO_PUBLIC_GEMINI_API_KEY` in the EAS dashboard for cloud builds.
 - Migrate `expo-background-fetch` (deprecated) to `expo-background-task`; consider `npx expo install --fix` (10 SDK-54 patch bumps); Play policy: `USE_EXACT_ALARM` is restricted to alarm/calendar apps.
