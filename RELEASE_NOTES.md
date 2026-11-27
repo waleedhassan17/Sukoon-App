@@ -1,7 +1,7 @@
 # Sukoon v1.4.0 — Release Notes
 
 ## Release Name
-**v1.4.0 — Prayer Times & New Look** (versionName 1.4.0, versionCode 35 via EAS remote auto-increment, OTA runtime 1.1.0)
+**v1.4.0 — Audiobooks, Prayer Times & New Look** (versionName 1.4.0, versionCode 35 via EAS remote auto-increment, OTA runtime 1.1.0)
 
 ---
 
@@ -9,32 +9,32 @@
 
 ### English (en-US)
 ```
-Prayer times you can rely on 🕌
+Audiobooks, prayer times & a fresh new look 🕌
 
+• NEW: Islamic audiobooks with human narration, offline downloads and resume
 • Azan alerts arrive on time, even if you don't open the app for days
-• Accurate prayer times anywhere in the world, even offline
-• Redesigned Prayer Times screen with a live countdown
-• Fresh new look: new logo, app icon and splash screen
+• Accurate prayer times anywhere, even offline
+• Redesigned Prayer Times with a live countdown
+• New logo, app icon and splash screen
 • Clearer Qibla compass and improved Tasbeeh
 • Share any Ayah or Hadith as a beautiful image card
-• Speak your feelings and get Quranic guidance instantly
-• Easier navigation with five tabs
-• Bug fixes and improvements
+• Speak your feelings, get Quranic guidance
+• Five tabs and bug fixes
 ```
 
 ### Urdu (ur)
 ```
-نماز کے اوقات جن پر بھروسا کیا جا سکے 🕌
+آڈیو بکس، نماز کے اوقات اور نیا انداز 🕌
 
+• نیا: سنیں — اسلامی آڈیو بکس، آف لائن ڈاؤن لوڈ اور جہاں چھوڑا وہیں سے جاری
 • ایپ کھولے بغیر بھی اذان کی اطلاع وقت پر ملتی رہے گی
 • دنیا میں کہیں بھی درست نماز کے اوقات، انٹرنیٹ کے بغیر بھی
 • نماز کے اوقات کی نئی اسکرین، اگلی نماز تک الٹی گنتی کے ساتھ
 • نیا لوگو، ایپ آئیکن اور اسپلیش اسکرین
-• بہتر قبلہ کمپاس اور تسبیح کاؤنٹر
-• کسی بھی آیت یا حدیث کو خوبصورت تصویر کی صورت میں شیئر کریں
-• بول کر اپنے احساسات بتائیں اور فوراً قرآنی رہنمائی پائیں
-• آسان نیویگیشن کے لیے پانچ ٹیبز
-• خرابیوں کی درستگی اور بہتر کارکردگی
+• بہتر قبلہ کمپاس اور تسبیح
+• کسی بھی آیت یا حدیث کو خوبصورت تصویر میں شیئر کریں
+• بول کر احساسات بتائیں، قرآنی رہنمائی پائیں
+• پانچ ٹیبز اور خرابیوں کی درستگی
 ```
 
 ### Internal changelog
